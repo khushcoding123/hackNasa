@@ -1,0 +1,4 @@
+{
+  "compilerOptions": {"target":"ES2022","module":"ES2022","rootDir":"frontend","outDir":"web","types":[],"strict":true,"noEmitOnError":true},
+  "include":["frontend/**/*.ts"]
+}

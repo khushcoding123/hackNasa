@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#09101a"><title>MOONMESH · Lunar mission planner</title>
+<link rel="icon" href="/moon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css"><script type="module" src="/app.js"></script></head>
+<body>
+<aside class="rail">
+  <div class="brand"><span class="mark" aria-hidden="true">◒</span><div>MOONMESH<small>LUNAR MISSION PLANNER</small></div></div>
+  <nav aria-label="Mission views">
+    <button data-view="overview" aria-current="page">Mission overview</button><button data-view="sites">Landing sites</button>
+    <button data-view="terrain">Terrain analysis</button><button data-view="communication">Communication analysis</button>
+    <button data-view="relays">Relay planner</button><button data-view="resilience">Resilience simulator</button>
+    <button data-view="sensitivity">Sensitivity analysis</button><button data-view="data">Data and assumptions</button>
+  </nav>
+  <div class="rail-bottom"><span class="dot"></span> Planning prototype</div>
+</aside>
+<main>
+  <header><div><p class="eyebrow">LUNAR SOUTH POLE</p><h1 id="title">Mission overview</h1><p id="subtitle" class="subtitle"></p></div>
+    <div class="actions"><button id="json" disabled>JSON</button><button id="csv" disabled>CSV</button><button id="report" disabled>Print report</button></div>
+  </header>
+  <form id="mission" class="panel configuration">
+    <div class="fields">
+      <label>Landing region<select name="site" required></select></label>
+      <label>Start (UTC)<input name="start" type="date" required></label>
+      <label>End (UTC)<input name="end" type="date" required></label>
+      <label>Sampling<select name="minutes"><option value="5">5 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select></label>
+      <button class="primary" type="submit" disabled>Run mission</button>
+    </div>
+    <details id="advanced"><summary>Expert settings</summary><div id="expert" class="fields"></div></details>
+  </form>
+  <div id="status" role="status" aria-live="polite">Loading mission settings…</div>
+  <div id="view"></div>
+</main>
+</body></html>
