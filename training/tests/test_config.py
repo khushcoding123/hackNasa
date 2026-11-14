@@ -29,11 +29,12 @@ def test_pilot_loads_despite_unused_incomplete_profile():
     assert run["label_origin"] == "simulated"
 
 
-def test_atlas_run_refuses_null_metadata_even_with_experiment_range():
-    with pytest.raises(ConfigError, match="lunarrf_1p8") as error:
-        load_experiment("exp_a_lunarrf_haworth.yaml")
-    assert "max_range_m" in str(error.value)
-    assert "TODO: fill from LunarRF run metadata" in str(error.value)
+def test_atlas_run_loads_published_settings():
+    run = load_experiment("exp_a_lunarrf_haworth.yaml")
+    assert run["radio"] == pytest.approx(dict(frequency_ghz=1.8, tx_power_dbm=30,
+        tx_gain_dbi=0, rx_gain_dbi=0, fixed_loss_db=0,
+        receiver_sensitivity_dbm=-94.40475498807768, required_margin_db=0, max_range_m=22040))
+    assert (run["h_tx_m"], run["h_rx_m"]) == (4, 1.5)
 
 
 @pytest.mark.parametrize("field", RADIO_FIELDS)

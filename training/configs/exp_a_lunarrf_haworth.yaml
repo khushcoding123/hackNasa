@@ -1,15 +1,13 @@
-# Planned atlas comparison; metadata validation must pass before execution.
+# Deterministic simulated comparison; no tuning on published layers.
 experiment: exp_a_lunarrf_haworth
 radio_profile: lunarrf_1p8
 label_origin: simulated
 site: haworth
-latitude_deg: -86.8
-longitude_deg: 337.2 # East longitude
-grid_resolution_m: 20
-tx_heights_m: [5, 10, 20, 50]
-rx_height_m: 2
-max_range_m: 8000
+dem: derived/terrain/haworth/pgda90_dem_20m.tif
+reference_dir: derived/terrain/haworth/lunarrf
+catalog: interim/lunarrf/meta/data/atlas_base/candidates.csv
+h_tx_m: 4.0 # radio_params.json: mast_height_m
+h_rx_m: 1.5 # radio_params.json: rx_height_m
+spacing_m: 10
+comparison_threshold_dbm: -94.405 # Step 07 reporting threshold (rounded); aggregate count uses exact sensitivity.
 seed: 42
-pilot_transmitters: 150
-min_spacing_m: 500
-block_size_m: 5000
