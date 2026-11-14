@@ -3,6 +3,8 @@
 Run these in order, one prompt per Codex task. Do the check under each prompt before moving on.
 If a check fails, paste the error or report back into Codex and fix it first.
 
+Nothing here assumes an existing model. You build everything from scratch: Prompts 5-6 write the physics code that creates the training labels, Prompt 9 builds the training dataset, Prompt 10 trains your first model (LightGBM), and Prompt 13 optionally trains a neural network (U-Net).
+
 ## Before you start
 
 - **The repo is the `hackNasa` folder:** `C:\Users\khush\OneDrive - Lake Washington School District\nasahack\hackNasa`. Always open PowerShell and Codex in that folder, not in `nasahack`.
@@ -30,6 +32,7 @@ Read MOONMESH_TERRAIN_COVERAGE_TRAINING.md (repo root) fully, then read README.m
 
 1. Create AGENTS.md at the repo root with these standing rules for all future tasks:
    - MOONMESH_TERRAIN_COVERAGE_TRAINING.md (repo root) is the spec. Follow it. docs/CODEX_PROMPTS.md lists the tasks.
+   - There is no trained model in this repo yet. Everything is built from scratch in these prompts: the label generator (Prompts 5-6), the dataset (Prompt 9), the first model (LightGBM, Prompt 10) and an optional neural network (U-Net, Prompt 13). Never look for, download or assume pretrained weights. The existing moonmesh/ and lunar_core/ code is deterministic physics, not ML: use it as the reference our new code is checked against.
    - Python for training work is the uv venv at C:\moonmesh-data\venv (Python 3.13). Run Python and pytest with C:\moonmesh-data\venv\Scripts\python.exe. Install packages with `uv pip install --python C:\moonmesh-data\venv\Scripts\python.exe ...`. Never install training packages into the app's .moonmesh-data\venv.
    - The app's existing tests must keep passing: `python -m unittest discover -s tests -v`. New training tests use pytest under training/tests/.
    - .moonmesh-data/ is the app's own cache (LOLA PDS terrain, SPICE kernels, its venv). Treat it as read-only. Reuse its files instead of downloading them again.
