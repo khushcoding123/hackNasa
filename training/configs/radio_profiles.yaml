@@ -1,0 +1,20 @@
+# Normalized surface-link fields. Sensitivity is at the app's 128 kbps reference rate.
+moonmesh_2p4_ref:
+  frequency_ghz: 2.4 # moonmesh/models.py:40, surface_radio.ghz
+  tx_power_dbm: 33.01029995663981 # moonmesh/models.py:40, watts=2; 30 + 10*log10(2)
+  tx_gain_dbi: 4 # moonmesh/models.py:40, surface_radio.tx_gain
+  rx_gain_dbi: 4 # moonmesh/models.py:40, surface_radio.rx_gain
+  fixed_loss_db: 3 # moonmesh/models.py:40, surface_radio.loss
+  receiver_sensitivity_dbm: -105 # moonmesh/models.py:40, surface_radio.sensitivity
+  required_margin_db: 3 # moonmesh/models.py:40, surface_radio.margin
+  max_range_m: 8000 # moonmesh/models.py:27, deployment_km=8; 8 * 1000
+
+lunarrf_1p8:
+  frequency_ghz: 1.8
+  tx_power_dbm: null # TODO: fill from LunarRF run metadata
+  tx_gain_dbi: null # TODO: fill from LunarRF run metadata
+  rx_gain_dbi: null # TODO: fill from LunarRF run metadata
+  fixed_loss_db: null # TODO: fill from LunarRF run metadata
+  receiver_sensitivity_dbm: null # TODO: fill from LunarRF run metadata
+  required_margin_db: null # TODO: fill from LunarRF run metadata
+  max_range_m: null # TODO: fill from LunarRF run metadata

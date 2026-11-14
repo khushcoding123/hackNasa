@@ -9,3 +9,7 @@ node_modules/
 # training pipeline
 data/
 .venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/

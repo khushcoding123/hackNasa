@@ -1,0 +1,19 @@
+# Install alongside requirements.txt; retain the app's NumPy 2.x contract.
+# Use Windows CPython 3.13 wheels. Rasterio bundles GDAL; no separate gdal package.
+numpy>=2,<3
+rasterio>=1.4.3
+pyproj>=3.7
+numba>=0.61
+pandas>=2.2.3
+pyarrow>=18
+xarray>=2024.10
+rioxarray>=0.18
+scikit-learn>=1.6
+lightgbm>=4.5
+scikit-image>=0.25
+matplotlib>=3.9.2
+pyyaml>=6.0.2
+pytest>=8.3
+tqdm>=4.67
+pypdf>=5
+requests>=2.32

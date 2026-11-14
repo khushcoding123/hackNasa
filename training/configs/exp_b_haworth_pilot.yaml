@@ -1,0 +1,15 @@
+# Planned transmitter-conditioned deterministic-label pilot.
+experiment: exp_b_haworth_pilot
+radio_profile: moonmesh_2p4_ref
+label_origin: simulated
+site: haworth
+latitude_deg: -86.8
+longitude_deg: 337.2 # East longitude
+grid_resolution_m: 20
+tx_heights_m: [5, 10, 20, 50]
+rx_height_m: 2
+max_range_m: 8000
+seed: 42
+pilot_transmitters: 150
+min_spacing_m: 500
+block_size_m: 5000
