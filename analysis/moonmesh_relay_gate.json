@@ -1,0 +1,290 @@
+{
+  "test": "geometry-only relay upper bound on terrain-limited region centers",
+  "sites": [
+    {
+      "site": {
+        "id": "nobile-rim-1",
+        "name": "Nobile Rim 1",
+        "latitude_deg": -85.4,
+        "longitude_deg": 37.3
+      },
+      "period": {
+        "start": "2026-11-01T00:00:00+00:00",
+        "end": "2026-12-01T00:00:00+00:00",
+        "step_minutes": 30
+      },
+      "outage_decomposition_2m": {
+        "flat_horizon_availability_pct": 68.68,
+        "terrain_horizon_availability_pct": 0.0,
+        "terrain_blocked_while_above_flat_horizon_pct_of_time": 68.68,
+        "below_flat_horizon_pct_of_time": 31.32,
+        "terrain_share_of_all_outage_pct": 68.68
+      },
+      "antenna_height": {
+        "2m": {
+          "availability_pct": 0.0,
+          "longest_outage_h": 720.0,
+          "total_outage_h": 720.0
+        },
+        "5m": {
+          "availability_pct": 0.0,
+          "longest_outage_h": 720.0,
+          "total_outage_h": 720.0
+        },
+        "10m": {
+          "availability_pct": 0.0,
+          "longest_outage_h": 720.0,
+          "total_outage_h": 720.0
+        }
+      },
+      "best_200m_shift": {
+        "direction": "north",
+        "distance_m": 200.0,
+        "availability_pct": 0.0,
+        "longest_outage_h": 720.0,
+        "total_outage_h": 720.0
+      },
+      "all_200m_shifts": [
+        {
+          "direction": "north",
+          "distance_m": 200.0,
+          "availability_pct": 0.0,
+          "longest_outage_h": 720.0,
+          "total_outage_h": 720.0
+        },
+        {
+          "direction": "northeast",
+          "distance_m": 200.0,
+          "availability_pct": 0.0,
+          "longest_outage_h": 720.0,
+          "total_outage_h": 720.0
+        },
+        {
+          "direction": "east",
+          "distance_m": 200.0,
+          "availability_pct": 0.0,
+          "longest_outage_h": 720.0,
+          "total_outage_h": 720.0
+        },
+        {
+          "direction": "southeast",
+          "distance_m": 200.0,
+          "availability_pct": 0.0,
+          "longest_outage_h": 720.0,
+          "total_outage_h": 720.0
+        },
+        {
+          "direction": "south",
+          "distance_m": 200.0,
+          "availability_pct": 0.0,
+          "longest_outage_h": 720.0,
+          "total_outage_h": 720.0
+        },
+        {
+          "direction": "southwest",
+          "distance_m": 200.0,
+          "availability_pct": 0.0,
+          "longest_outage_h": 720.0,
+          "total_outage_h": 720.0
+        },
+        {
+          "direction": "west",
+          "distance_m": 200.0,
+          "availability_pct": 0.0,
+          "longest_outage_h": 720.0,
+          "total_outage_h": 720.0
+        },
+        {
+          "direction": "northwest",
+          "distance_m": 200.0,
+          "availability_pct": 0.0,
+          "longest_outage_h": 720.0,
+          "total_outage_h": 720.0
+        }
+      ],
+      "relay_test_scope": {
+        "candidate_rule": "local maxima, slope <15 deg, 0.5-8 km, >=500 m separation",
+        "site_mast_m": 2.0,
+        "relay_mast_m": 5.0,
+        "raw_candidate_count": 9,
+        "surface_los_candidate_count": 0,
+        "limitations": "geometry-only upper bound; no RF budget, power, access, thermal, or ground-station scheduling"
+      },
+      "relay_candidates": [],
+      "best_relay_combinations": []
+    },
+    {
+      "site": {
+        "id": "haworth",
+        "name": "Haworth",
+        "latitude_deg": -86.8,
+        "longitude_deg": 337.2
+      },
+      "period": {
+        "start": "2026-11-01T00:00:00+00:00",
+        "end": "2026-12-01T00:00:00+00:00",
+        "step_minutes": 30
+      },
+      "outage_decomposition_2m": {
+        "flat_horizon_availability_pct": 64.44,
+        "terrain_horizon_availability_pct": 45.07,
+        "terrain_blocked_while_above_flat_horizon_pct_of_time": 19.38,
+        "below_flat_horizon_pct_of_time": 35.56,
+        "terrain_share_of_all_outage_pct": 35.27
+      },
+      "antenna_height": {
+        "2m": {
+          "availability_pct": 45.07,
+          "longest_outage_h": 370.5,
+          "total_outage_h": 395.5
+        },
+        "5m": {
+          "availability_pct": 45.28,
+          "longest_outage_h": 369.5,
+          "total_outage_h": 394.0
+        },
+        "10m": {
+          "availability_pct": 45.49,
+          "longest_outage_h": 368.5,
+          "total_outage_h": 392.5
+        }
+      },
+      "best_200m_shift": {
+        "direction": "east",
+        "distance_m": 200.0,
+        "availability_pct": 46.94,
+        "longest_outage_h": 362.5,
+        "total_outage_h": 382.0
+      },
+      "all_200m_shifts": [
+        {
+          "direction": "east",
+          "distance_m": 200.0,
+          "availability_pct": 46.94,
+          "longest_outage_h": 362.5,
+          "total_outage_h": 382.0
+        },
+        {
+          "direction": "northeast",
+          "distance_m": 200.0,
+          "availability_pct": 45.56,
+          "longest_outage_h": 369.0,
+          "total_outage_h": 392.0
+        },
+        {
+          "direction": "south",
+          "distance_m": 200.0,
+          "availability_pct": 45.28,
+          "longest_outage_h": 369.5,
+          "total_outage_h": 394.0
+        },
+        {
+          "direction": "southeast",
+          "distance_m": 200.0,
+          "availability_pct": 44.93,
+          "longest_outage_h": 368.5,
+          "total_outage_h": 396.5
+        },
+        {
+          "direction": "southwest",
+          "distance_m": 200.0,
+          "availability_pct": 44.72,
+          "longest_outage_h": 371.5,
+          "total_outage_h": 398.0
+        },
+        {
+          "direction": "west",
+          "distance_m": 200.0,
+          "availability_pct": 43.96,
+          "longest_outage_h": 375.0,
+          "total_outage_h": 403.5
+        },
+        {
+          "direction": "north",
+          "distance_m": 200.0,
+          "availability_pct": 43.54,
+          "longest_outage_h": 378.0,
+          "total_outage_h": 406.5
+        },
+        {
+          "direction": "northwest",
+          "distance_m": 200.0,
+          "availability_pct": 43.26,
+          "longest_outage_h": 378.5,
+          "total_outage_h": 408.5
+        }
+      ],
+      "relay_test_scope": {
+        "candidate_rule": "local maxima, slope <15 deg, 0.5-8 km, >=500 m separation",
+        "site_mast_m": 2.0,
+        "relay_mast_m": 5.0,
+        "raw_candidate_count": 11,
+        "surface_los_candidate_count": 4,
+        "limitations": "geometry-only upper bound; no RF budget, power, access, thermal, or ground-station scheduling"
+      },
+      "relay_candidates": [
+        {
+          "latitude_deg": -86.766101,
+          "longitude_deg": 339.488393,
+          "distance_m": 4030.3,
+          "slope_deg": 1.04,
+          "ground_m": 1907.7,
+          "earth_visibility_pct": 68.47
+        },
+        {
+          "latitude_deg": -86.65741,
+          "longitude_deg": 337.530109,
+          "distance_m": 4364.9,
+          "slope_deg": 1.09,
+          "ground_m": 1712.0,
+          "earth_visibility_pct": 1.46
+        },
+        {
+          "latitude_deg": -86.753547,
+          "longitude_deg": 336.952686,
+          "distance_m": 1471.5,
+          "slope_deg": 0.33,
+          "ground_m": 1654.6,
+          "earth_visibility_pct": 35.21
+        },
+        {
+          "latitude_deg": -86.706738,
+          "longitude_deg": 336.912877,
+          "distance_m": 2873.0,
+          "slope_deg": 2.09,
+          "ground_m": 1627.4,
+          "earth_visibility_pct": 25.21
+        }
+      ],
+      "best_relay_combinations": [
+        {
+          "relay_indices": [
+            0
+          ],
+          "availability_pct": 68.47,
+          "longest_outage_h": 227.0,
+          "total_outage_h": 227.0
+        },
+        {
+          "relay_indices": [
+            0,
+            1
+          ],
+          "availability_pct": 68.47,
+          "longest_outage_h": 227.0,
+          "total_outage_h": 227.0
+        },
+        {
+          "relay_indices": [
+            0,
+            1,
+            2
+          ],
+          "availability_pct": 68.47,
+          "longest_outage_h": 227.0,
+          "total_outage_h": 227.0
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,317 @@
+{
+  "method": "NASA/JPL SPICE DE440 + NASA GSFC LOLA 20 m near field / 240 m far field",
+  "sites": [
+    {
+      "site": {
+        "id": "malapert",
+        "name": "Malapert Massif",
+        "latitude_deg": -85.964,
+        "longitude_deg": 357.681
+      },
+      "period": {
+        "start": "2026-11-01T00:00:00+00:00",
+        "end": "2026-12-01T00:00:00+00:00",
+        "step_minutes": 30
+      },
+      "outage_decomposition_2m": {
+        "flat_horizon_availability_pct": 70.35,
+        "terrain_horizon_availability_pct": 100.0,
+        "terrain_blocked_while_above_flat_horizon_pct_of_time": 0.0,
+        "below_flat_horizon_pct_of_time": 29.65,
+        "terrain_share_of_all_outage_pct": 0.0
+      },
+      "antenna_height": {
+        "2m": {
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        },
+        "5m": {
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        },
+        "10m": {
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        }
+      },
+      "best_200m_shift": {
+        "direction": "north",
+        "distance_m": 200.0,
+        "availability_pct": 100.0,
+        "longest_outage_h": 0.0,
+        "total_outage_h": 0.0
+      },
+      "all_200m_shifts": [
+        {
+          "direction": "north",
+          "distance_m": 200.0,
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        },
+        {
+          "direction": "northeast",
+          "distance_m": 200.0,
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        },
+        {
+          "direction": "east",
+          "distance_m": 200.0,
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        },
+        {
+          "direction": "northwest",
+          "distance_m": 200.0,
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        },
+        {
+          "direction": "west",
+          "distance_m": 200.0,
+          "availability_pct": 76.32,
+          "longest_outage_h": 170.5,
+          "total_outage_h": 170.5
+        },
+        {
+          "direction": "south",
+          "distance_m": 200.0,
+          "availability_pct": 55.42,
+          "longest_outage_h": 311.5,
+          "total_outage_h": 321.0
+        },
+        {
+          "direction": "southeast",
+          "distance_m": 200.0,
+          "availability_pct": 49.31,
+          "longest_outage_h": 348.0,
+          "total_outage_h": 365.0
+        },
+        {
+          "direction": "southwest",
+          "distance_m": 200.0,
+          "availability_pct": 0.0,
+          "longest_outage_h": 720.0,
+          "total_outage_h": 720.0
+        }
+      ],
+      "relay_test_scope": {
+        "candidate_rule": "local maxima, slope <15 deg, 0.5-8 km, >=500 m separation",
+        "site_mast_m": 2.0,
+        "relay_mast_m": 5.0,
+        "raw_candidate_count": 5,
+        "surface_los_candidate_count": 3,
+        "limitations": "geometry-only upper bound; no RF budget, power, access, thermal, or ground-station scheduling"
+      },
+      "relay_candidates": [
+        {
+          "latitude_deg": -85.987851,
+          "longitude_deg": 0.287159,
+          "distance_m": 5599.2,
+          "slope_deg": 1.02,
+          "ground_m": 4859.0,
+          "earth_visibility_pct": 100.0
+        },
+        {
+          "latitude_deg": -85.974066,
+          "longitude_deg": 359.939012,
+          "distance_m": 4828.5,
+          "slope_deg": 1.46,
+          "ground_m": 4833.7,
+          "earth_visibility_pct": 100.0
+        },
+        {
+          "latitude_deg": -85.974625,
+          "longitude_deg": 359.59179,
+          "distance_m": 4090.3,
+          "slope_deg": 1.48,
+          "ground_m": 4832.2,
+          "earth_visibility_pct": 100.0
+        }
+      ],
+      "best_relay_combinations": [
+        {
+          "relay_indices": [
+            0
+          ],
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        },
+        {
+          "relay_indices": [
+            0,
+            1
+          ],
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        },
+        {
+          "relay_indices": [
+            0,
+            1,
+            2
+          ],
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        }
+      ]
+    },
+    {
+      "site": {
+        "id": "mons-mouton",
+        "name": "Mons Mouton",
+        "latitude_deg": -85.4,
+        "longitude_deg": 31.7
+      },
+      "period": {
+        "start": "2026-11-01T00:00:00+00:00",
+        "end": "2026-12-01T00:00:00+00:00",
+        "step_minutes": 30
+      },
+      "outage_decomposition_2m": {
+        "flat_horizon_availability_pct": 70.07,
+        "terrain_horizon_availability_pct": 100.0,
+        "terrain_blocked_while_above_flat_horizon_pct_of_time": 0.0,
+        "below_flat_horizon_pct_of_time": 29.93,
+        "terrain_share_of_all_outage_pct": 0.0
+      },
+      "antenna_height": {
+        "2m": {
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        },
+        "5m": {
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        },
+        "10m": {
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        }
+      },
+      "best_200m_shift": {
+        "direction": "north",
+        "distance_m": 200.0,
+        "availability_pct": 100.0,
+        "longest_outage_h": 0.0,
+        "total_outage_h": 0.0
+      },
+      "all_200m_shifts": [
+        {
+          "direction": "north",
+          "distance_m": 200.0,
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        },
+        {
+          "direction": "northeast",
+          "distance_m": 200.0,
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        },
+        {
+          "direction": "east",
+          "distance_m": 200.0,
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        },
+        {
+          "direction": "west",
+          "distance_m": 200.0,
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        },
+        {
+          "direction": "northwest",
+          "distance_m": 200.0,
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        },
+        {
+          "direction": "south",
+          "distance_m": 200.0,
+          "availability_pct": 75.28,
+          "longest_outage_h": 178.0,
+          "total_outage_h": 178.0
+        },
+        {
+          "direction": "southeast",
+          "distance_m": 200.0,
+          "availability_pct": 69.79,
+          "longest_outage_h": 217.5,
+          "total_outage_h": 217.5
+        },
+        {
+          "direction": "southwest",
+          "distance_m": 200.0,
+          "availability_pct": 64.17,
+          "longest_outage_h": 258.0,
+          "total_outage_h": 258.0
+        }
+      ],
+      "relay_test_scope": {
+        "candidate_rule": "local maxima, slope <15 deg, 0.5-8 km, >=500 m separation",
+        "site_mast_m": 2.0,
+        "relay_mast_m": 5.0,
+        "raw_candidate_count": 8,
+        "surface_los_candidate_count": 2,
+        "limitations": "geometry-only upper bound; no RF budget, power, access, thermal, or ground-station scheduling"
+      },
+      "relay_candidates": [
+        {
+          "latitude_deg": -85.287057,
+          "longitude_deg": 32.101797,
+          "distance_m": 3570.7,
+          "slope_deg": 0.04,
+          "ground_m": 6321.0,
+          "earth_visibility_pct": 83.33
+        },
+        {
+          "latitude_deg": -85.309041,
+          "longitude_deg": 31.899983,
+          "distance_m": 2806.2,
+          "slope_deg": 1.1,
+          "ground_m": 6282.4,
+          "earth_visibility_pct": 100.0
+        }
+      ],
+      "best_relay_combinations": [
+        {
+          "relay_indices": [
+            0
+          ],
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        },
+        {
+          "relay_indices": [
+            0,
+            1
+          ],
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        }
+      ]
+    }
+  ]
+}

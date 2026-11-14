@@ -1,0 +1,145 @@
+{
+  "period": {
+    "start": "2026-11-01T00:00:00+00:00",
+    "end": "2026-12-01T00:00:00+00:00",
+    "step_minutes": 10
+  },
+  "site": {
+    "latitude_deg": -86.8,
+    "longitude_deg": 337.2,
+    "mast_m": 2.0
+  },
+  "relay": {
+    "latitude_deg": -86.766101,
+    "longitude_deg": 339.488393,
+    "mast_m": 5.0
+  },
+  "relay_solar": {
+    "sunlit_pct": 95.6,
+    "longest_darkness_h": 17.33
+  },
+  "clearance_margin_cases": {
+    "0deg": {
+      "direct": {
+        "availability_pct": 45.09,
+        "longest_outage_h": 370.33,
+        "total_outage_h": 395.33
+      },
+      "relay_earth": {
+        "availability_pct": 68.47,
+        "longest_outage_h": 227.0,
+        "total_outage_h": 227.0
+      },
+      "combined": {
+        "unconstrained_upper_bound": {
+          "availability_pct": 68.47,
+          "longest_outage_h": 227.0,
+          "total_outage_h": 227.0
+        },
+        "solar_plus_0h_storage": {
+          "availability_pct": 68.47,
+          "longest_outage_h": 227.0,
+          "total_outage_h": 227.0
+        },
+        "solar_plus_24h_storage": {
+          "availability_pct": 68.47,
+          "longest_outage_h": 227.0,
+          "total_outage_h": 227.0
+        },
+        "solar_plus_72h_storage": {
+          "availability_pct": 68.47,
+          "longest_outage_h": 227.0,
+          "total_outage_h": 227.0
+        },
+        "solar_plus_168h_storage": {
+          "availability_pct": 68.47,
+          "longest_outage_h": 227.0,
+          "total_outage_h": 227.0
+        }
+      }
+    },
+    "1deg": {
+      "direct": {
+        "availability_pct": 38.31,
+        "longest_outage_h": 403.33,
+        "total_outage_h": 444.17
+      },
+      "relay_earth": {
+        "availability_pct": 63.31,
+        "longest_outage_h": 264.17,
+        "total_outage_h": 264.17
+      },
+      "combined": {
+        "unconstrained_upper_bound": {
+          "availability_pct": 63.31,
+          "longest_outage_h": 264.17,
+          "total_outage_h": 264.17
+        },
+        "solar_plus_0h_storage": {
+          "availability_pct": 63.31,
+          "longest_outage_h": 264.17,
+          "total_outage_h": 264.17
+        },
+        "solar_plus_24h_storage": {
+          "availability_pct": 63.31,
+          "longest_outage_h": 264.17,
+          "total_outage_h": 264.17
+        },
+        "solar_plus_72h_storage": {
+          "availability_pct": 63.31,
+          "longest_outage_h": 264.17,
+          "total_outage_h": 264.17
+        },
+        "solar_plus_168h_storage": {
+          "availability_pct": 63.31,
+          "longest_outage_h": 264.17,
+          "total_outage_h": 264.17
+        }
+      }
+    },
+    "2deg": {
+      "direct": {
+        "availability_pct": 31.3,
+        "longest_outage_h": 437.33,
+        "total_outage_h": 494.67
+      },
+      "relay_earth": {
+        "availability_pct": 57.55,
+        "longest_outage_h": 298.17,
+        "total_outage_h": 305.67
+      },
+      "combined": {
+        "unconstrained_upper_bound": {
+          "availability_pct": 57.55,
+          "longest_outage_h": 298.17,
+          "total_outage_h": 305.67
+        },
+        "solar_plus_0h_storage": {
+          "availability_pct": 57.45,
+          "longest_outage_h": 298.17,
+          "total_outage_h": 306.33
+        },
+        "solar_plus_24h_storage": {
+          "availability_pct": 57.55,
+          "longest_outage_h": 298.17,
+          "total_outage_h": 305.67
+        },
+        "solar_plus_72h_storage": {
+          "availability_pct": 57.55,
+          "longest_outage_h": 298.17,
+          "total_outage_h": 305.67
+        },
+        "solar_plus_168h_storage": {
+          "availability_pct": 57.55,
+          "longest_outage_h": 298.17,
+          "total_outage_h": 305.67
+        }
+      }
+    }
+  },
+  "limitations": [
+    "Surface site-to-relay LOS was checked in the prior gate.",
+    "No RF link budget, antenna pattern, deployment route, thermal model, or Earth station schedule.",
+    "Battery model is duration-only and does not model energy generation or load."
+  ]
+}

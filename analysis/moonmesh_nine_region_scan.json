@@ -1,0 +1,421 @@
+{
+  "period": "2026-11-01 through 2026-12-01 UTC",
+  "step_minutes": 30,
+  "site_coordinate_note": "Approximate candidate-region centers; Malapert uses NASA notional study point.",
+  "sites_ranked_by_terrain_blocking": [
+    {
+      "id": "nobile-rim-1",
+      "name": "Nobile Rim 1",
+      "latitude_deg": -85.4,
+      "longitude_deg": 37.3,
+      "flat": {
+        "availability_pct": 68.68,
+        "longest_outage_h": 225.5,
+        "total_outage_h": 225.5
+      },
+      "terrain_2m": {
+        "availability_pct": 0.0,
+        "longest_outage_h": 720.0,
+        "total_outage_h": 720.0
+      },
+      "terrain_blocked_hours": 494.5,
+      "terrain_opened_below_tangent_hours": 0.0,
+      "terrain_share_of_actual_outage_pct": 68.68,
+      "horizon_range_deg": {
+        "min": -5.245,
+        "max": 18.262
+      },
+      "antenna_height": {
+        "2m": {
+          "availability_pct": 0.0,
+          "longest_outage_h": 720.0,
+          "total_outage_h": 720.0
+        },
+        "5m": {
+          "availability_pct": 0.0,
+          "longest_outage_h": 720.0,
+          "total_outage_h": 720.0
+        },
+        "10m": {
+          "availability_pct": 0.0,
+          "longest_outage_h": 720.0,
+          "total_outage_h": 720.0
+        }
+      },
+      "best_200m_shift": {
+        "direction": "north",
+        "availability_pct": 0.0,
+        "longest_outage_h": 720.0,
+        "total_outage_h": 720.0
+      }
+    },
+    {
+      "id": "haworth",
+      "name": "Haworth",
+      "latitude_deg": -86.8,
+      "longitude_deg": 337.2,
+      "flat": {
+        "availability_pct": 64.44,
+        "longest_outage_h": 256.0,
+        "total_outage_h": 256.0
+      },
+      "terrain_2m": {
+        "availability_pct": 45.07,
+        "longest_outage_h": 370.5,
+        "total_outage_h": 395.5
+      },
+      "terrain_blocked_hours": 139.5,
+      "terrain_opened_below_tangent_hours": 0.0,
+      "terrain_share_of_actual_outage_pct": 35.27,
+      "horizon_range_deg": {
+        "min": -2.624,
+        "max": 4.954
+      },
+      "antenna_height": {
+        "2m": {
+          "availability_pct": 45.07,
+          "longest_outage_h": 370.5,
+          "total_outage_h": 395.5
+        },
+        "5m": {
+          "availability_pct": 45.28,
+          "longest_outage_h": 369.5,
+          "total_outage_h": 394.0
+        },
+        "10m": {
+          "availability_pct": 45.49,
+          "longest_outage_h": 368.5,
+          "total_outage_h": 392.5
+        }
+      },
+      "best_200m_shift": {
+        "direction": "east",
+        "availability_pct": 46.94,
+        "longest_outage_h": 362.5,
+        "total_outage_h": 382.0
+      }
+    },
+    {
+      "id": "mouton-plateau",
+      "name": "Mons Mouton Plateau",
+      "latitude_deg": -84.3,
+      "longitude_deg": 30.6,
+      "flat": {
+        "availability_pct": 76.46,
+        "longest_outage_h": 169.5,
+        "total_outage_h": 169.5
+      },
+      "terrain_2m": {
+        "availability_pct": 69.38,
+        "longest_outage_h": 220.5,
+        "total_outage_h": 220.5
+      },
+      "terrain_blocked_hours": 51.0,
+      "terrain_opened_below_tangent_hours": 0.0,
+      "terrain_share_of_actual_outage_pct": 23.13,
+      "horizon_range_deg": {
+        "min": -0.173,
+        "max": 8.172
+      },
+      "antenna_height": {
+        "2m": {
+          "availability_pct": 69.38,
+          "longest_outage_h": 220.5,
+          "total_outage_h": 220.5
+        },
+        "5m": {
+          "availability_pct": 71.88,
+          "longest_outage_h": 202.5,
+          "total_outage_h": 202.5
+        },
+        "10m": {
+          "availability_pct": 75.9,
+          "longest_outage_h": 173.5,
+          "total_outage_h": 173.5
+        }
+      },
+      "best_200m_shift": {
+        "direction": "southeast",
+        "availability_pct": 74.51,
+        "longest_outage_h": 183.5,
+        "total_outage_h": 183.5
+      }
+    },
+    {
+      "id": "cabeus-b",
+      "name": "Peak near Cabeus B",
+      "latitude_deg": -83.6,
+      "longitude_deg": 291.3,
+      "flat": {
+        "availability_pct": 61.18,
+        "longest_outage_h": 279.5,
+        "total_outage_h": 279.5
+      },
+      "terrain_2m": {
+        "availability_pct": 54.65,
+        "longest_outage_h": 316.0,
+        "total_outage_h": 326.5
+      },
+      "terrain_blocked_hours": 47.0,
+      "terrain_opened_below_tangent_hours": 0.0,
+      "terrain_share_of_actual_outage_pct": 14.4,
+      "horizon_range_deg": {
+        "min": -5.251,
+        "max": 4.371
+      },
+      "antenna_height": {
+        "2m": {
+          "availability_pct": 54.65,
+          "longest_outage_h": 316.0,
+          "total_outage_h": 326.5
+        },
+        "5m": {
+          "availability_pct": 55.9,
+          "longest_outage_h": 310.0,
+          "total_outage_h": 317.5
+        },
+        "10m": {
+          "availability_pct": 58.06,
+          "longest_outage_h": 299.5,
+          "total_outage_h": 302.0
+        }
+      },
+      "best_200m_shift": {
+        "direction": "east",
+        "availability_pct": 62.64,
+        "longest_outage_h": 269.0,
+        "total_outage_h": 269.0
+      }
+    },
+    {
+      "id": "de-gerlache-rim-2",
+      "name": "de Gerlache Rim 2",
+      "latitude_deg": -88.2,
+      "longitude_deg": 295.4,
+      "flat": {
+        "availability_pct": 52.15,
+        "longest_outage_h": 329.0,
+        "total_outage_h": 344.5
+      },
+      "terrain_2m": {
+        "availability_pct": 46.94,
+        "longest_outage_h": 353.0,
+        "total_outage_h": 382.0
+      },
+      "terrain_blocked_hours": 37.5,
+      "terrain_opened_below_tangent_hours": 0.0,
+      "terrain_share_of_actual_outage_pct": 9.82,
+      "horizon_range_deg": {
+        "min": -2.615,
+        "max": 15.07
+      },
+      "antenna_height": {
+        "2m": {
+          "availability_pct": 46.94,
+          "longest_outage_h": 353.0,
+          "total_outage_h": 382.0
+        },
+        "5m": {
+          "availability_pct": 46.94,
+          "longest_outage_h": 353.0,
+          "total_outage_h": 382.0
+        },
+        "10m": {
+          "availability_pct": 46.94,
+          "longest_outage_h": 353.0,
+          "total_outage_h": 382.0
+        }
+      },
+      "best_200m_shift": {
+        "direction": "east",
+        "availability_pct": 47.15,
+        "longest_outage_h": 352.0,
+        "total_outage_h": 380.5
+      }
+    },
+    {
+      "id": "slater-plain",
+      "name": "Slater Plain",
+      "latitude_deg": -87.2,
+      "longitude_deg": 125.5,
+      "flat": {
+        "availability_pct": 36.94,
+        "longest_outage_h": 408.5,
+        "total_outage_h": 454.0
+      },
+      "terrain_2m": {
+        "availability_pct": 33.12,
+        "longest_outage_h": 422.0,
+        "total_outage_h": 481.5
+      },
+      "terrain_blocked_hours": 28.5,
+      "terrain_opened_below_tangent_hours": 1.0,
+      "terrain_share_of_actual_outage_pct": 5.92,
+      "horizon_range_deg": {
+        "min": -0.869,
+        "max": 11.542
+      },
+      "antenna_height": {
+        "2m": {
+          "availability_pct": 33.12,
+          "longest_outage_h": 422.0,
+          "total_outage_h": 481.5
+        },
+        "5m": {
+          "availability_pct": 33.26,
+          "longest_outage_h": 421.0,
+          "total_outage_h": 480.5
+        },
+        "10m": {
+          "availability_pct": 33.4,
+          "longest_outage_h": 420.0,
+          "total_outage_h": 479.5
+        }
+      },
+      "best_200m_shift": {
+        "direction": "southwest",
+        "availability_pct": 34.1,
+        "longest_outage_h": 416.5,
+        "total_outage_h": 474.5
+      }
+    },
+    {
+      "id": "malapert",
+      "name": "Malapert Massif",
+      "latitude_deg": -85.964,
+      "longitude_deg": 357.681,
+      "flat": {
+        "availability_pct": 70.35,
+        "longest_outage_h": 213.5,
+        "total_outage_h": 213.5
+      },
+      "terrain_2m": {
+        "availability_pct": 100.0,
+        "longest_outage_h": 0.0,
+        "total_outage_h": 0.0
+      },
+      "terrain_blocked_hours": 0.0,
+      "terrain_opened_below_tangent_hours": 213.5,
+      "terrain_share_of_actual_outage_pct": 0.0,
+      "horizon_range_deg": {
+        "min": -3.681,
+        "max": 0.916
+      },
+      "antenna_height": {
+        "2m": {
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        },
+        "5m": {
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        },
+        "10m": {
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        }
+      },
+      "best_200m_shift": {
+        "direction": "north",
+        "availability_pct": 100.0,
+        "longest_outage_h": 0.0,
+        "total_outage_h": 0.0
+      }
+    },
+    {
+      "id": "mons-mouton",
+      "name": "Mons Mouton",
+      "latitude_deg": -85.4,
+      "longitude_deg": 31.7,
+      "flat": {
+        "availability_pct": 70.07,
+        "longest_outage_h": 215.5,
+        "total_outage_h": 215.5
+      },
+      "terrain_2m": {
+        "availability_pct": 100.0,
+        "longest_outage_h": 0.0,
+        "total_outage_h": 0.0
+      },
+      "terrain_blocked_hours": 0.0,
+      "terrain_opened_below_tangent_hours": 215.5,
+      "terrain_share_of_actual_outage_pct": 0.0,
+      "horizon_range_deg": {
+        "min": -3.355,
+        "max": 2.075
+      },
+      "antenna_height": {
+        "2m": {
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        },
+        "5m": {
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        },
+        "10m": {
+          "availability_pct": 100.0,
+          "longest_outage_h": 0.0,
+          "total_outage_h": 0.0
+        }
+      },
+      "best_200m_shift": {
+        "direction": "north",
+        "availability_pct": 100.0,
+        "longest_outage_h": 0.0,
+        "total_outage_h": 0.0
+      }
+    },
+    {
+      "id": "nobile-rim-2",
+      "name": "Nobile Rim 2",
+      "latitude_deg": -84.0,
+      "longitude_deg": 58.8,
+      "flat": {
+        "availability_pct": 65.83,
+        "longest_outage_h": 246.0,
+        "total_outage_h": 246.0
+      },
+      "terrain_2m": {
+        "availability_pct": 68.26,
+        "longest_outage_h": 228.5,
+        "total_outage_h": 228.5
+      },
+      "terrain_blocked_hours": 0.0,
+      "terrain_opened_below_tangent_hours": 17.5,
+      "terrain_share_of_actual_outage_pct": 0.0,
+      "horizon_range_deg": {
+        "min": -1.011,
+        "max": 10.302
+      },
+      "antenna_height": {
+        "2m": {
+          "availability_pct": 68.26,
+          "longest_outage_h": 228.5,
+          "total_outage_h": 228.5
+        },
+        "5m": {
+          "availability_pct": 68.4,
+          "longest_outage_h": 227.5,
+          "total_outage_h": 227.5
+        },
+        "10m": {
+          "availability_pct": 68.47,
+          "longest_outage_h": 227.0,
+          "total_outage_h": 227.0
+        }
+      },
+      "best_200m_shift": {
+        "direction": "southwest",
+        "availability_pct": 69.03,
+        "longest_outage_h": 223.0,
+        "total_outage_h": 223.0
+      }
+    }
+  ]
+}
