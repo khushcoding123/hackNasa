@@ -1,35 +1,38 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#070b12"><meta name="description" content="Explore lunar landing sites, terrain-induced communication blackouts and resilient surface relay networks."><title>MOONMESH · Lunar mission planner</title><link rel="icon" href="/moon.svg" type="image/svg+xml"><link rel="stylesheet" href="/style.css"><script type="module" src="/app.js"></script></head>
-<body>
-<a class="skip-link" href="#view">Skip to mission content</a>
-<aside class="rail" id="navigation">
- <a class="brand" href="/" aria-label="MOONMESH home"><span class="mark" aria-hidden="true"></span><span>MOONMESH<small>LUNAR SYSTEMS</small></span></a>
- <button id="menu-toggle" class="mobile-menu" aria-expanded="false" aria-controls="mission-nav">Menu <span aria-hidden="true">☰</span></button>
- <nav id="mission-nav" aria-label="Mission views">
-  <p class="nav-label">MISSION WORKSPACE</p>
-  <button data-view="overview" aria-current="page"><span class="nav-number">01</span> Mission <span class="nav-arrow" aria-hidden="true">↗</span></button>
-  <button data-view="sites"><span class="nav-number">02</span> Sites</button>
-  <button data-view="communication"><span class="nav-number">03</span> Blackouts</button>
-  <button data-view="relays"><span class="nav-number">04</span> Relays</button>
-  <button data-view="resilience"><span class="nav-number">05</span> Resilience</button>
-  <p class="nav-label secondary-label">DEEPER ANALYSIS</p>
-  <button data-view="sensitivity"><span class="nav-symbol" aria-hidden="true">≋</span> Sensitivity</button>
-  <button data-view="data"><span class="nav-symbol" aria-hidden="true">⊙</span> Data &amp; assumptions</button>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#000000"><meta name="description" content="Explore the Moon in a full-screen map and 3D workspace, then plan terrain-aware lunar communication networks."><title>MOONMESH · Lunar mission planner</title><link rel="icon" href="/moon.svg" type="image/svg+xml"><link rel="stylesheet" href="/cesium/Widgets/widgets.css"><link rel="stylesheet" href="/style.css"><script>window.CESIUM_BASE_URL="/cesium/";</script><script type="module" src="/app.js"></script></head>
+<body data-step="landing">
+<a class="skip-link" href="#panel">Skip to mission panel</a>
+<div id="moon" aria-label="Moon explorer"></div>
+<header class="topbar">
+ <a class="brand" href="/" aria-label="MOONMESH home"><span class="mark" aria-hidden="true"></span><span>MOONMESH</span></a>
+ <nav id="journey" aria-label="Mission journey">
+  <ol>
+   <li><button data-view="landing" aria-current="step"><span class="nav-number">1</span><span class="nav-text">Explore</span></button></li>
+   <li><button data-view="configure"><span class="nav-number">2</span><span class="nav-text">Configure</span></button></li>
+   <li><button data-view="overview" disabled><span class="nav-number">3</span><span class="nav-text">Network</span></button></li>
+   <li><button data-view="communication" disabled><span class="nav-number">4</span><span class="nav-text">Blackouts</span></button></li>
+   <li><button data-view="resilience" disabled><span class="nav-number">5</span><span class="nav-text">Resilience</span></button></li>
+  </ol>
  </nav>
- <div class="rail-bottom"><div class="orbit-mini" aria-hidden="true">✧</div><p>Built for the<br>next lunar horizon.</p><span class="prototype"><span class="dot"></span> Planning prototype</span></div>
-</aside>
-<main>
- <div class="topline"><span>LUNAR SOUTH POLE <span class="separator">/</span> MISSION OPERATIONS</span><span class="telemetry"><span class="dot"></span> NASA LOLA · JPL DE440</span></div>
- <header><div><p class="eyebrow" id="chapter">01 / MISSION WORKSPACE</p><h1 id="title" tabindex="-1">Your mission.<br><span class="muted-heading">A clearer connection.</span></h1><p id="purpose" class="subtitle">Explore the terrain. Understand the blackout. Build a resilient link.</p></div>
- <details class="export-menu"><summary>Export mission <span aria-hidden="true">↗</span></summary><div class="export-options"><p>Available after a successful mission run.</p><button id="json" disabled>Download JSON</button><button id="csv" disabled>Download CSV</button><button id="report" disabled>Print report</button></div></details></header>
- <form id="mission" class="panel configuration">
+ <div class="topbar-tools">
+  <button id="start-mission" class="primary" hidden>Set up my mission →</button>
+  <details class="more-menu"><summary>More</summary><div class="menu-pop"><p>Optional analysis</p>
+   <button data-view="sites" disabled>Compare sites</button><button data-view="relays" disabled>Tower details</button><button data-view="sensitivity" disabled>Sensitivity</button><button data-view="data" disabled>Data &amp; assumptions</button></div></details>
+  <details class="export-menu"><summary>Export <span aria-hidden="true">↗</span></summary><div class="export-options"><p>Available after a successful mission run.</p><button id="json" disabled>Download JSON</button><button id="csv" disabled>Download CSV</button><button id="report" disabled>Print report</button></div></details>
+ </div>
+</header>
+<div class="scenario-strip"><p id="subtitle">No mission calculated yet.</p><span id="status" role="status" aria-live="polite">Loading mission settings…</span><button id="retry" hidden>Retry setup</button></div>
+<button id="panel-tab" aria-expanded="false" aria-controls="panel"><span id="panel-tab-label">Mission</span></button>
+<aside id="panel" class="side-panel" aria-label="Mission panel">
+ <div class="panel-head"><div><p class="eyebrow" id="chapter">STEP 1 OF 5 / EXPLORE</p><h1 id="title" tabindex="-1">Start with the Moon.</h1><p id="purpose" class="subtitle">Explore the surface, then build a communication plan for your mission.</p></div><button id="panel-close" aria-label="Collapse mission panel">✕</button></div>
+ <form id="mission" class="panel configuration" hidden>
   <div class="config-heading"><span class="eyebrow">MISSION PARAMETERS</span><span id="dirty" class="state-label" role="status">Preparing scenario</span></div>
-  <div class="fields mission-fields"><label>Landing region<select name="site" required></select></label><label>Start · UTC<input name="start" type="date" required></label><label>End · UTC<input name="end" type="date" required></label><label>Sampling<select name="minutes"><option value="5">5 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select></label><button class="primary" type="submit" disabled>Run mission <span aria-hidden="true">↗</span></button></div>
+  <div class="fields mission-fields"><label>Landing region<select name="site" required></select></label><label>Start · UTC<input name="start" type="date" required></label><label>End · UTC<input name="end" type="date" required></label><label>Sampling<select name="minutes"><option value="5">5 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select></label><button class="primary" type="submit" disabled>Calculate network <span aria-hidden="true">↗</span></button></div>
+  <fieldset class="mission-requirements"><legend>What does your mission need?</legend><p class="muted">Set the coverage goal and the number of relay towers you can deploy. Technical radio and battery assumptions are in Expert settings.</p><div id="basic-constraints" class="fields"></div></fieldset>
   <details id="advanced"><summary>Expert settings <span class="muted">/ constraints, radio &amp; power</span></summary><div id="expert" class="fields"></div></details>
  </form>
- <div class="scenario-strip"><p id="subtitle">Preparing default mission…</p><span id="status" role="status" aria-live="polite">Loading mission settings…</span><button id="retry" hidden>Retry setup</button></div>
- <div id="view" tabindex="-1"><section class="panel initial-state"><span class="eyebrow">INITIALIZING WORKSPACE</span><h2>Charting a path to the Moon.</h2><p class="muted">Preparing terrain, geometry, and mission settings.</p></section></div>
- <footer><span>MOONMESH <span class="separator">/</span> SURFACE COMMUNICATION INTELLIGENCE</span><span>Planning estimates · Terrain and RF assumptions apply</span></footer>
-</main>
+ <div id="view" tabindex="-1"></div>
+ <div id="flow-actions" class="flow-actions"></div>
+</aside>
 </body></html>
