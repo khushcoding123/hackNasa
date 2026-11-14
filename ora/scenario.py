@@ -20,7 +20,7 @@ from moonmesh.data import DATA
 from moonmesh.science import Observer, mask_for
 
 from .data import ALL_SITES, terrain
-from .features import CHEAP, cell_features, rasters
+from .features import CHEAP, FEATURES, prior_features, rasters, surrogate_features
 from .graph import build_los_graph, candidate_sites, to_latlon
 from .links import SURFACE_RADIO
 from .optimize import place
@@ -111,10 +111,20 @@ def siting_scores(dem, px_m, cells, layers=None):
     Uses the trained Earth-tower prior when it is available. Otherwise falls back to a
     transparent terrain heuristic (prominence plus view), so the app still runs untrained.
     """
-    features = cell_features(dem, px_m, cells, layers)
-    model = _models().get("ora_siting_prior")
+    full = prior_features(dem, px_m, cells, layers)
+    features = full[:, :len(FEATURES)]
+    models = _models()
+    model, surrogate = models.get("ora_siting_prior"), models.get("ora_coverage_surrogate")
+    rank = lambda v: np.argsort(np.argsort(v)) / max(len(v) - 1, 1)
+    if surrogate is not None and model is not None:
+        # The Earth prior ranks lunar cells poorly (Spearman 0.18 with true visibility), so the lunar coverage
+        # surrogate leads and the prior only breaks ties.
+        wide, _ = surrogate_features(dem, px_m, cells, layers)
+        seen = surrogate.predict(wide[:, :surrogate.n_features_in_])
+        tower = model.predict_proba(full[:, :model.n_features_in_])[:, 1]
+        return 0.8 * rank(seen) + 0.2 * rank(tower), features, "lunar coverage surrogate (80%) with Earth-tower prior (20%)"
     if model is not None:
-        return model.predict_proba(features)[:, 1], features, "trained Earth-tower prior"
+        return model.predict_proba(full[:, :model.n_features_in_])[:, 1], features, "trained Earth-tower prior"
     rank = lambda v: np.argsort(np.argsort(v)) / max(len(v) - 1, 1)
     return 0.5 * rank(features[:, CHEAP.index("tpi_1000")]) + 0.5 * rank(features[:, -1]), features, "terrain heuristic (untrained)"
 

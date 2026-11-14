@@ -9,6 +9,7 @@
     python -m ora dte                               Earth-visibility map south of 85 S
     python -m ora topologies                        chain vs ring vs ladder vs skip links
     python -m ora tunnel     [--layout drift|room] [--seeds 10]
+    python -m ora benchmark  [site] [--budget 8]    siting strategies on held-out lunar sites
     python -m ora earth      [tile]
     python -m ora dem        <file>                 describe an elevation file
     python -m ora run        scenarios/<file>.yaml  run any scenario file by its kind
@@ -90,9 +91,10 @@ def dte():
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="python -m ora", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("command", choices=("demo", "network", "resilience", "twin", "parts", "export", "dte", "topologies", "tunnel",
-                                            "earth", "dem", "run"))
+                                            "earth", "dem", "run", "benchmark", "tall-towers", "evaluate", "stress"))
     parser.add_argument("target", nargs="?")
     parser.add_argument("--seeds", type=int, default=None)
+    parser.add_argument("--budget", type=int, default=8)
     parser.add_argument("--layout", default="drift")
     parser.add_argument("--out", default=None)
     parser.add_argument("--beam", action="store_true")
@@ -120,11 +122,40 @@ def main(argv=None):
         from .scenario import build
         out = [dict(id=c["id"], role=c["role"], mass_kg=c["mass_kg"], power_w=c["power_w"], modules=[p["module"] for p in c["parts"]],
                     notes=c["notes"]) for c in twin.node_configs(build(args.target or DEFAULT))]
+        if any(c["assumed_modules"] for c in twin.node_configs(build(args.target or DEFAULT))):
+            print("WARNING: masses and powers come from ora/modules.yaml placeholders (assumed: true), not datasheets.", file=sys.stderr)
     elif command == "export":
         from .export import write_geojson
         from .scenario import build
         name = args.target or DEFAULT
         out = dict(written=str(write_geojson(build(name), args.out or f"{name}.geojson")))
+    elif command == "benchmark":
+        import joblib
+
+        from .lunar_windows import build, split
+        from .selector import compare
+        from .train import MODELS
+        _, test = split()
+        built = [build(*w) for w in test]
+        surrogate, gain = (joblib.load(MODELS / f"{n}.joblib") for n in ("ora_coverage_surrogate", "ora_gain_model"))
+        out = [dict(window=list(w), budget=args.budget, **compare(b, surrogate, gain, budget=args.budget)) for w, b in zip(test, built)]
+        FIGURES.mkdir(parents=True, exist_ok=True)
+        (FIGURES / "ora_benchmark.json").write_text(json.dumps(out, indent=1) + "\n")
+    elif command == "tall-towers":
+        from .tall_towers import reproduce
+        out = reproduce()
+        FIGURES.mkdir(parents=True, exist_ok=True)
+        (FIGURES / "ora_tall_towers.json").write_text(json.dumps(out, indent=1) + "\n")
+    elif command == "evaluate":
+        from .evaluate import evaluate
+        out = evaluate()
+        FIGURES.mkdir(parents=True, exist_ok=True)
+        (FIGURES / "ora_evaluation.json").write_text(json.dumps(out, indent=1) + "\n")
+    elif command == "stress":
+        from .stress import run
+        out = run()
+        FIGURES.mkdir(parents=True, exist_ok=True)
+        (FIGURES / "ora_stress.json").write_text(json.dumps(out, indent=1, default=float) + "\n")
     elif command == "dte":
         out = dte()
     elif command == "topologies":

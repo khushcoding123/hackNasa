@@ -28,11 +28,13 @@ Module A (terrain to graph) is `ora/los.py` and `ora/graph.py`. Module B is `ora
 ## Run it
 
 ```bash
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt   # or: make setup
 python -m moonmesh.data          # NASA terrain and SPICE kernels (about 540 MB)
 python -m ora.data --earth       # Shackleton terrain window, FCC towers, six Earth elevation tiles (about 120 MB)
-python -m ora.train              # trains both models, writes ora/model_card.json
-python -m unittest discover -s tests
+python -m ora.lunar_windows      # 102 lunar windows with exact viewshed labels (a few minutes)
+python -m ora.train              # trains the prior, surrogate and gain model, writes ora/model_card.json
+python -m ora stress             # nine stress evals on sealed data
+python -m pytest tests -q
 ```
 
 | Command | Result |
@@ -42,6 +44,10 @@ python -m unittest discover -s tests
 | `python -m ora twin --beam` | Twin summary with laser power on |
 | `python -m ora run scenarios/mine_tunnel_demo.yaml` | Underground policy comparison over 10 mine layouts |
 | `python -m ora run scenarios/earth_cascades_validation.yaml` | Earth check of the terrain graph engine |
+| `python -m ora stress` | Stress report, written to `docs/figures/ora_stress.json` |
+| `python -m ora evaluate` | Saved models on sealed Earth tiles and lunar windows |
+| `python -m ora benchmark` | Relay selection strategies against exact greedy on sealed windows |
+| `python -m ora tall-towers` | Tall Lunar Towers viewshed benchmark |
 | `python -m ora.literature "tunnel radio propagation"` | OpenAlex literature and dataset search |
 
 ## Measured results
@@ -98,10 +104,11 @@ The plan's hypothesis was that the resilience-aware policy would win on collapse
 
 | Model | Validation | Result |
 | --- | --- | --- |
-| Siting prior (Earth towers) | Leave one region out, six regions | AUC 0.84; 40% of real towers fall in the top 10% of cells (chance is 10%); a view-only baseline scores 0.81 |
-| Coverage surrogate (lunar) | Leave one site out, five sites | Rank correlation 0.61, R² 0.18 |
+| Siting prior (Earth towers) | Leave one tile out, 14 tiles with 15 or more towers | AUC 0.85; 43% of real towers fall in the top 10% of cells (chance 10%). On eight sealed tiles: AUC 0.88, 48.5% in the top 10% |
+| Coverage surrogate (lunar) | 5 folds of 60 km blocks over 86 lunar windows; 16 more windows sealed as a test | CV R² 0.69, rank correlation 0.83. Sealed test: R² 0.71, rank 0.82, error 5.7 points |
+| Marginal-gain model | 16 sealed lunar windows, 8 relays | 83% of exact greedy coverage, beats random in 100% of windows |
 
-The surrogate ranks sites usefully but predicts values poorly. Exact viewsheds take about a millisecond each here, so the app computes them directly and keeps the surrogate only as a screening aid.
+The surrogate screens candidates; the app still computes exact line of sight for the final set. Siting scores in the app are 80% surrogate and 20% Earth prior, because the prior alone does not rank lunar cells by visibility. The stress suite (`python -m ora stress`) passes 23 of 24 checks; `docs/ORA_TRAINING.md` lists the one that fails and the weak spots.
 
 ## What ORA does not claim
 
@@ -117,9 +124,9 @@ The surrogate ranks sites usefully but predicts values poorly. Exact viewsheds t
 | Item | Why it is open |
 | --- | --- |
 | Bench test with ESP32 boards | Needs hardware. Firmware is in `hardware/` but has not been compiled or flashed. |
-| 3D twin view (CesiumJS or Three.js) | The twin uses a 2D map. |
+| 3D twin view (CesiumJS or Three.js) | Not built. The twin uses a 2D map. |
 | Real Earth mine or cave map | The loader exists; no survey file has been loaded. Candidate datasets are in `docs/ORA_TRAINING.md`. |
-| Tall Lunar Towers benchmark | The paper's 185 km² and 325 km² viewsheds have not been reproduced. Connecting Ridge terrain is prepared. |
+| Tall Lunar Towers benchmark | Run on a 36 km window at its centre: 2.9% / 10.4% against the paper's 14.7% / 25.9% at 10 m / 50 m. The full-region numbers need the whole Connecting Ridge tile. |
 | Licence, Zenodo release, LunaNet terminology review | Team decisions. |
 | Items marked "verify" in the plan | Night temperatures, ISS optical terminal dates and rates, beam efficiency range, lava-tube temperatures. None are used as inputs. |
 | The blank bullet, the challenge statement, the Earth customer | Questions for the team. |

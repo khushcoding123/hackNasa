@@ -17,6 +17,7 @@ from .links import Optical, PowerBeam, beam_budget, optical_margin_db, rf_margin
 from .los import visible_cells
 from .scenario import Scenario, available, build, load
 from .thermal import LUNAR_NIGHT_H, NodeDesign, night_budget
+from .topologies import table as topology_table
 from .tunnel import TunnelRadio, drift_mine, room_and_pillar
 
 router = APIRouter(prefix="/api/ora")
@@ -56,6 +57,10 @@ class Design(BaseModel):
 
     def node(self):
         return NodeDesign(**self.model_dump())
+
+
+class CoverageBody(NetworkBody):
+    budget: int = Field(default=6, ge=1, le=16)
 
 
 class Kill(BaseModel):
@@ -273,3 +278,41 @@ def tunnel(body: TunnelBody):
                 length_m=mine.total_length(), loops=nx.cycle_basis(mine.G).__len__(), policies=results,
                 radio=dict(ghz=radio.ghz, alpha_db_per_100m=radio.alpha_db_per_100m, bend_db_per_90deg=radio.bend_db_per_90deg,
                            required_margin_db=radio.required_margin_db))
+
+
+@router.post("/coverage")
+def coverage_sites(body: CoverageBody):
+    """Coverage-first relay sites: surrogate shortlist, then exact greedy, compared with random sets."""
+    import joblib
+    from moonmesh.data import DATA
+    from .selector import select_sites
+    path = DATA / "models" / "ora_coverage_surrogate.joblib"
+    if not path.is_file():
+        raise HTTPException(503, "The coverage surrogate is not trained. Run python -m ora.train.")
+    net = network_for(body)
+    cells = net["sites"][:net["n_relays"]]
+    result = select_sites(net["grid"].heights, net["grid"].pixel_size_m, cells, body.budget, joblib.load(path), seed=net["scenario"].seed,
+                          range_m=net["scenario"].max_range_km * 1000, h_tx=net["scenario"].relay_mast_m)
+    result["sites"] = [dict(id=int(i), x=float(cells[i][0]), y=float(cells[i][1]), lat=float(net["lat"][i]), lon=float(net["lon"][i]),
+                            elevation=float(net["ground"][i])) for i in result["chosen"]]
+    return result
+
+
+@router.get("/dte")
+def dte():
+    """Share of a year the Earth is above the horizon, south of 85 S: with terrain and on a smooth sphere."""
+    from .earth_vis import dte_map
+    data = dte_map()
+    clean = lambda a: np.where(np.isfinite(a), np.round(a, 3), None).tolist()
+    return dict(terrain=clean(data["terrain"]), flat=clean(data["flat"]), cell_km=float(data["cell_km"]), days=int(data["days"]))
+
+
+@router.get("/topologies")
+def topologies():
+    return topology_table()
+
+
+@router.get("/stress")
+def stress_report():
+    path = Path(__file__).resolve().parents[1] / "docs" / "figures" / "ora_stress.json"
+    return json.loads(path.read_text()) if path.is_file() else None
