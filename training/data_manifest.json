@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "source_id": "lunarrf",
+      "url": "https://zenodo.org/records/23301640/files/SHA256SUMS?download=1",
+      "provider": "WPI / Zenodo",
+      "version": "2.0",
+      "license": "CC BY 4.0",
+      "sha256": "654fd2a223b93e3c8418c7299c9242d7b4c0bf474e51141d4a658c0f33c93f59",
+      "bytes": 1564,
+      "downloaded_utc": "2026-11-14T20:42:01.057209+00:00",
+      "local_path": "C:\\moonmesh-data\\raw\\lunarrf\\SHA256SUMS",
+      "verified": "unverified",
+      "notes": [
+        "unverified: compare with the Zenodo record page"
+      ],
+      "label_provenance": "simulated"
+    },
+    {
+      "source_id": "lunarrf",
+      "url": "https://zenodo.org/records/23301640/files/MANIFEST.txt?download=1",
+      "provider": "WPI / Zenodo",
+      "version": "2.0",
+      "license": "CC BY 4.0",
+      "sha256": "bd916a0a7f9346f4ce95e4ddea1f3af261b59cead6990f17f6b194d45554f9aa",
+      "bytes": 127414,
+      "downloaded_utc": "2026-11-14T20:42:01.965515+00:00",
+      "local_path": "C:\\moonmesh-data\\raw\\lunarrf\\MANIFEST.txt",
+      "verified": "unverified",
+      "notes": [
+        "unverified: compare with the Zenodo record page"
+      ],
+      "label_provenance": "simulated"
+    },
+    {
+      "source_id": "lunarrf",
+      "url": "https://zenodo.org/records/23301640/files/lunarrf_atlas_context_v2.0.tar?download=1",
+      "provider": "WPI / Zenodo",
+      "version": "2.0",
+      "license": "CC BY 4.0",
+      "sha256": "0efc889119604d22d766f988d716f5b521a474317098b3a88e31eddc59d22dfb",
+      "bytes": 165038080,
+      "downloaded_utc": "2026-11-14T20:43:45.266077+00:00",
+      "local_path": "C:\\moonmesh-data\\raw\\lunarrf\\lunarrf_atlas_context_v2.0.tar",
+      "verified": true,
+      "notes": [],
+      "label_provenance": "simulated"
+    },
+    {
+      "source_id": "lunarrf",
+      "url": "https://zenodo.org/records/23301640/files/lunarrf_atlas_regions_20m_part1_v2.0.tar?download=1",
+      "provider": "WPI / Zenodo",
+      "version": "2.0",
+      "license": "CC BY 4.0",
+      "sha256": "bbb32e0ee41870c06df06051e11efdb0f5690efeee0c671d5e6ac6e00594e70a",
+      "bytes": 398417920,
+      "downloaded_utc": "2026-11-14T20:45:10.596146+00:00",
+      "local_path": "C:\\moonmesh-data\\raw\\lunarrf\\lunarrf_atlas_regions_20m_part1_v2.0.tar",
+      "verified": true,
+      "notes": [],
+      "label_provenance": "simulated"
+    },
+    {
+      "source_id": "pgda78",
+      "url": "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Haworth/Haworth_final_adj_5mpp_surf.tif",
+      "provider": "NASA GSFC / PGDA",
+      "version": null,
+      "license": "check catalog",
+      "sha256": "387fd6e99bca266f4982f7256c4c185921105313882b4c2eee5b5ff1ef75016b",
+      "bytes": 142123767,
+      "downloaded_utc": "2026-11-14T20:52:11.758705+00:00",
+      "local_path": "C:\\moonmesh-data\\raw\\pgda78\\haworth\\Haworth_final_adj_5mpp_surf.tif",
+      "verified": "unverified",
+      "notes": [
+        "TODO: inspect source metadata for version",
+        "TODO: compare with a publisher checksum; local SHA256 is inventory only"
+      ]
+    },
+    {
+      "source_id": "lola_pds",
+      "url": "https://imbrium.mit.edu/DATA/LOLA_GDR/POLAR/IMG/LDEM_85S_20M.LBL",
+      "provider": "NASA LOLA / PDS",
+      "version": "V2.0",
+      "license": "check catalog",
+      "sha256": "0cbc74e623ce4af19a84f3d40752f4cc2655d36deb6e35e2d31c1ab3ee64ea9c",
+      "bytes": 4991,
+      "downloaded_utc": null,
+      "local_path": "C:\\Users\\khush\\OneDrive - Lake Washington School District\\nasahack\\hackNasa\\.moonmesh-data\\terrain\\LDEM_85S_20M.LBL",
+      "verified": "unverified",
+      "notes": [
+        "TODO: original download time is unknown for this existing file",
+        "TODO: compare with a publisher checksum; local SHA256 is inventory only"
+      ],
+      "version_metadata_path": "C:\\Users\\khush\\OneDrive - Lake Washington School District\\nasahack\\hackNasa\\.moonmesh-data\\terrain\\LDEM_85S_20M.LBL"
+    },
+    {
+      "source_id": "lola_pds",
+      "url": "https://imbrium.mit.edu/DATA/LOLA_GDR/POLAR/IMG/LDEM_85S_20M.IMG",
+      "provider": "NASA LOLA / PDS",
+      "version": "V2.0",
+      "license": "check catalog",
+      "sha256": "d900ac0aa97fbb983f9898873ead759d870fdb33978afc17fb4e1fa526aa49b2",
+      "bytes": 460136448,
+      "downloaded_utc": null,
+      "local_path": "C:\\Users\\khush\\OneDrive - Lake Washington School District\\nasahack\\hackNasa\\.moonmesh-data\\terrain\\LDEM_85S_20M.IMG",
+      "verified": "unverified",
+      "notes": [
+        "TODO: original download time is unknown for this existing file",
+        "TODO: compare with a publisher checksum; local SHA256 is inventory only"
+      ],
+      "version_metadata_path": "C:\\Users\\khush\\OneDrive - Lake Washington School District\\nasahack\\hackNasa\\.moonmesh-data\\terrain\\LDEM_85S_20M.LBL"
+    },
+    {
+      "source_id": "lola_pds",
+      "url": "https://imbrium.mit.edu/DATA/LOLA_GDR/POLAR/IMG/LDEM_75S_240M.LBL",
+      "provider": "NASA LOLA / PDS",
+      "version": "V2.0",
+      "license": "check catalog",
+      "sha256": "ec07239f41d8abc1a3681495b5799b770c7206b5268b76721d69180df0422e02",
+      "bytes": 4990,
+      "downloaded_utc": null,
+      "local_path": "C:\\Users\\khush\\OneDrive - Lake Washington School District\\nasahack\\hackNasa\\.moonmesh-data\\terrain\\LDEM_75S_240M.LBL",
+      "verified": "unverified",
+      "notes": [
+        "TODO: original download time is unknown for this existing file",
+        "TODO: compare with a publisher checksum; local SHA256 is inventory only"
+      ],
+      "version_metadata_path": "C:\\Users\\khush\\OneDrive - Lake Washington School District\\nasahack\\hackNasa\\.moonmesh-data\\terrain\\LDEM_75S_240M.LBL"
+    },
+    {
+      "source_id": "lola_pds",
+      "url": "https://imbrium.mit.edu/DATA/LOLA_GDR/POLAR/IMG/LDEM_75S_240M.IMG",
+      "provider": "NASA LOLA / PDS",
+      "version": "V2.0",
+      "license": "check catalog",
+      "sha256": "d031efe2611b17dfbf3c158f5e15dc04cd5719349dcbf6384bb21fd97697c490",
+      "bytes": 29062688,
+      "downloaded_utc": null,
+      "local_path": "C:\\Users\\khush\\OneDrive - Lake Washington School District\\nasahack\\hackNasa\\.moonmesh-data\\terrain\\LDEM_75S_240M.IMG",
+      "verified": "unverified",
+      "notes": [
+        "TODO: original download time is unknown for this existing file",
+        "TODO: compare with a publisher checksum; local SHA256 is inventory only"
+      ],
+      "version_metadata_path": "C:\\Users\\khush\\OneDrive - Lake Washington School District\\nasahack\\hackNasa\\.moonmesh-data\\terrain\\LDEM_75S_240M.LBL"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Terrain coverage training workspace
 
-Follow [AGENTS.md](../AGENTS.md), the repository-root [specification](../MOONMESH_TERRAIN_COVERAGE_TRAINING.md) and [ordered tasks](../docs/CODEX_PROMPTS.md). The existing `moonmesh` and `lunar_core` packages are deterministic reference physics. No trained model or pretrained weights are included or expected. This workspace currently provides configuration and path helpers only; pipeline scripts are planned below.
+Follow [AGENTS.md](../AGENTS.md), the repository-root [specification](../MOONMESH_TERRAIN_COVERAGE_TRAINING.md) and [ordered tasks](../docs/CODEX_PROMPTS.md). The existing `moonmesh` and `lunar_core` packages are deterministic reference physics. No trained model or pretrained weights are included or expected. This workspace provides configuration, path helpers and source acquisition; later pipeline scripts are planned below.
 
 ## Windows environment
 
@@ -49,6 +49,30 @@ Raw files are immutable. Reuse `.moonmesh-data` as a read-only source cache; do 
 Both experiment YAMLs specify the requested Haworth pilot geometry and seed 42. `load_experiment()` resolves relative config names under `training/configs/` and attaches validated numeric radio settings under `radio`. `load_radio_profile()` rejects unknown profiles, missing/null fields and invalid numeric values. It validates only the selected profile, so the incomplete LunarRF entry does not prevent the app-reference pilot.
 
 `moonmesh_2p4_ref` copies the surface-radio defaults from `moonmesh/models.py:40`, converts 2 W to dBm, and converts the deployment radius from line 27 to meters. Sensitivity applies at the app's 128 kbps reference rate. `lunarrf_1p8` intentionally contains nulls for everything except frequency. Experiment A therefore refuses to run until the LunarRF run metadata has been inspected and all TODO fields filled. The experiment's requested 8000 m range must not silently fill the unknown benchmark range. Experiment A's pilot geometry is a requested configuration, not a verified description of LunarRF's simulation setup.
+
+## Source acquisition (Prompt 2)
+
+Run downloads yourself with the training Python. All commands have `--help`:
+
+```powershell
+& C:\moonmesh-data\venv\Scripts\python.exe training/scripts/00_download.py --help
+& C:\moonmesh-data\venv\Scripts\python.exe training/scripts/00_download.py lunarrf-meta
+& C:\moonmesh-data\venv\Scripts\python.exe training/scripts/00_download.py lunarrf --parts context 1 --yes
+& C:\moonmesh-data\venv\Scripts\python.exe training/scripts/00_download.py extract --site Haworth --band 1p800GHz
+& C:\moonmesh-data\venv\Scripts\python.exe training/scripts/00_download.py pgda78 --site haworth
+& C:\moonmesh-data\venv\Scripts\python.exe training/scripts/00_download.py lola-pds
+& C:\moonmesh-data\venv\Scripts\python.exe training/scripts/00_download.py pgda90-window --bounds-from '<extracted raster path>' --buffer-m 10000
+```
+
+Settings and source URLs live in [configs/downloads.yaml](configs/downloads.yaml). Put `--config <path>` before the subcommand to override them. Downloads require `--yes` above 2,000,000,000 bytes or when HEAD cannot determine a size. `pgda78` prints the source folder; pass inspected companion names with `--files name1 name2`. No companion names are guessed.
+
+Downloads use `.part` files, validate resumed HTTP ranges and verify published SHA256 checksums before promoting the file. If the server ignores Range, the partial restarts from zero. Completed raw files are reused and never overwritten. A checksum mismatch leaves the partial for inspection; inspect or remove that partial yourself before retrying. `lunarrf` requires `lunarrf-meta` first. Unlisted checksums are recorded as `verified: "unverified"`, with the instruction to compare against the Zenodo record page. All LunarRF labels are **simulated**.
+
+Extraction lists all available configured archives before writing selected files under `interim/lunarrf/<Site>/`, preserving their internal paths and the site's case. It includes all context metadata files, rejects links and unsafe paths, and refuses conflicting output files. It never changes archives. PGDA90 checks HTTP Range support, transforms reference bounds into the DEM's projected CRS, adds the metre buffer, rounds outward to pixels and clips to the source extent. Only that window is read, in blocks, into `interim/pgda90/`; the report records its actual window. Range failure stops with the full source size when available and instructions; it never falls back to a full download.
+
+`lola-pds` registers existing `.moonmesh-data/terrain/` paths without copying. Missing files are acquired through `moonmesh.data.download` into the training data root's `raw/lola_pds/`, leaving the app cache read-only. PDS product versions are read from the companion `.LBL`; unknown versions stay null with a TODO.
+
+[data_manifest.json](data_manifest.json) contains a versioned `entries` list, updated atomically after each completed acquisition. Entries are keyed by source and absolute local path; repeated registration retains a known acquisition time. Existing cache files without an earlier manifest timestamp use `downloaded_utc: null` and a TODO rather than inventing a download date. PGDA versions and unchecked licenses remain marked for catalog inspection. Computing a local hash does not mark an acquisition publisher-verified. Run one acquisition process at a time; concurrent manifest writers are not supported. Each executed command writes a timestamped JSON report under the configured data root's `reports/`, including the git commit, seed, messages and failures. `--help` has no data side effects.
 
 ## Planned pipeline
 

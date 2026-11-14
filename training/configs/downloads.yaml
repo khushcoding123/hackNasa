@@ -1,0 +1,33 @@
+# Source URLs and LunarRF license/version: repository spec, section 3.
+seed: 42
+timeout_seconds: 90
+chunk_bytes: 1048576
+confirmation_bytes: 2000000000  # 2 GB (decimal)
+lunarrf:
+  base_url: https://zenodo.org/records/23301640/files/
+  provider: WPI / Zenodo
+  version: '2.0'
+  license: CC BY 4.0
+  archives:
+    context: lunarrf_atlas_context_v2.0.tar
+    '1': lunarrf_atlas_regions_20m_part1_v2.0.tar
+    '2': lunarrf_atlas_regions_20m_part2_v2.0.tar
+    '3': lunarrf_atlas_regions_20m_part3_v2.0.tar
+pgda78:
+  base_url: https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/
+  provider: NASA GSFC / PGDA
+  version: null  # TODO: inspect catalog / downloaded metadata.
+  license: check catalog
+  sites:
+    haworth: Haworth
+    malapert: Site23
+    nobile-rim-1: Site06
+pgda90:
+  url: https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LDEM_80S_20MPP_ADJ.TIF
+  provider: NASA GSFC / PGDA
+  version: null  # TODO: inspect catalog / downloaded metadata.
+  license: check catalog
+lola_pds:
+  provider: NASA LOLA / PDS
+  version: null  # TODO: inspect PDS labels for product versions.
+  license: check catalog
