@@ -66,7 +66,7 @@ def atomic_json(path: Path, value):
 
 
 def update_manifest(path: Path, entry: dict):
-    """Upsert by source and resolved local path, preserving original acquisition time.
+    """Upsert by resolved local path, preserving time and enforcing unique file IDs.
 
     The CLI is a single writer: simultaneous acquisition processes are unsupported.
     A content hash alone is not evidence of verification against a publisher.
@@ -77,9 +77,12 @@ def update_manifest(path: Path, entry: dict):
     if manifest.get("schema_version") != 1 or not isinstance(manifest.get("entries"), list):
         raise ValueError(f"Unsupported manifest schema: {path}")
     entry = dict(entry, local_path=str(Path(entry["local_path"]).resolve()))
-    for index, previous in enumerate(manifest["entries"]):
+    for previous in manifest["entries"]:
         if (previous["source_id"] == entry["source_id"]
-                and Path(previous["local_path"]).resolve() == Path(entry["local_path"])):
+                and Path(previous["local_path"]).resolve() != Path(entry["local_path"])):
+            raise ValueError(f"Source ID already belongs to another file: {entry['source_id']}")
+    for index, previous in enumerate(manifest["entries"]):
+        if Path(previous["local_path"]).resolve() == Path(entry["local_path"]):
             if previous.get("sha256") == entry["sha256"] and previous.get("downloaded_utc"):
                 entry["downloaded_utc"] = previous["downloaded_utc"]
                 entry["notes"] = [note for note in entry.get("notes", [])
@@ -90,6 +93,21 @@ def update_manifest(path: Path, entry: dict):
         manifest["entries"].append(entry)
     atomic_json(path, manifest)
     return entry
+
+
+def file_source_id(source: str, path: Path) -> str:
+    """Stable per-file IDs; keep the source family separate for config lookup."""
+    name = path.name.lower()
+    if source == "lunarrf":
+        if name.endswith(".tar"):
+            return "lunarrf_" + name[:-4].removeprefix("lunarrf_").removeprefix("atlas_")
+        return "lunarrf_" + name.replace(".", "_")
+    if source == "pgda78":
+        sites = {"haworth": "haworth", "site23": "malapert", "site06": "nobile-rim-1"}
+        for folder, site in sites.items():
+            if name == f"{folder}_final_adj_5mpp_surf.tif":
+                return f"pgda78_{site}_5m"
+    return source + "_" + name.replace(".", "_")
 
 
 def safe_name(name: str) -> str:
@@ -136,7 +154,7 @@ class Downloader:
             notes.append(UNVERIFIED if source == "lunarrf" else
                          "TODO: compare with a publisher checksum; local SHA256 is inventory only")
         entry = {
-            "source_id": source, "url": url, "provider": info["provider"],
+            "source_id": file_source_id(source, path), "url": url, "provider": info["provider"],
             "version": version, "license": info["license"],
             "sha256": digest or sha256_file(path), "bytes": path.stat().st_size,
             "downloaded_utc": downloaded_utc, "local_path": str(path.resolve()),
@@ -221,19 +239,40 @@ def lunarrf_url(config, name):
 
 def extract_archives(archives: list[Path], destination: Path, site: str, band: str,
                      context_name: str, *, log=print):
-    """List all members first; manually copy only regular, confined selected files."""
+    """Select the site's labels and context terrain, plus legacy context metadata."""
     safe_name(site)
     safe_name(band)
+
+    def select(archive, member):
+        relative = PurePosixPath(member.name)
+        wanted = (relative.name.startswith(f"{site}__") and
+                  (band in relative.name or "los_count" in relative.name))
+        context = (archive.name == context_name and
+                   (relative.suffix.lower() in METADATA_SUFFIXES or
+                    relative.name in {f"{site}__dem.tif", f"{site}__psr.tif"}))
+        return wanted or context
+
+    return _extract_selected(archives, destination, select, log=log)
+
+
+def extract_metadata(archives: list[Path], destination: Path, validation_name: str, *, log=print):
+    """Extract metadata from every archive, plus validation PNG/PDF figures."""
+    def select(archive, member):
+        suffix = PurePosixPath(member.name).suffix.lower()
+        return (suffix in METADATA_SUFFIXES or
+                (archive.name == validation_name and suffix in {".png", ".pdf"}))
+
+    return _extract_selected(archives, destination, select, log=log)
+
+
+def _extract_selected(archives, destination, select, *, log):
+    """List all members first; manually copy only regular, confined selected files."""
     selected = []
     for archive in archives:
         with tarfile.open(archive, "r:*") as source:
             for member in source:
                 log(f"{archive.name}: {member.name} ({member.size} bytes)")
-                wanted = (f"{site}__" in member.name and
-                          (band in member.name or "los_count" in member.name))
-                metadata = (archive.name == context_name and
-                            PurePosixPath(member.name).suffix.lower() in METADATA_SUFFIXES)
-                if not (wanted or metadata):
+                if not select(archive, member):
                     continue
                 if not member.isfile():
                     if member.isdir():
@@ -249,7 +288,7 @@ def extract_archives(archives: list[Path], destination: Path, site: str, band: s
                     raise ValueError(f"Tar member escapes extraction directory: {member.name}")
                 selected.append((archive, member, target))
     if not selected:
-        raise ValueError("No matching files. Inspect MANIFEST.txt for the exact site and band tags.")
+        raise ValueError("No matching files. Inspect MANIFEST.txt and the downloaded archives.")
     outputs = []
     # Preserve relative archive paths; conflicting files are never silently replaced.
     for archive, member, target in selected:
@@ -269,6 +308,29 @@ def extract_archives(archives: list[Path], destination: Path, site: str, band: s
         outputs.append(str(target))
     log(f"Extracted/reused {len(outputs)} files; LunarRF labels are simulated")
     return outputs
+
+
+def lunarrf_sites(manifest: Path) -> dict[str, dict[str, int]]:
+    """Count exact site prefixes in region archive sections, including sideruns."""
+    if not manifest.is_file():
+        raise ValueError("MANIFEST.txt not found; run lunarrf-meta first")
+    sites = {}
+    archive = None
+    for line in manifest.read_text(encoding="utf-8-sig").splitlines():
+        header = re.fullmatch(r"---\s+(lunarrf_\S+\.tar)\s*", line)
+        if header:
+            archive = header.group(1)
+        elif line and not line[0].isspace():
+            archive = None
+        elif archive and "_regions_" in archive and line.strip():
+            member = PurePosixPath(line.strip())
+            site, separator, layer = member.name.partition("__")
+            if separator and site and layer and not line.rstrip().endswith("/"):
+                counts = sites.setdefault(site, {})
+                counts[archive] = counts.get(archive, 0) + 1
+    if not sites:
+        raise ValueError("No region site files found in MANIFEST.txt; inspect its archive sections")
+    return {site: dict(sorted(counts.items())) for site, counts in sorted(sites.items())}
 
 
 def register_lola(downloader: Downloader):

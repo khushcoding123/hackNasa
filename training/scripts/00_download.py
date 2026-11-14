@@ -9,7 +9,7 @@ import yaml
 
 from moonmesh_train import paths
 from moonmesh_train.downloads import (
-    Downloader, atomic_json, extract_archives, lunarrf_url, pgda90_window,
+    Downloader, atomic_json, extract_archives, extract_metadata, lunarrf_sites, lunarrf_url, pgda90_window,
     read_checksums, register_lola, safe_name, utc_now,
 )
 
@@ -21,11 +21,13 @@ def parser():
     meta = commands.add_parser("lunarrf-meta", help="Fetch MANIFEST.txt and SHA256SUMS (simulated labels)")
     meta.add_argument("--yes", action="store_true", help="Allow a response over 2 GB or with unknown size")
     lunar = commands.add_parser("lunarrf", help="Fetch selected simulated LunarRF archives")
-    lunar.add_argument("--parts", nargs="+", choices=["context", "1", "2", "3"], required=True)
+    lunar.add_argument("--parts", nargs="+", choices=["context", "1", "2", "3", "mosaics2", "candidates", "validation"], required=True)
     lunar.add_argument("--yes", action="store_true", help="Allow downloads over 2 GB or with unknown size")
     extract = commands.add_parser("extract", help="List tar contents, then extract selected simulated labels/metadata")
     extract.add_argument("--site", required=True, type=safe_name)
     extract.add_argument("--band", default="1p800GHz", type=safe_name)
+    commands.add_parser("extract-meta", help="Extract metadata and validation figures from all downloaded LunarRF tars")
+    commands.add_parser("sites", help="List exact site names and region archive file counts from local MANIFEST.txt")
     pgda = commands.add_parser("pgda78", help="Fetch 5 m site DEM and explicitly named companions")
     pgda.add_argument("--site", required=True, choices=["haworth", "malapert", "nobile-rim-1"])
     pgda.add_argument("--files", nargs="+", default=[], type=safe_name)
@@ -51,11 +53,24 @@ def run(args, downloader):
             checksums = read_checksums(root / "SHA256SUMS")
             downloader.download(lunarrf_url(config, name), root / name, "lunarrf",
                                 expected=checksums.get(name), yes=args.yes)
-    elif args.command == "extract":
+    elif args.command == "sites":
+        sites = lunarrf_sites(paths.raw_dir("lunarrf", create=False) / "MANIFEST.txt")
+        for site, counts in sites.items():
+            downloader.log(f"{site}:")
+            for archive, count in counts.items():
+                downloader.log(f"  {archive}: {count} files")
+        return {"sites": sites, "label_provenance": "simulated"}
+    elif args.command in {"extract", "extract-meta"}:
         root = paths.raw_dir("lunarrf", create=False)
-        archives = [root / name for name in config["lunarrf"]["archives"].values() if (root / name).is_file()]
+        archives = (sorted(path for path in root.glob("lunarrf*.tar") if path.is_file())
+                    if args.command == "extract-meta" else
+                    [root / name for name in config["lunarrf"]["archives"].values() if (root / name).is_file()])
         if not archives:
             raise ValueError("No LunarRF archives found; run lunarrf first")
+        if args.command == "extract-meta":
+            outputs = extract_metadata(archives, paths.interim_dir() / "lunarrf" / "meta",
+                                       config["lunarrf"]["archives"]["validation"], log=downloader.log)
+            return {"outputs": outputs, "label_provenance": "simulated"}
         outputs = extract_archives(archives, paths.interim_dir() / "lunarrf" / args.site,
                                    args.site, args.band, config["lunarrf"]["archives"]["context"],
                                    log=downloader.log)
@@ -93,7 +108,7 @@ def main(argv=None):
                                 capture_output=True, text=True, check=False, timeout=10)
         report["git_commit"] = commit.stdout.strip() if commit.returncode == 0 else None
         log(f"Git commit: {report['git_commit']}; seed: {config['seed']}")
-        if args.command in {"lunarrf-meta", "lunarrf", "extract"}:
+        if args.command in {"lunarrf-meta", "lunarrf", "extract", "extract-meta", "sites"}:
             report["label_provenance"] = "simulated"
             log("LunarRF labels are simulated")
         downloader = Downloader(config, paths.repo_root() / "training/data_manifest.json", log=log)

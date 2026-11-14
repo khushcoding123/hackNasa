@@ -2,7 +2,7 @@
   "schema_version": 1,
   "entries": [
     {
-      "source_id": "lunarrf",
+      "source_id": "lunarrf_sha256sums",
       "url": "https://zenodo.org/records/23301640/files/SHA256SUMS?download=1",
       "provider": "WPI / Zenodo",
       "version": "2.0",
@@ -18,7 +18,7 @@
       "label_provenance": "simulated"
     },
     {
-      "source_id": "lunarrf",
+      "source_id": "lunarrf_manifest_txt",
       "url": "https://zenodo.org/records/23301640/files/MANIFEST.txt?download=1",
       "provider": "WPI / Zenodo",
       "version": "2.0",
@@ -34,7 +34,7 @@
       "label_provenance": "simulated"
     },
     {
-      "source_id": "lunarrf",
+      "source_id": "lunarrf_context_v2.0",
       "url": "https://zenodo.org/records/23301640/files/lunarrf_atlas_context_v2.0.tar?download=1",
       "provider": "WPI / Zenodo",
       "version": "2.0",
@@ -48,7 +48,7 @@
       "label_provenance": "simulated"
     },
     {
-      "source_id": "lunarrf",
+      "source_id": "lunarrf_regions_20m_part1_v2.0",
       "url": "https://zenodo.org/records/23301640/files/lunarrf_atlas_regions_20m_part1_v2.0.tar?download=1",
       "provider": "WPI / Zenodo",
       "version": "2.0",
@@ -62,7 +62,7 @@
       "label_provenance": "simulated"
     },
     {
-      "source_id": "pgda78",
+      "source_id": "pgda78_haworth_5m",
       "url": "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Haworth/Haworth_final_adj_5mpp_surf.tif",
       "provider": "NASA GSFC / PGDA",
       "version": null,
@@ -78,7 +78,7 @@
       ]
     },
     {
-      "source_id": "lola_pds",
+      "source_id": "lola_pds_ldem_85s_20m_lbl",
       "url": "https://imbrium.mit.edu/DATA/LOLA_GDR/POLAR/IMG/LDEM_85S_20M.LBL",
       "provider": "NASA LOLA / PDS",
       "version": "V2.0",
@@ -95,7 +95,7 @@
       "version_metadata_path": "C:\\Users\\khush\\OneDrive - Lake Washington School District\\nasahack\\hackNasa\\.moonmesh-data\\terrain\\LDEM_85S_20M.LBL"
     },
     {
-      "source_id": "lola_pds",
+      "source_id": "lola_pds_ldem_85s_20m_img",
       "url": "https://imbrium.mit.edu/DATA/LOLA_GDR/POLAR/IMG/LDEM_85S_20M.IMG",
       "provider": "NASA LOLA / PDS",
       "version": "V2.0",
@@ -112,7 +112,7 @@
       "version_metadata_path": "C:\\Users\\khush\\OneDrive - Lake Washington School District\\nasahack\\hackNasa\\.moonmesh-data\\terrain\\LDEM_85S_20M.LBL"
     },
     {
-      "source_id": "lola_pds",
+      "source_id": "lola_pds_ldem_75s_240m_lbl",
       "url": "https://imbrium.mit.edu/DATA/LOLA_GDR/POLAR/IMG/LDEM_75S_240M.LBL",
       "provider": "NASA LOLA / PDS",
       "version": "V2.0",
@@ -129,7 +129,7 @@
       "version_metadata_path": "C:\\Users\\khush\\OneDrive - Lake Washington School District\\nasahack\\hackNasa\\.moonmesh-data\\terrain\\LDEM_75S_240M.LBL"
     },
     {
-      "source_id": "lola_pds",
+      "source_id": "lola_pds_ldem_75s_240m_img",
       "url": "https://imbrium.mit.edu/DATA/LOLA_GDR/POLAR/IMG/LDEM_75S_240M.IMG",
       "provider": "NASA LOLA / PDS",
       "version": "V2.0",
@@ -144,6 +144,98 @@
         "TODO: compare with a publisher checksum; local SHA256 is inventory only"
       ],
       "version_metadata_path": "C:\\Users\\khush\\OneDrive - Lake Washington School District\\nasahack\\hackNasa\\.moonmesh-data\\terrain\\LDEM_75S_240M.LBL"
+    },
+    {
+      "source_id": "lunarrf_mosaics_160m_part2_v2.0",
+      "url": "https://zenodo.org/records/23301640/files/lunarrf_atlas_mosaics_160m_part2_v2.0.tar?download=1",
+      "provider": "WPI / Zenodo",
+      "version": "2.0",
+      "license": "CC BY 4.0",
+      "sha256": "8a3b24e56652015b95518ea64a36e1cfb7af70c1e8f6dc734ebfe09d19259fb5",
+      "bytes": 59392000,
+      "downloaded_utc": "2026-11-14T21:11:02.917965+00:00",
+      "local_path": "C:\\moonmesh-data\\raw\\lunarrf\\lunarrf_atlas_mosaics_160m_part2_v2.0.tar",
+      "verified": true,
+      "notes": [],
+      "label_provenance": "simulated"
+    },
+    {
+      "source_id": "lunarrf_candidates_v2.0",
+      "url": "https://zenodo.org/records/23301640/files/lunarrf_candidates_v2.0.tar?download=1",
+      "provider": "WPI / Zenodo",
+      "version": "2.0",
+      "license": "CC BY 4.0",
+      "sha256": "50ffcc8e2d49323106c79c277700e17aab32ee67200456a006f7b805dbc48d20",
+      "bytes": 8601600,
+      "downloaded_utc": "2026-11-14T21:11:16.343057+00:00",
+      "local_path": "C:\\moonmesh-data\\raw\\lunarrf\\lunarrf_candidates_v2.0.tar",
+      "verified": true,
+      "notes": [],
+      "label_provenance": "simulated"
+    },
+    {
+      "source_id": "lunarrf_validation_v2.0",
+      "url": "https://zenodo.org/records/23301640/files/lunarrf_validation_v2.0.tar?download=1",
+      "provider": "WPI / Zenodo",
+      "version": "2.0",
+      "license": "CC BY 4.0",
+      "sha256": "84f3e6ff1b64051e100e07134d04288adc22c945b5e25b735a84b9754a7ad48c",
+      "bytes": 10117120,
+      "downloaded_utc": "2026-11-14T21:11:21.704713+00:00",
+      "local_path": "C:\\moonmesh-data\\raw\\lunarrf\\lunarrf_validation_v2.0.tar",
+      "verified": true,
+      "notes": [],
+      "label_provenance": "simulated"
+    },
+    {
+      "source_id": "pgda90_ldem_80s_20mpp_adj_window_43e4fd8aecfcbaa4_tif",
+      "url": "https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LDEM_80S_20MPP_ADJ.TIF",
+      "provider": "NASA GSFC / PGDA",
+      "version": null,
+      "license": "check catalog",
+      "sha256": "3a0f4d7d4b02f2f7c3e952d1690f8e1aae71ff7dde82283c8b5e2a337863ac72",
+      "bytes": 37568611,
+      "downloaded_utc": "2026-11-14T21:13:48.584234+00:00",
+      "local_path": "C:\\moonmesh-data\\interim\\pgda90\\LDEM_80S_20MPP_ADJ_window_43e4fd8aecfcbaa4.tif",
+      "verified": "unverified",
+      "notes": [
+        "TODO: inspect source metadata for version",
+        "TODO: compare with a publisher checksum; local SHA256 is inventory only"
+      ],
+      "bounds_from": "C:\\moonmesh-data\\interim\\lunarrf\\Haworth\\atlas_v2\\bundle\\regions\\Haworth__best_prx_1p800GHz.tif",
+      "buffer_m": 10000.0,
+      "source_window": [
+        11634,
+        9018,
+        3359,
+        3309
+      ],
+      "artifact_kind": "raster_window"
+    },
+    {
+      "source_id": "pgda90_ldem_80s_20mpp_adj_window_a1dd8a7c810088de_tif",
+      "url": "https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LDEM_80S_20MPP_ADJ.TIF",
+      "provider": "NASA GSFC / PGDA",
+      "version": null,
+      "license": "check catalog",
+      "sha256": "109d5abad1793ed825dabc17b56930751286f2621c93638084c7e9f4aaa306a6",
+      "bytes": 77589701,
+      "downloaded_utc": "2026-11-14T21:17:38.076216+00:00",
+      "local_path": "C:\\moonmesh-data\\interim\\pgda90\\LDEM_80S_20MPP_ADJ_window_a1dd8a7c810088de.tif",
+      "verified": "unverified",
+      "notes": [
+        "TODO: inspect source metadata for version",
+        "TODO: compare with a publisher checksum; local SHA256 is inventory only"
+      ],
+      "bounds_from": "C:\\moonmesh-data\\interim\\lunarrf\\Haworth\\atlas_v2\\bundle\\regions\\Haworth__best_prx_1p800GHz.tif",
+      "buffer_m": 25000.0,
+      "source_window": [
+        10884,
+        8268,
+        4859,
+        4809
+      ],
+      "artifact_kind": "raster_window"
     }
   ]
 }

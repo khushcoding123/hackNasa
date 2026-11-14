@@ -13,6 +13,10 @@ lunarrf:
     '1': lunarrf_atlas_regions_20m_part1_v2.0.tar
     '2': lunarrf_atlas_regions_20m_part2_v2.0.tar
     '3': lunarrf_atlas_regions_20m_part3_v2.0.tar
+    # Exact filenames from raw/lunarrf/MANIFEST.txt.
+    mosaics2: lunarrf_atlas_mosaics_160m_part2_v2.0.tar
+    candidates: lunarrf_candidates_v2.0.tar
+    validation: lunarrf_validation_v2.0.tar
 pgda78:
   base_url: https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/
   provider: NASA GSFC / PGDA

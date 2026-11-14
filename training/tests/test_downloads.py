@@ -33,6 +33,14 @@ def config():
     return yaml.safe_load((paths.repo_root() / "training/configs/downloads.yaml").read_text())
 
 
+@pytest.fixture
+def cli():
+    spec = importlib.util.spec_from_file_location("download_cli", paths.repo_root() / "training/scripts/00_download.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 class Response:
     def __init__(self, body=b"", status=200, headers=None, interrupt=False):
         self.body = body
@@ -230,10 +238,13 @@ def make_tar(path, members):
 def test_extract_selection_listing_and_raw_immutability(tmp_path):
     context = tmp_path / "context.tar"
     region = tmp_path / "region.tar"
-    make_tar(context, {"meta/run.JSON": b"{}", "unrelated.tif": b"no"})
+    make_tar(context, {"meta/run.JSON": b"{}", "unrelated.tif": b"no",
+                       "context/regions/Haworth__dem.tif": b"dem",
+                       "context/regions/Haworth__psr.tif": b"psr",
+                       "context/regions/Nobile_Rim_1__dem.tif": b"no"})
     make_tar(region, {"maps/Haworth__best_prx_1p800GHz.tif": b"yes", "Haworth__los_count.tif": b"count",
                       "Haworth__best_prx_2p580GHz.tif": b"no", "Nobile__best_prx_1p800GHz.tif": b"no",
-                      "regional.txt": b"no"})
+                      "regional.txt": b"no", "NotHaworth__best_prx_1p800GHz.tif": b"no"})
     before = [dl.sha256_file(path) for path in (context, region)]
     output = tmp_path / "out"
     listing = []
@@ -244,8 +255,10 @@ def test_extract_selection_listing_and_raw_immutability(tmp_path):
         listing.append(message)
 
     extracted = dl.extract_archives([context, region], output, "Haworth", "1p800GHz", context.name, log=log)
-    assert {Path(path).name for path in extracted} == {"run.JSON", "Haworth__best_prx_1p800GHz.tif", "Haworth__los_count.tif"}
-    assert len(listing) == 8
+    assert {Path(path).relative_to(output).as_posix() for path in extracted} == {
+        "meta/run.JSON", "maps/Haworth__best_prx_1p800GHz.tif", "Haworth__los_count.tif",
+        "context/regions/Haworth__dem.tif", "context/regions/Haworth__psr.tif"}
+    assert len(listing) == 12
     assert before == [dl.sha256_file(path) for path in (context, region)]
     assert dl.extract_archives([context, region], output, "Haworth", "1p800GHz", context.name, log=lambda _: None) == extracted
 
@@ -372,3 +385,217 @@ def test_cli_help_and_subcommands():
     assert exc.value.code == 0
     assert cli.parser().parse_args(["lunarrf", "--parts", "context", "1", "--yes"]).yes
     assert cli.parser().parse_args(["pgda78", "--site", "malapert", "--files", "supplied.tif"]).files == ["supplied.tif"]
+
+
+@pytest.mark.parametrize("part,name", [
+    ("mosaics2", "lunarrf_atlas_mosaics_160m_part2_v2.0.tar"),
+    ("candidates", "lunarrf_candidates_v2.0.tar"),
+    ("validation", "lunarrf_validation_v2.0.tar"),
+])
+def test_new_parts_resume_verify_reuse_and_record(tmp_path, config, cli, monkeypatch, part, name):
+    monkeypatch.setenv("MOONMESH_DATA_ROOT", str(tmp_path / "data"))
+    root = paths.raw_dir("lunarrf")
+    (root / "SHA256SUMS").write_text(f"{digest(b'abcdef')}  {name}\n")
+    (root / (name + ".part")).write_bytes(b"abc")
+    session = Session(6, Response(b"def", 206, {"Content-Range": "bytes 3-5/6"}))
+    worker = downloader(tmp_path, config, session)
+    args = cli.parser().parse_args(["lunarrf", "--parts", part, part])
+    cli.run(args, worker)
+    assert (root / name).read_bytes() == b"abcdef"
+    assert [call[0] for call in session.calls] == ["HEAD", "GET"]
+    assert session.calls[0][1] == config["lunarrf"]["base_url"] + name + "?download=1"
+    assert session.calls[1][2]["headers"]["Range"] == "bytes=3-"
+    entry = json.loads(worker.manifest.read_text())["entries"][0]
+    assert entry["verified"] is True and entry["label_provenance"] == "simulated"
+    assert entry["source_id"] == dl.file_source_id("lunarrf", root / name)
+    cli.run(args, worker)
+    assert json.loads(worker.manifest.read_text())["entries"] == [entry]
+    assert session.calls[-1][0] == "HEAD"
+
+
+@pytest.mark.parametrize("part", ["mosaics2", "candidates", "validation"])
+def test_new_parts_keep_size_and_checksum_rules(tmp_path, config, cli, monkeypatch, part):
+    monkeypatch.setenv("MOONMESH_DATA_ROOT", str(tmp_path / "data"))
+    root = paths.raw_dir("lunarrf")
+    name = config["lunarrf"]["archives"][part]
+    args = cli.parser().parse_args(["lunarrf", "--parts", part])
+    worker = downloader(tmp_path, config, Session(None))
+    with pytest.raises(ValueError, match="lunarrf-meta first"):
+        cli.run(args, worker)
+    assert not worker.session.calls
+    (root / "SHA256SUMS").write_text(f"{digest(b'abc')}  {name}\n")
+    for size in [None, 2_000_000_001]:
+        worker.session = Session(size)
+        with pytest.raises(ValueError, match="--yes"):
+            cli.run(args, worker)
+        assert [call[0] for call in worker.session.calls] == ["HEAD"]
+    worker.session = Session(3, Response(b"bad"))
+    with pytest.raises(ValueError, match="SHA256 mismatch"):
+        cli.run(args, worker)
+    assert not (root / name).exists() and not worker.manifest.exists()
+    (root / "SHA256SUMS").write_text("")
+    worker.session = Session(3)
+    cli.run(args, worker)
+    entry = json.loads(worker.manifest.read_text())["entries"][0]
+    assert entry["verified"] == "unverified" and dl.UNVERIFIED in entry["notes"]
+
+
+def test_mosaics_part1_not_offered(config, cli):
+    assert "lunarrf_atlas_mosaics_160m_part1_v2.0.tar" not in config["lunarrf"]["archives"].values()
+    with pytest.raises(SystemExit):
+        cli.parser().parse_args(["lunarrf", "--parts", "mosaics1"])
+
+
+def test_extract_meta_all_downloaded_archives_and_figures(tmp_path, config, cli, monkeypatch):
+    monkeypatch.setenv("MOONMESH_DATA_ROOT", str(tmp_path / "data"))
+    root = paths.raw_dir("lunarrf")
+    metadata = {f"nested/meta{suffix.upper()}": b"metadata" for suffix in dl.METADATA_SUFFIXES}
+    members = {
+        config["lunarrf"]["archives"]["mosaics2"]: {
+            **metadata, "atlas_v2/radio_params.json": b"{}", "atlas_v2/manifest.json": b"{}",
+            "atlas_v2/bundle/store.json": b"{}", "atlas_v2/bundle/stats_exact/disc_exact.csv": b"a,b"},
+        config["lunarrf"]["archives"]["candidates"]: {
+            "data/atlas_base/candidates.csv": b"base", "data/atlas_base/candidates_freeze.csv": b"freeze",
+            "data/atlas_power_control/candidates.csv": b"power", "data/atlas_power_control/subset_ids.csv": b"ids",
+            "data/atlas_v2/bundle/candidates_coverage.csv": b"coverage"},
+        config["lunarrf"]["archives"]["validation"]: {
+            "figures/validation/plot.PNG": b"png", "figures/validation/pe_reference/plot.pdf": b"pdf"},
+        "lunarrf_sideruns_core_part1_v2.0.tar": {"data/run/radio_params.json": b"siderun"},
+    }
+    expected = {}
+    for name, files in members.items():
+        expected.update(files)
+        make_tar(root / name, {**files, "excluded.tif": b"raster", "excluded.bin": b"binary"})
+    make_tar(root / config["lunarrf"]["archives"]["context"], {"excluded.png": b"image", "excluded.pdf": b"pdf"})
+    (root / "lunarrf_incomplete.tar.part").write_bytes(b"not a tar yet")
+    before = {path: dl.sha256_file(path) for path in root.iterdir()}
+    worker = downloader(tmp_path, config, Session(None))
+    args = cli.parser().parse_args(["extract-meta"])
+    result = cli.run(args, worker)
+    output = paths.interim_dir() / "lunarrf/meta"
+    assert {Path(path).relative_to(output).as_posix(): Path(path).read_bytes()
+            for path in result["outputs"]} == expected
+    assert result["label_provenance"] == "simulated"
+    assert cli.run(args, worker) == result
+    assert before == {path: dl.sha256_file(path) for path in root.iterdir()}
+    assert not worker.session.calls
+
+
+@pytest.mark.parametrize("name", ["../escape.json", "/escape.csv", "C:/escape.txt", "..\\escape.md", "dir/CON.xml"])
+def test_extract_meta_rejects_unsafe_paths(tmp_path, name):
+    archive = tmp_path / "candidates.tar"
+    make_tar(archive, {"valid.json": b"{}", name: b"bad"})
+    with pytest.raises(ValueError):
+        dl.extract_metadata([archive], tmp_path / "out", "validation.tar", log=lambda _: None)
+    assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.parametrize("kind", [tarfile.SYMTYPE, tarfile.LNKTYPE, tarfile.FIFOTYPE])
+def test_extract_meta_rejects_special_members(tmp_path, kind):
+    archive = tmp_path / "validation.tar"
+    with tarfile.open(archive, "w") as tar:
+        member = tarfile.TarInfo("figures/link.png")
+        member.type, member.linkname = kind, "../outside"
+        tar.addfile(member)
+    with pytest.raises(ValueError, match="link/special"):
+        dl.extract_metadata([archive], tmp_path / "out", archive.name, log=lambda _: None)
+
+
+def test_extract_meta_collision_preserves_existing_file(tmp_path):
+    archives = [tmp_path / "one.tar", tmp_path / "two.tar"]
+    for archive, payload in zip(archives, [b"one", b"two"]):
+        make_tar(archive, {"nested/radio_params.json": payload})
+    with pytest.raises(ValueError, match="collision"):
+        dl.extract_metadata(archives, tmp_path / "out", "validation.tar", log=lambda _: None)
+    assert (tmp_path / "out/nested/radio_params.json").read_bytes() == b"one"
+
+
+def test_sites_from_manifest_sections_without_archives(tmp_path, config, cli, monkeypatch):
+    monkeypatch.setenv("MOONMESH_DATA_ROOT", str(tmp_path / "data"))
+    part1 = config["lunarrf"]["archives"]["1"]
+    part2 = config["lunarrf"]["archives"]["2"]
+    siderun = "lunarrf_sideruns_regions_20m_part1_v2.0.tar"
+    manifest = paths.raw_dir("lunarrf") / "MANIFEST.txt"
+    manifest.write_text(f"""{part1} 398.4 MB 232 files
+Contents of each archive:
+--- {config['lunarrf']['archives']['context']}
+  atlas_v2/context/regions/Haworth__dem.tif
+--- {part1}
+  atlas_v2/bundle/regions/Haworth__best_prx_1p800GHz.tif
+  atlas_v2/bundle/regions/Haworth__los_count.tif
+  atlas_v2/bundle/regions/Malapert_Massif__best_id_1p800GHz.tif
+  atlas_v2/bundle/regions/Connecting_Ridge__los_count.tif
+  atlas_v2/bundle/regions/Mons_Mouton_Plateau__los_count.tif
+  atlas_v2/bundle/regions/Mons_Mouton__los_count.tif
+--- {part2}
+  atlas_v2/bundle/regions/Malapert_Massif__los_count.tif
+  atlas_v2/bundle/regions/Nobile_Rim_1__los_count.tif
+--- {siderun}
+  data/run1/regions/Haworth__los_count.tif
+  data/run2/regions/Haworth__los_count.tif
+--- provenance ---
+  ignored__footer.txt
+""")
+    expected = {
+        "Haworth": {part1: 2, siderun: 2}, "Malapert_Massif": {part1: 1, part2: 1},
+        "Nobile_Rim_1": {part2: 1}, "Connecting_Ridge": {part1: 1},
+        "Mons_Mouton_Plateau": {part1: 1}, "Mons_Mouton": {part1: 1},
+    }
+    worker = downloader(tmp_path, config, Session(None))
+    logs = []
+    worker.log = logs.append
+    result = cli.run(cli.parser().parse_args(["sites"]), worker)
+    assert result == {"sites": expected, "label_provenance": "simulated"}
+    assert "Haworth:" in logs and f"  {part1}: 2 files" in logs
+    assert not worker.session.calls
+
+
+def test_sites_missing_or_unrecognized_manifest(tmp_path):
+    manifest = tmp_path / "MANIFEST.txt"
+    with pytest.raises(ValueError, match="lunarrf-meta first"):
+        dl.lunarrf_sites(manifest)
+    manifest.write_text("No archive sections")
+    with pytest.raises(ValueError, match="No region site files"):
+        dl.lunarrf_sites(manifest)
+
+
+def test_file_source_ids_distinguish_files_and_preserve_versions(tmp_path, config):
+    names = {
+        "lunarrf": {"lunarrf_atlas_context_v2.0.tar": "lunarrf_context_v2.0",
+                    "lunarrf_atlas_regions_20m_part1_v2.0.tar": "lunarrf_regions_20m_part1_v2.0",
+                    "MANIFEST.txt": "lunarrf_manifest_txt", "SHA256SUMS": "lunarrf_sha256sums"},
+        "pgda78": {"Haworth_final_adj_5mpp_surf.tif": "pgda78_haworth_5m",
+                   "Haworth_slope.tif": "pgda78_haworth_slope_tif"},
+        "lola_pds": {"LDEM_85S_20M.IMG": "lola_pds_ldem_85s_20m_img",
+                     "LDEM_85S_20M.LBL": "lola_pds_ldem_85s_20m_lbl"},
+        "pgda90": {"window_a.tif": "pgda90_window_a_tif", "window_b.tif": "pgda90_window_b_tif"},
+    }
+    worker = downloader(tmp_path, config, Session(None))
+    for source, files in names.items():
+        for name, expected in files.items():
+            path = tmp_path / name
+            path.write_bytes(b"same content still distinct files")
+            assert worker.record(path, source, "url")["source_id"] == expected
+    entries = json.loads(worker.manifest.read_text())["entries"]
+    assert len({entry["source_id"] for entry in entries}) == sum(map(len, names.values()))
+
+
+def test_manifest_renamed_id_upserts_legacy_path_and_rejects_duplicate_id(tmp_path, config):
+    worker = downloader(tmp_path, config, Session(None))
+    target = tmp_path / "MANIFEST.txt"
+    target.write_bytes(b"manifest")
+    entry = worker.record(target, "lunarrf", "url", downloaded_utc="known-time")
+    legacy = dict(entry, source_id="lunarrf")
+    dl.atomic_json(worker.manifest, {"schema_version": 1, "entries": [legacy]})
+    assert worker.record(target, "lunarrf", "url") == entry
+    before = worker.manifest.read_bytes()
+    with pytest.raises(ValueError, match="already belongs"):
+        dl.update_manifest(worker.manifest, dict(entry, local_path=str(tmp_path / "another.txt")))
+    assert worker.manifest.read_bytes() == before
+
+
+def test_checked_in_manifest_has_unique_per_file_ids():
+    manifest = json.loads((paths.repo_root() / "training/data_manifest.json").read_text())
+    entries = manifest["entries"]
+    assert len({entry["source_id"] for entry in entries}) == len(entries)
+    assert not {entry["source_id"] for entry in entries} & {"lunarrf", "pgda78", "lola_pds", "pgda90"}
