@@ -1,0 +1,33 @@
+{
+ "scenario": "shackleton_rim_to_floor",
+ "sites": 223,
+ "range_km": 12,
+ "seeds": 200,
+ "matched_range_km": 3.2449961479379015,
+ "graphs": {
+  "Real terrain": {
+   "links": 1600,
+   "articulation_points": 11,
+   "schneider_r_random": 0.3854,
+   "schneider_r_betweenness": 0.1606
+  },
+  "Unit disk, same range": {
+   "links": 10151,
+   "articulation_points": 0,
+   "schneider_r_random": 0.4977,
+   "schneider_r_betweenness": 0.4969
+  },
+  "Unit disk, same mean degree": {
+   "links": 1600,
+   "articulation_points": 1,
+   "schneider_r_random": 0.3514,
+   "schneider_r_betweenness": 0.1675
+  },
+  "Rewired, same degrees": {
+   "links": 1600,
+   "articulation_points": 12,
+   "schneider_r_random": 0.466,
+   "schneider_r_betweenness": 0.3178
+  }
+ }
+}

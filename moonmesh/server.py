@@ -7,6 +7,7 @@ from spiceypy.utils.exceptions import SpiceyError
 from .data import SITES
 from .models import Mission
 from .science import scenario
+from ora.api import router as ora_router
 
 app = FastAPI(title="MOONMESH", description="Lunar landing-site and communications planning prototype")
 
@@ -72,4 +73,5 @@ def sensitivity(body: Mission):
     return rows
 
 
+app.include_router(ora_router)
 app.mount("/", StaticFiles(directory=Path(__file__).resolve().parents[1] / "web", html=True), name="web")

@@ -32,6 +32,16 @@ python -m uvicorn moonmesh.server:app --host 127.0.0.1 --port 8765
 
 The interface follows **Mission → Sites → Blackouts → Relays → Resilience**. Sensitivity and Data & assumptions are secondary analysis tools. Configuration changes are labeled **Changes not applied** until you run the mission. Exports are in the header menu. See [UI_REDESIGN_PLAN.md](UI_REDESIGN_PLAN.md) for the visual and interaction specification.
 
+## ORA relay lab
+
+Open [the ORA lab](http://127.0.0.1:8765/ora.html) from the MOONMESH menu. ORA places relays for a lunar mining site on real terrain, tests the network against node failures, runs it through time as a digital twin, sizes batteries for the lunar night, and takes the same graph engine underground. See [docs/ORA.md](docs/ORA.md) for what is built and the measured results, and [docs/ORA_TRAINING.md](docs/ORA_TRAINING.md) for the training procedure and datasets.
+
+```shell
+python -m ora.data --earth
+python -m ora.train
+python -m ora --help
+```
+
 ## Model and validation
 
 - Terrain uses [LOLA PDS products](https://imbrium.mit.edu/DATA/LOLA_GDR/POLAR/IMG/) at 20 m locally and 240 m farther out. Horizon rays include lunar curvature, sample every 2° and extend up to 150 km. Missing terrain is treated as uncertain and excluded from credited availability.

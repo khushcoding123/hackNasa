@@ -1,0 +1,360 @@
+// ORA lab: relay placement, resilience, digital twin, lunar night, underground, lasers.
+// API payloads are documented in ora/api.py; they are typed loosely here.
+type J = any;
+export {};
+
+const $=<T extends HTMLElement=HTMLElement>(q:string)=>document.querySelector<T>(q)!;
+const form=$<HTMLFormElement>("#scenario"), view=$("#view");
+const C={cyan:"#84deff",green:"#73d8ae",amber:"#f4ba72",red:"#f2848c",muted:"#a9bacd",text:"#edf5ff",violet:"#bba9ff",grid:"#29435a",bg:"#0c1520"};
+const TABS:Record<string,[string,string,string]>={
+ network:["01 / PLACE RELAYS","Relays for a lunar mine.","The model proposes sites. Line of sight on real terrain decides."],
+ resilience:["02 / RESILIENCE LAB","What breaks first?","Fail nodes and links, and compare real terrain with idealized networks."],
+ twin:["03 / DIGITAL TWIN","Run the network through time.","Sunlight, battery, temperature and links, hour by hour. Then ask what if."],
+ night:["04 / LUNAR NIGHT","354 hours of darkness.","What it costs to keep a relay alive, and how hibernation changes the answer."],
+ tunnel:["05 / UNDERGROUND","Follow the dig.","A robot drops repeaters as the mine grows. Three policies, then failures and collapses."],
+ laser:["06 / LASERS","Light for data and power.","Optical trunks and laser power from a sunlit rim to a dark crater floor."],
+ earth:["07 / EARTH MINES","The same engine on Earth.","Room-and-pillar mines need links that survive a collapse."],
+ data:["MODELS & LIMITS","What was trained, and how far to trust it.","Measured results, data sources and known limits."],
+};
+let tab="network", net:J, lab:J, sim:J, nightResult:J, mine:J, earthMine:J, beam:J, conf:J;
+let hour=0, layer="score", mode="betweenness", minePolicy="resilient", kills:{node:number;hour:number}[]=[], busy=0;
+
+const n=(x:number|null|undefined,d=1)=>x==null||Number.isNaN(x)?"—":x.toFixed(d);
+const pct=(x:number|null|undefined,d=0)=>x==null?"—":(100*x).toFixed(d)+"%";
+const esc=(s:unknown)=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]!));
+const panel=(title:string,html:string)=>`<section class="panel"><h2>${title}</h2>${html}</section>`;
+const metric=(label:string,value:string,caption:string,cls="")=>`<section class="panel metric"><small>${label}</small><strong class="${cls}">${value}</strong><small>${caption}</small></section>`;
+const table=(head:string[],rows:string[][])=>`<div class="table-wrap"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+const readout=(rows:[string,string][])=>`<dl>${rows.map(([a,b])=>`<dt>${a}</dt><dd>${b}</dd>`).join("")}</dl>`;
+const key=(items:[string,string,boolean?][])=>`<ul class="key">${items.map(([color,label,line])=>`<li><i class="${line?"line":""}" style="background:${color}"></i>${label}</li>`).join("")}</ul>`;
+const pill=(ok:boolean,yes:string,no:string)=>`<span class="pill ${ok?"ok":"warn"}">${ok?yes:no}</span>`;
+function status(text:string,error=false){const node=$("#status");node.textContent=text;node.classList.toggle("error",error);}
+
+async function api<T=J>(path:string,body?:unknown):Promise<T>{
+ let response:Response;
+ try{response=await fetch("/api/ora/"+path,body===undefined?{}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});}
+ catch{throw new Error("Cannot reach the MOONMESH server. Check that it is running.");}
+ const data=await response.json().catch(()=>({detail:`Server error ${response.status}.`}));
+ if(!response.ok){
+  const detail=data.detail;
+  throw new Error(typeof detail==="string"?detail:Array.isArray(detail)?detail.map((d:J)=>`${d.loc.slice(1).join(".")}: ${d.msg}`).join(" "):"Request failed.");
+ }
+ return data;
+}
+async function task<T>(label:string,work:()=>Promise<T>):Promise<T|undefined>{
+ busy++;status(label);$("#state").textContent="Working";
+ try{const out=await work();status("");return out;}
+ catch(error){status((error as Error).message,true);return undefined;}
+ finally{busy--;if(!busy)$("#state").textContent="Ready";}
+}
+function scenarioBody(){
+ const out:Record<string,unknown>={};
+ for(const [k,v] of new FormData(form))out[k]=k==="scenario"?v:Number(v);
+ return out;
+}
+
+// ---------- canvas helpers ----------
+function canvas(id:string){
+ const element=document.querySelector<HTMLCanvasElement>("#"+id);
+ if(!element)return undefined;
+ const bounds=element.getBoundingClientRect(), dpi=devicePixelRatio;
+ element.width=Math.round(bounds.width*dpi);element.height=Math.round(bounds.height*dpi);
+ const ctx=element.getContext("2d")!;ctx.scale(dpi,dpi);ctx.fillStyle=C.bg;ctx.fillRect(0,0,bounds.width,bounds.height);
+ return {element,ctx,w:bounds.width,h:bounds.height};
+}
+let shadeCache:{key:string;image:HTMLCanvasElement}|undefined;
+function shadeImage(){
+ const rows:number[][]=net.map.image, k=net.site+rows.length;
+ if(shadeCache&&shadeCache.key===k)return shadeCache.image;
+ const image=document.createElement("canvas");image.width=rows[0].length;image.height=rows.length;
+ const ctx=image.getContext("2d")!, data=ctx.createImageData(image.width,image.height);
+ rows.forEach((row,y)=>row.forEach((v,x)=>{const i=4*(y*image.width+x);data.data[i]=v*.62;data.data[i+1]=v*.68;data.data[i+2]=v*.8;data.data[i+3]=255;}));
+ ctx.putImageData(data,0,0);shadeCache={key:k,image};return image;
+}
+const ROLE:Record<string,string>={gateway:C.cyan,relay:C.green,mine:C.amber,candidate:"#7d8da3"};
+interface MapState{nodes:J[];edges:{a:number;b:number;color:string;dash?:boolean}[];color:(node:J)=>string;label?:(node:J)=>string;pick?:(node:J)=>void}
+function drawMap(id:string,state:MapState,overlay?:string){
+ const c=canvas(id);if(!c)return;
+ const {ctx,w,h,element}=c, side=Math.min(w,h), x0=(w-side)/2, y0=(h-side)/2, scale=side/net.size[1];
+ ctx.imageSmoothingEnabled=true;ctx.drawImage(shadeImage(),x0,y0,side,side);
+ if(overlay==="coverage"){
+  const grid:number[][]=net.coverage.grid, cell=side/grid.length;
+  grid.forEach((row,y)=>row.forEach((v,x)=>{if(v<0)return;ctx.fillStyle=v===0?"rgba(242,132,140,.42)":v===1?"rgba(132,222,255,.20)":"rgba(115,216,174,.30)";ctx.fillRect(x0+x*cell,y0+y*cell,cell+.5,cell+.5);}));
+ }
+ const at=(v:J)=>[x0+v.x*scale,y0+v.y*scale] as [number,number];
+ const byId=new Map<number,J>(state.nodes.map(v=>[v.id,v]));
+ for(const e of state.edges){
+  const a=byId.get(e.a),b=byId.get(e.b);if(!a||!b)continue;
+  ctx.strokeStyle=e.color;ctx.lineWidth=1.6;ctx.setLineDash(e.dash?[5,5]:[]);ctx.beginPath();ctx.moveTo(...at(a));ctx.lineTo(...at(b));ctx.stroke();
+ }
+ ctx.setLineDash([]);
+ for(const v of state.nodes){
+  const [x,y]=at(v), big=v.role!=="candidate";
+  ctx.fillStyle=state.color(v);ctx.beginPath();
+  if(v.role==="mine")ctx.rect(x-5,y-5,10,10);else ctx.arc(x,y,big?5.5:2.4,0,2*Math.PI);
+  ctx.fill();
+  if(big){ctx.strokeStyle="#07101a";ctx.lineWidth=1.2;ctx.stroke();ctx.font="11px monospace";ctx.fillStyle=C.text;ctx.fillText(state.label?state.label(v):String(v.id),x+8,y-6);}
+ }
+ const km=5, bar=km*1000/net.pixel_m*scale;
+ ctx.fillStyle=C.text;ctx.font="11px monospace";ctx.fillRect(x0+10,y0+side-14,bar,2);ctx.fillText(km+" km",x0+10,y0+side-19);ctx.fillText("GRID N ↑",x0+10,y0+16);
+ element.onclick=state.pick?event=>{
+  const bounds=element.getBoundingClientRect();let best:J,dist=14;
+  for(const v of state.nodes){if(v.role==="candidate")continue;const [x,y]=at(v),d=Math.hypot(event.clientX-bounds.left-x,event.clientY-bounds.top-y);if(d<dist){dist=d;best=v;}}
+  if(best)state.pick!(best);
+ }:null;
+}
+interface Series{label:string;color:string;x:number[];y:number[];band?:number[];dash?:boolean}
+function drawChart(id:string,series:Series[],xLabel:string,yLabel:string,yMax=1,marker?:number){
+ const c=canvas(id);if(!c)return;
+ const {ctx,w,h}=c, L=46,R=w-12,T=12,B=h-34;
+ const xMax=Math.max(...series.flatMap(s=>s.x),1e-9), px=(x:number)=>L+x/xMax*(R-L), py=(y:number)=>B-Math.min(y,yMax)/yMax*(B-T);
+ ctx.font="10px monospace";ctx.strokeStyle=C.grid;ctx.lineWidth=1;
+ for(let i=0;i<=4;i++){
+  const y=T+(B-T)*i/4;ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(R,y);ctx.stroke();
+  ctx.fillStyle=C.muted;ctx.textAlign="right";ctx.fillText((yMax*(1-i/4)).toFixed(yMax<=1?2:0),L-6,y+3);
+  ctx.textAlign="center";ctx.fillText((xMax*i/4).toFixed(xMax<=1?2:0),px(xMax*i/4),B+14);
+ }
+ ctx.fillText(xLabel,(L+R)/2,h-6);ctx.save();ctx.translate(11,(T+B)/2);ctx.rotate(-Math.PI/2);ctx.fillText(yLabel,0,0);ctx.restore();
+ for(const s of series){
+  if(s.band){
+   ctx.fillStyle=s.color+"33";ctx.beginPath();
+   s.x.forEach((x,i)=>ctx.lineTo(px(x),py(s.y[i]+s.band![i])));
+   for(let i=s.x.length-1;i>=0;i--)ctx.lineTo(px(s.x[i]),py(Math.max(0,s.y[i]-s.band[i])));
+   ctx.fill();
+  }
+  ctx.strokeStyle=s.color;ctx.lineWidth=2;ctx.setLineDash(s.dash?[6,4]:[]);ctx.beginPath();
+  s.x.forEach((x,i)=>i?ctx.lineTo(px(x),py(s.y[i])):ctx.moveTo(px(x),py(s.y[i])));ctx.stroke();
+ }
+ ctx.setLineDash([]);
+ if(marker!==undefined){ctx.fillStyle=C.text;ctx.fillRect(px(marker),T,1,B-T);}
+ ctx.textAlign="left";
+}
+function drawMine(id:string,data:J,policy:string){
+ const c=canvas(id);if(!c)return;
+ const {ctx,w,h}=c, pts=Object.values(data.junctions) as number[][];
+ const xs=pts.map(p=>p[0]),ys=pts.map(p=>p[1]), minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
+ const scale=Math.min((w-60)/Math.max(maxX-minX,1),(h-60)/Math.max(maxY-minY,1));
+ const at=(p:number[])=>[30+(p[0]-minX)*scale,h/2-((p[1]-(minY+maxY)/2))*scale] as [number,number];
+ const result=data.policies[policy], worst=result.worst_collapse as string|null;
+ for(const [a,b] of data.segments as string[][]){
+  const collapsed=worst===`${a}-${b}`||worst===`${b}-${a}`;
+  ctx.strokeStyle=collapsed?C.red:"#3d566f";ctx.lineWidth=collapsed?5:7;ctx.lineCap="round";ctx.beginPath();ctx.moveTo(...at(data.junctions[a]));ctx.lineTo(...at(data.junctions[b]));ctx.stroke();
+ }
+ ctx.font="11px monospace";
+ for(const [name,radio] of Object.entries(result.radios) as [string,J][]){
+  const [x,y]=at(radio.pos), gateway=name==="gateway";
+  ctx.fillStyle=gateway?C.cyan:name===result.worst_repeater?C.amber:C.green;ctx.beginPath();ctx.arc(x,y,gateway?7:4.5,0,2*Math.PI);ctx.fill();
+  if(gateway){ctx.fillStyle=C.text;ctx.fillText("portal gateway",x+10,y-8);}
+ }
+ ctx.fillStyle=C.text;ctx.fillRect(30,h-16,100*scale,2);ctx.fillText("100 m",30,h-21);
+}
+
+// ---------- views ----------
+function kpis(){
+ const p=net.plan, s=net.structure;
+ return `<div class="metrics">${metric("MINES LINKED",pct(p.served),`${p.mines.length} mining sites to ${p.gateways.length} gateways`,p.feasible?"green":"amber")}
+ ${metric("RELAYS CHOSEN",String(p.chosen.length),`${p.chain.length} to connect · ${p.added.length} spare`)}
+ ${metric("WORST SINGLE FAILURE",pct(p.worst_after_failure),"mines still linked after losing any one node",p.worst_after_failure>=1?"green":"amber")}
+ ${metric("GROUND COVERED",n(net.coverage.covered_pct,0)+"%",`${n(net.coverage.redundant_pct,0)}% hears two or more relays`)}
+ ${metric("SINGLE POINTS OF FAILURE",String(s.articulation_points),`${s.bridges} single-path links`,s.articulation_points?"amber":"green")}</div>`;
+}
+function networkView(){
+ const p=net.plan, byId=new Map<number,J>(net.nodes.map((v:J)=>[v.id,v]));
+ const layers=`<div class="controls"><label>Colour candidates by <select id="layer"><option value="score">siting score</option><option value="sun">sunlight</option><option value="earth">Earth visibility</option><option value="coverage">coverage and dead zones</option></select></label></div>`;
+ const fragile=table(["Node","Role","Sunlight","Earth view","Mines linked if lost"],net.fragile.map((f:J)=>{const v=byId.get(f.id);return [String(f.id),f.role,pct(v.sun),pct(v.earth),`${pct(f.served_if_lost)} ${f.served_if_lost<1?'<span class="pill warn">critical</span>':""}`];}));
+ const paths=Object.entries(net.structure.disjoint_paths as Record<string,number>).map(([id,k])=>`Mine ${id}: ${k} independent path${k===1?"":"s"}`).join(" · ");
+ return kpis()+`<div class="split">${panel("Terrain, candidates and the chosen network",layers+`<canvas id="map" class="ora-map" aria-label="Terrain map with candidate sites, chosen relays, gateways and mining sites"></canvas>`+
+  key([[C.cyan,"gateway (sees Earth)"],[C.green,"chosen relay"],[C.amber,"mining site"],["#7d8da3","candidate"],["rgba(242,132,140,.8)","dead zone (coverage layer)"]])+
+  `<p class="caption">${esc(net.site)} · ${net.nodes.length} sites · ${net.all_edges.toLocaleString()} line-of-sight links within ${n(net.scenario.max_range_km,0)} km.</p>`)}
+ ${panel("Placement",`<p class="callout ${p.feasible?"":"amber"}">${p.feasible?"Best evaluated relay set · every mining site linked":"Best evaluated relay set · some mining sites unreachable"}</p>`+readout([
+  ["Siting scores",esc(net.score_method)],["Chain relays",p.chain.join(", ")||"none needed"],["Spare relays",p.added.join(", ")||"none added"],["Gateways",p.gateways.join(", ")],
+  ["After any one failure","mean "+pct(p.mean_after_failure)+" · worst "+pct(p.worst_after_failure)],["Independent paths",paths||"—"]])+
+  `<p class="note">Stage 1 connects each mining site to a gateway along the cheapest line-of-sight chain, steering toward sunlit, high-scoring ground. Stage 2 adds spare relays where they most improve what survives a single failure. This is a heuristic search over the screened candidates, not a proven optimum.</p>`)}</div>`+
+  panel("What breaks first",fragile+`<p class="note">Each row removes one node from the chosen network and counts the mining sites that can still reach a gateway.</p>`);
+}
+function paintNetwork(){
+ const chosen=new Set<number>([...net.plan.chosen,...net.plan.gateways,...net.plan.mines]);
+ const heat=(t:number)=>`rgb(${Math.round(70+185*t)},${Math.round(110+90*t)},${Math.round(160-90*t)})`;
+ const scores=net.nodes.filter((v:J)=>v.score!=null).map((v:J)=>v.score), lo=Math.min(...scores), hi=Math.max(...scores);
+ drawMap("map",{nodes:[...net.nodes].sort((a:J,b:J)=>Number(chosen.has(a.id))-Number(chosen.has(b.id))),
+  edges:net.edges.map((e:J)=>({a:e.a,b:e.b,color:"rgba(115,216,174,.85)"})),
+  color:(v:J)=>v.role!=="candidate"?ROLE[v.role]:layer==="sun"?heat(v.sun):layer==="earth"?heat(v.earth):layer==="coverage"?"rgba(255,255,255,.35)":heat((v.score-lo)/Math.max(hi-lo,1e-9))},layer==="coverage"?"coverage":undefined);
+}
+const GRAPH_COLOR:Record<string,string>={"Real terrain":C.green,"No terrain, same range":C.muted,"No terrain, same mean degree":C.cyan,"Rewired, same degrees":C.violet};
+const MODE_LABEL:Record<string,string>={random:"Random failures",betweenness:"Targeted: busiest relay first",articulation:"Single points of failure first",disk:"Regional failure (landslide, ejecta)",edge:"Link degradation (dust, pointing)"};
+function resilienceView(){
+ if(!lab)return panel("Resilience lab",`<p class="note">Fails relays and links in five ways on the full candidate network and compares real terrain with three idealized networks on the same sites. Each random mode is repeated and reported as a mean with a 95% interval.</p><div class="ora-grid"><label>Repeats per mode<input id="seeds" type="number" min="5" max="400" value="100"></label><label>Regional failure radius (m)<input id="disk" type="number" min="100" max="10000" step="100" value="1500"></label><button id="run-lab" class="primary">Run the failure experiments</button></div>`);
+ const labels=Object.keys(lab.graphs), modes=Object.keys(lab.graphs[labels[0]].modes);
+ const struct=table(["Network","Links","Mean degree","Single points of failure","Single-path links","Largest connected share"],labels.map(l=>{const s=lab.graphs[l].structure;return [esc(l),s.edges.toLocaleString(),n(s.mean_degree),String(s.articulation_points),String(s.bridges),pct(s.giant_fraction)];}));
+ const rtable=table(["Failure mode",...labels.map(esc)],modes.map(m=>[MODE_LABEL[m],...labels.map(l=>{const r=lab.graphs[l].modes[m];return `${n(r.schneider_r,3)}${r.runs>1?` ± ${n(r.schneider_r_ci,3)}`:""}`;})]));
+ const real=lab.graphs["Real terrain"], matched=lab.graphs["No terrain, same mean degree"];
+ const earlier=modes.filter(m=>real.modes[m].schneider_r<matched.modes[m].schneider_r-1e-9).length;
+ return panel("Network degradation",`<div class="tabs" role="group" aria-label="Failure mode">${modes.map(m=>`<button data-mode="${m}" aria-pressed="${m===mode}">${MODE_LABEL[m]}</button>`).join("")}</div>
+  <canvas id="curve" class="ora-chart" aria-label="Largest connected share of the network as nodes fail"></canvas>${key(labels.map(l=>[GRAPH_COLOR[l],l,true] as [string,string,boolean]))}
+  <p class="caption">${lab.nodes} sites · ${n(lab.range_m/1000,0)} km range · ${lab.seeds} repeats for random modes · shaded band is the 95% interval. Mining sites and gateways are removed last.</p>`)+
+  panel("Finding",`<p class="callout">Real terrain has ${real.structure.articulation_points} single points of failure; the terrain-free network with the same mean degree has ${matched.structure.articulation_points}. Terrain is less robust than that network in ${earlier} of ${modes.length} failure modes.</p><p class="note">This is the measured result for this site and seed, reported as found. The same-degree comparison isolates the effect of terrain from the effect of simply having fewer links.</p>`)+
+  panel("Robustness score (Schneider R, higher is better)",rtable+`<p class="note">R is the mean share of the network still in one piece across the whole removal sequence.</p>`)+panel("Structure",struct)+
+  `<p><button id="run-lab" class="primary">Run again</button> <span class="muted">with <input id="seeds" type="number" min="5" max="400" value="${lab.seeds}" style="width:90px"> repeats and a <input id="disk" type="number" min="100" max="10000" step="100" value="${lab.disk_radius_m}" style="width:100px"> m regional radius</span></p>`;
+}
+function paintResilience(){
+ if(!lab)return;
+ drawChart("curve",Object.entries(lab.graphs as Record<string,J>).map(([label,g])=>{const r=g.modes[mode];return {label,color:GRAPH_COLOR[label],x:r.fraction,y:r.giant,band:r.runs>1?r.giant_ci:undefined,dash:label!=="Real terrain"};}),
+  mode==="edge"?"share of links removed":"share of nodes removed","largest connected share");
+}
+const design=()=>conf.design as Record<string,number|boolean>;
+function designFields(){
+ const d=design(), num=(k:string,label:string,min:number,max:number,step:number)=>`<label>${label}<input type="number" data-design="${k}" min="${min}" max="${max}" step="${step}" value="${d[k]}"></label>`;
+ return `<div class="ora-grid">${num("battery_wh","Battery (Wh)",1,100000,50)}${num("solar_w","Solar panel (W)",0,5000,5)}${num("active_w","Relaying power (W)",0.1,500,0.5)}${num("survival_w","Hibernating power (W)",0,100,0.1)}${num("heater_w","Heater (W)",0,500,0.5)}${num("rhu_w","Radioisotope heat (W)",0,50,0.5)}
+ <label class="check"><input type="checkbox" data-design="hibernate" ${d.hibernate?"checked":""}> Hibernate when unlit</label>${num("duty","Wake share while hibernating",0,1,0.05)}</div>`;
+}
+const twinOptions:Record<string,number|boolean>={beam:false,optical:false,dust_db:0,rf_backup:true,night:false,disk_radius_m:0};
+function twinBody(){
+ return {...scenarioBody(),design:design(),kill:kills,beam:twinOptions.beam,optical:twinOptions.optical,dust_db:twinOptions.dust_db,rf_backup:twinOptions.rf_backup,
+  night_start_h:twinOptions.night?48:null,...(twinOptions.disk_radius_m&&kills.length?{disk_radius_m:twinOptions.disk_radius_m,disk_node:kills[0].node,disk_hour:kills[0].hour}:{})};
+}
+function twinView(){
+ const controls=panel("Node design and what-ifs",designFields()+`<div class="ora-grid" style="margin-top:14px">
+  <label class="check"><input type="checkbox" data-option="night" ${twinOptions.night?"checked":""}> Force a full lunar night (354 h from hour 48)</label>
+  <label class="check"><input type="checkbox" data-option="beam" ${twinOptions.beam?"checked":""}> Laser-power shadowed relays</label>
+  <label class="check"><input type="checkbox" data-option="optical" ${twinOptions.optical?"checked":""}> Optical trunks on long hops</label>
+  <label>Dust loss on optics (dB)<input type="number" data-option="dust_db" min="0" max="80" step="5" value="${twinOptions.dust_db}"></label>
+  <label class="check"><input type="checkbox" data-option="rf_backup" ${twinOptions.rf_backup?"checked":""}> RF backup behind optical trunks</label>
+  <label>Regional failure radius (m, around the first killed node)<input type="number" data-option="disk_radius_m" min="0" max="10000" step="100" value="${twinOptions.disk_radius_m}"></label>
+  <button id="run-twin" class="primary">Run the twin</button><button id="clear-kills" ${kills.length?"":"disabled"}>Clear ${kills.length} failure${kills.length===1?"":"s"}</button></div>
+  <p class="note">Click a relay or gateway on the map to kill it at the selected hour, then run again.</p>`);
+ if(!sim)return controls;
+ const s=sim.summary;
+ return `<div class="metrics">${metric("MINES LINKED TO A GATEWAY",n(s.gateway_availability,0)+"%","of the period",s.always_connected?"green":"amber")}${metric("LINKED TO EARTH",n(s.earth_availability,0)+"%","gateway must also see Earth")}
+ ${metric("LONGEST LOCAL OUTAGE",n(s.longest_gateway_outage_h,0)+" h","mines cut off from every gateway",s.longest_gateway_outage_h?"amber":"green")}${metric("RELAYS FROZEN",String(s.frozen.length),s.frozen.length?"nodes "+s.frozen.join(", "):"none below −60 °C",s.frozen.length?"red":"green")}
+ ${metric("LASER FEEDS · OPTICAL TRUNKS",`${s.beams} · ${s.optical_trunks}`,"active in this run")}</div>`+
+ `<div class="split">${panel("Network state",`<canvas id="twin-map" class="ora-map" aria-label="Network state at the selected hour"></canvas><input id="hour" class="time" type="range" min="0" max="${sim.times.length-1}" value="${hour}" aria-label="Hour of the simulation"><p id="clock" class="caption"></p>`+
+  key([[C.green,"relaying"],[C.violet,"hibernating"],["#5b6b80","off or dead"],[C.red,"frozen"],[C.cyan,"gateway seeing Earth"],[C.amber,"laser power feed",true]]))}
+ ${panel("Nodes at this hour",`<div id="twin-table"></div>`)}</div>`+
+ panel("Service over time",`<canvas id="service" class="ora-chart" aria-label="Share of mining sites linked over time"></canvas>${key([[C.green,"linked to a gateway",true],[C.cyan,"linked to Earth",true]])}`)+controls;
+}
+function paintTwin(){
+ if(!sim||!document.querySelector("#twin-map"))return;
+ const t=hour, modeColor=(v:J)=>v.frozen_h!=null&&v.frozen_h<=t*sim.step_h?C.red:v.mode[t]===2?(v.role==="gateway"&&v.earth?.[t]?C.cyan:v.role==="mine"?C.amber:C.green):v.mode[t]===1?C.violet:"#5b6b80";
+ const base=new Map<number,J>(net.nodes.map((v:J)=>[v.id,v]));
+ const nodes=sim.nodes.map((v:J)=>({...v,x:base.get(v.id).x,y:base.get(v.id).y}));
+ drawMap("twin-map",{nodes,color:modeColor,label:(v:J)=>`${v.id} ${v.role==="mine"?"":n(v.temp_c[t],0)+"°C"}`,
+  edges:[...sim.edges.map((e:J)=>({a:e.a,b:e.b,color:e.up[t]==="1"?(e.kind==="optical"?"rgba(132,222,255,.95)":"rgba(115,216,174,.9)"):"rgba(242,132,140,.55)",dash:e.up[t]!=="1"})),
+   ...sim.beams.map((b:J)=>({a:b.source,b:b.target,color:C.amber,dash:true}))],
+  pick:(v:J)=>{if(v.role==="mine")return;kills=[...kills.filter(k=>k.node!==v.id),{node:v.id,hour:t*sim.step_h}];status(`Node ${v.id} will fail at hour ${t*sim.step_h}. Run the twin to apply.`);render();}});
+ $("#clock").textContent=`${sim.times[t].slice(0,16).replace("T"," ")} UTC · hour ${t*sim.step_h} · ${pct(sim.served_gateway[t])} of mines linked to a gateway, ${pct(sim.served_earth[t])} to Earth`;
+ $("#twin-table").innerHTML=table(["Node","Role","State","Sun","Battery","Temp"],sim.nodes.map((v:J)=>[String(v.id),v.role,v.killed_h!=null&&v.killed_h<=t*sim.step_h?"killed":v.frozen_h!=null&&v.frozen_h<=t*sim.step_h?"frozen":["off","hibernating","relaying"][v.mode[t]],pct(v.lit[t]),v.role==="mine"?"own power":pct(v.soc[t]),v.role==="mine"?"—":n(v.temp_c[t],0)+" °C"]));
+ const x=sim.times.map((_:string,i:number)=>i*sim.step_h);
+ drawChart("service",[{label:"gateway",color:C.green,x,y:sim.served_gateway},{label:"earth",color:C.cyan,x,y:sim.served_earth,dash:true}],"hours","share of mines linked",1,t*sim.step_h);
+}
+function nightView(){
+ const head=panel("Survival energy",`<p class="note">A lunar night is about ${conf.lunar_night_h} hours of darkness. Energy needed is power times hours, so a relay's survival power matters more than its peak performance. Numbers are illustrative: calibrate the thermal constants against a real box before quoting them.</p>`+designFields()+`<p><button id="run-night" class="primary">Size the battery for the night</button></p>`);
+ if(!nightResult)return head;
+ const b=nightResult.budget,hb=nightResult.hibernating;
+ const row=(label:string,x:J)=>[label,n(x.electronics_w)+" W",n(x.heater_w)+" W",n(x.draw_w)+" W",n(x.energy_wh,0)+" Wh",n(x.endurance_h,0)+" h",pill(x.survives,"survives","runs out")];
+ return `<div class="metrics">${metric("ENERGY FOR ONE NIGHT",n(b.energy_wh,0)+" Wh",`at ${n(b.draw_w)} W for ${n(b.hours,0)} h`,b.survives?"green":"amber")}${metric("BATTERY",n(b.battery_wh,0)+" Wh",b.margin_wh>=0?`${n(b.margin_wh,0)} Wh spare`:`${n(-b.margin_wh,0)} Wh short`,b.survives?"green":"red")}
+ ${metric("HEAT TO STAY ABOVE −30 °C",n(b.heat_needed_w,2)+" W","through insulation, to a 100 K sink")}${metric("WITH 10% HIBERNATION",n(hb.energy_wh,0)+" Wh",hb.survives?"fits this battery":"still short",hb.survives?"green":"amber")}</div>`+
+ panel("One node through the night",table(["Mode","Electronics","Heater","Total draw","Energy","Battery lasts","Outcome"],[row("Always relaying",b),row("Hibernating, awake 10%",hb)]))+
+ panel("Smallest battery that keeps every mine linked all night",table(["Wake share","Smallest battery","Added wait for a sleeping relay","Outcome"],nightResult.design.map((r:J)=>[r.duty>=1?"Always on":pct(r.duty),r.battery_wh?r.battery_wh.toLocaleString()+" Wh":"none up to 5,000 Wh",r.wake_latency_min==null?"never wakes":n(r.wake_latency_min,0)+" min",pill(r.feasible,"mines stay linked","network drops")]))+
+  `<p class="note">Each row forces a full night on the chosen network in the twin and scans battery sizes. Hibernation trades battery mass for delay: a sleeping relay only passes traffic in its wake window, so the network becomes time-varying. Relays in permanent shadow never recharge and need laser power or a different site.</p>`)+head;
+}
+function tunnelView(data:J,earth:boolean){
+ const controls=earth?`<div class="ora-grid"><label>Entries (rows)<input id="rows" type="number" min="2" max="6" value="4"></label><label>Cross-cuts (columns)<input id="cols" type="number" min="2" max="8" value="6"></label><button id="run-earth" class="primary">Dig the panel</button></div>`
+  :`<div class="ora-grid"><label>Layout seed<input id="seed" type="number" min="0" max="9999" value="0"></label><label>Branches<input id="branches" type="number" min="1" max="8" value="4"></label><label class="check"><input id="loops" type="checkbox" checked> Cross-cuts (loops)</label>
+   <label>Tunnel loss (dB per 100 m)<input id="alpha" type="number" min="0" max="60" step="0.5" value="4"></label><label>Bend loss (dB per 90°)<input id="bend" type="number" min="0" max="60" step="1" value="14"></label><button id="run-tunnel" class="primary">Dig the mine</button></div>`;
+ const intro=earth?`<p class="note">A room-and-pillar panel is the common layout of Earth coal and salt mines. Radio does not pass through rock and GPS does not work underground, so safety depends on links that survive a roof fall. The engine is the same one used for the lunar mine.</p>`
+  :`<p class="note">A robot follows the dig front and drops a repeater when its link back to the surface weakens. Radio follows the tunnels: loss grows with distance and with every bend. The loss numbers are placeholders to be fitted from the bench test in <code>hardware/</code>.</p>`;
+ if(!data)return panel(earth?"Earth mine case study":"Dig twin",intro+controls);
+ const names:Record<string,string>={threshold:"Drop when the link weakens",fixed:"Drop every 70 m",resilient:"Resilience-aware (two links back, every junction)"};
+ const rows=Object.entries(data.policies as Record<string,J>).map(([k,r])=>[names[k],String(r.repeaters),pct(r.connected_fraction),pct(r.coverage),pct(r.repeater_failure.mean)+" / "+pct(r.repeater_failure.worst),pct(r.collapse.mean)+" / "+pct(r.collapse.worst)]);
+ const r=data.policies[minePolicy];
+ return panel(earth?"Room-and-pillar panel":"Mine plan",`<div class="tabs" role="group" aria-label="Repeater policy">${Object.keys(data.policies).map(k=>`<button data-policy="${k}" aria-pressed="${k===minePolicy}">${names[k]}</button>`).join("")}</div>
+  <canvas id="${earth?"earth-mine":"mine"}" class="ora-mine" aria-label="Plan view of the mine with repeaters"></canvas>${key([[C.cyan,"portal gateway"],[C.green,"repeater"],[C.amber,"repeater whose loss hurts most"],[C.red,"collapse that hurts most",true]])}
+  <p class="caption">${n(data.length_m,0)} m of tunnel · ${data.loops} loop${data.loops===1?"":"s"} · ${r.repeaters} repeaters · robot linked ${pct(r.connected_fraction)} of the dig.</p>`)+
+ panel("Policies compared",table(["Policy","Repeaters","Robot linked during dig","Mine covered","After one repeater fails (mean / worst)","After one collapse (mean / worst)"],rows)+
+  `<p class="note">After the dig, every repeater is failed in turn and every tunnel segment is collapsed in turn. The share is the part of the mine that can still reach the portal gateway. A collapse on the only way in cuts off everything behind it under any policy; only a second way out (a loop) helps.</p>`)+panel(earth?"Earth mine case study":"Dig twin",intro+controls);
+}
+function laserView(){
+ const form2=`<div class="ora-grid"><label>Distance (m)<input id="b-dist" type="number" min="10" max="100000" step="100" value="5000"></label><label>Wavelength (nm)<input id="b-wave" type="number" min="300" max="11000" step="1" value="1064"></label>
+  <label>Transmit aperture (m)<input id="b-tx" type="number" min="0.01" max="5" step="0.01" value="0.1"></label><label>Receiver diameter (m)<input id="b-rx" type="number" min="0.01" max="20" step="0.01" value="0.5"></label>
+  <label>Electrical power in (W)<input id="b-pow" type="number" min="1" max="1000000" step="50" value="500"></label><label>Dust loss on optics (dB)<input id="b-dust" type="number" min="0" max="80" step="5" value="0"></label><button id="run-beam" class="primary">Work out the budget</button></div>`;
+ if(!beam)return panel("Laser link and power budget",form2);
+ const b=beam.budget,l=beam.links;
+ return `<div class="metrics">${metric("POWER DELIVERED",n(b.delivered_w)+" W",`${pct(b.end_to_end_efficiency)} end to end`,"green")}${metric("SPOT RADIUS",n(b.spot_radius_m,3)+" m",`divergence ${(b.divergence_rad*1e6).toFixed(1)} µrad`)}
+ ${metric("BEAM CAUGHT",pct(b.capture_fraction),"by the receiver",b.capture_fraction>=1?"green":"amber")}${metric("OPTICAL LINK MARGIN",n(l.optical_margin_db)+" dB",`${l.optical_rate_mbps} Mbps · needs ${l.optical_required_db} dB`,l.optical_margin_db>=l.optical_required_db?"green":"red")}${metric("RF LINK MARGIN",n(l.rf_margin_db)+" dB",`${l.rf_rate_kbps} kbps at 2.4 GHz`)}</div>`+
+ panel("Power delivered against distance",`<canvas id="beam-chart" class="ora-chart" aria-label="Delivered power against distance"></canvas><p class="note">The spot grows with distance (1.22 λ/D). Once it is wider than the receiver, power falls with the square of distance. Efficiencies assumed: laser 45%, optics 90%, pointing 90%, tuned photovoltaic receiver 45%. These are first-order estimates, not a link design.</p>`)+
+ panel("Two kinds of link",table(["Link","Strength","Weakness","Use"],[["RF (UHF or S-band)","Tolerates pointing error, mature","Lower data rate","Default mesh and backup"],["Optical","Very high rate, narrow beam","Needs precise pointing and strict line of sight; dust","Rim to crater-floor trunks"]])+
+  `<p class="note">Turn on optical trunks and dust loss in the digital twin to test whether a trunk becomes a single point of failure without an RF backup.</p>`)+panel("Laser link and power budget",form2);
+}
+function dataView(){
+ const card=conf.model_card;
+ if(!card)return panel("Models",`<p class="callout amber">No trained models found. Run <code>python -m ora.data --earth</code> then <code>python -m ora.train</code>. Until then siting uses a transparent terrain heuristic.</p>`);
+ const p=card.siting_prior,s=card.coverage_surrogate;
+ return `<div class="metrics">${metric("SITING PRIOR · AUC",n(p.mean_auc,2),"held-out Earth regions (0.5 is chance)","green")}${metric("TOWERS FOUND IN TOP 10%",pct(p.mean_recall_top10pct),"chance would find 10%")}${metric("COVERAGE SURROGATE · RANK",n(s.mean_spearman,2),"Spearman on held-out lunar sites")}${metric("COVERAGE SURROGATE · R²",n(s.mean_r2,2),"weak: ranking aid only","amber")}</div>`+
+ panel("Siting prior: where towers stand on Earth",table(["Held-out region","Towers","AUC","Towers in top 10%","View-only baseline AUC"],p.folds.map((f:J)=>[f.held_out,String(f.towers),n(f.auc,3),pct(f.recall_top10pct),n(f.viewshed_only_auc,3)]))+
+  `<p class="note">Labels: ${esc(p.labels)}. Terrain: ${esc(p.terrain)}. Validation: ${esc(p.cross_validation)}, so the score is always tested on a region it never saw.</p><ul class="ora-list">${p.limits.map((x:string)=>`<li>${esc(x)}</li>`).join("")}</ul>`)+
+ panel("Coverage surrogate: predicting a site's view on the Moon",table(["Held-out site","R²","Rank correlation","Mean error"],s.folds.map((f:J)=>[esc(f.held_out),n(f.r2,2),n(f.spearman,2),n(f.mean_abs_error,3)]))+
+  `<p class="note">${esc(s.task)}. It ranks sites usefully but predicts the exact value poorly, so the app computes exact viewsheds instead and keeps this model as a screening aid.</p>`)+
+ panel("What this tool does not claim",`<ul class="ora-list"><li>No placement is optimal. The search is heuristic over screened candidates.</li><li>The twin runs on simulated telemetry, bounded by 20 m terrain.</li><li>Tunnel radio numbers are placeholders until fitted from a bench test; a bench test validates the method, not lunar values.</li><li>Laser power is evaluated as a technology. It is not flight heritage.</li><li>"Not found in our search" is not "does not exist" for prior work.</li></ul>`);
+}
+
+function render(){
+ const [chapter,title,purpose]=TABS[tab];
+ $("#chapter").textContent=chapter;$("#title").textContent=title;$("#purpose").textContent=purpose;
+ form.hidden=["tunnel","laser","earth","data"].includes(tab);
+ if(!net&&!form.hidden)return;
+ view.innerHTML=tab==="network"?networkView():tab==="resilience"?resilienceView():tab==="twin"?twinView():tab==="night"?nightView():tab==="tunnel"?tunnelView(mine,false):tab==="earth"?tunnelView(earthMine,true):tab==="laser"?laserView():dataView();
+ connect();paint();
+}
+function paint(){
+ if(tab==="network"&&net)paintNetwork();
+ if(tab==="resilience")paintResilience();
+ if(tab==="twin")paintTwin();
+ if(tab==="tunnel"&&mine)drawMine("mine",mine,minePolicy);
+ if(tab==="earth"&&earthMine)drawMine("earth-mine",earthMine,minePolicy);
+ if(tab==="laser"&&beam)drawChart("beam-chart",[{label:"delivered",color:C.amber,x:beam.curve.map((p:J)=>p.distance_m/1000),y:beam.curve.map((p:J)=>p.delivered_w)}],"distance (km)","delivered power (W)",Math.max(...beam.curve.map((p:J)=>p.delivered_w),1));
+}
+const value=(id:string)=>Number($<HTMLInputElement>("#"+id).value);
+function connect(){
+ const on=(id:string,action:()=>void)=>{const node=document.querySelector<HTMLButtonElement>("#"+id);if(node)node.onclick=action;};
+ const select=document.querySelector<HTMLSelectElement>("#layer");if(select){select.value=layer;select.onchange=()=>{layer=select.value;paint();};}
+ view.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach(b=>b.onclick=()=>{mode=b.dataset.mode!;render();});
+ view.querySelectorAll<HTMLButtonElement>("[data-policy]").forEach(b=>b.onclick=()=>{minePolicy=b.dataset.policy!;render();});
+ view.querySelectorAll<HTMLInputElement>("[data-design]").forEach(i=>i.onchange=()=>{design()[i.dataset.design!]=i.type==="checkbox"?i.checked:Number(i.value);});
+ view.querySelectorAll<HTMLInputElement>("[data-option]").forEach(i=>i.onchange=()=>{twinOptions[i.dataset.option!]=i.type==="checkbox"?i.checked:Number(i.value);});
+ on("run-lab",async()=>{const body={...scenarioBody(),seeds:value("seeds"),disk_radius_m:value("disk")};const out=await task("Failing nodes and links on four networks…",()=>api("resilience",body));if(out){lab=out;render();}});
+ on("run-twin",async()=>{const out=await task("Stepping the network through time…",()=>api("twin",twinBody()));if(out){sim=out;hour=Math.min(hour,sim.times.length-1);render();}});
+ on("clear-kills",()=>{kills=[];render();});
+ on("run-night",async()=>{const out=await task("Forcing a lunar night and sizing batteries…",()=>api("night",{...twinBody(),night_start_h:null}));if(out){nightResult=out;render();}});
+ on("run-tunnel",async()=>{const out=await task("Digging the mine under three policies…",()=>api("tunnel",{layout:"drift",seed:value("seed"),branches:value("branches"),loops:$<HTMLInputElement>("#loops").checked,alpha_db_per_100m:value("alpha"),bend_db_per_90deg:value("bend")}));if(out){mine=out;render();}});
+ on("run-earth",async()=>{const out=await task("Digging the room-and-pillar panel…",()=>api("tunnel",{layout:"room",rows:value("rows"),cols:value("cols")}));if(out){earthMine=out;render();}});
+ on("run-beam",async()=>{const out=await task("Working out the beam budget…",()=>api("beam",{distance_m:value("b-dist"),wavelength_nm:value("b-wave"),tx_aperture_m:value("b-tx"),rx_diameter_m:value("b-rx"),electrical_in_w:value("b-pow"),dust_db:value("b-dust")}));if(out){beam=out;render();}});
+ const slider=document.querySelector<HTMLInputElement>("#hour");if(slider)slider.oninput=()=>{hour=Number(slider.value);paintTwin();};
+}
+async function buildNetwork(){
+ if(!form.reportValidity())return;
+ const out=await task("Tracing line of sight and choosing relays…",()=>api("network",scenarioBody()));
+ if(!out)return;
+ net=out;lab=sim=nightResult=undefined;kills=[];hour=0;
+ $("#subtitle").textContent=`${net.site} · ${net.scenario.start} · ${net.scenario.days} days at ${net.scenario.step_h} h steps`;
+ render();
+}
+form.onsubmit=event=>{event.preventDefault();void buildNetwork();};
+$("#ora-nav").addEventListener("click",event=>{
+ const button=(event.target as HTMLElement).closest<HTMLButtonElement>("button[data-tab]");if(!button)return;
+ $("#ora-nav [aria-current]")?.removeAttribute("aria-current");button.setAttribute("aria-current","page");
+ tab=button.dataset.tab!;$("#navigation").classList.remove("open");$("#menu-toggle").setAttribute("aria-expanded","false");render();$("#title").focus({preventScroll:true});
+});
+$("#menu-toggle").onclick=()=>{const open=$("#navigation").classList.toggle("open");$("#menu-toggle").setAttribute("aria-expanded",String(open));};
+window.addEventListener("resize",paint);
+(async()=>{
+ const loaded=await task("Loading scenarios…",()=>api("config"));
+ if(!loaded)return;
+ conf=loaded;
+ const select=$<HTMLSelectElement>('select[name="scenario"]');
+ for(const name of Object.keys(conf.scenarios))select.add(new Option(name.replaceAll("_"," "),name));
+ const fill=()=>{const s=conf.scenarios[select.value];for(const k of ["candidates","max_range_km","relay_mast_m","mining_sites","extra_relays"])$<HTMLInputElement>(`[name="${k}"]`).value=String(s[k]);};
+ if(conf.scenarios.shackleton_rim_to_floor)select.value="shackleton_rim_to_floor";
+ select.onchange=fill;fill();
+ $<HTMLButtonElement>('#scenario button[type="submit"]').disabled=false;
+ await buildNetwork();
+})();

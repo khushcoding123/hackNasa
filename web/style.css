@@ -791,3 +791,5 @@ nav button[aria-current]::after { content: "↗"; margin-left: auto; }
 .track-help dl { margin-top: 16px; }
 .swatch.uncertain { display: inline-block; width: 10px; height: 8px; background: #bd864d; margin-right: 6px; }
 dd { min-width: 0; }
+.nav-link{display:block;padding:10px 12px;color:var(--muted);text-decoration:none;font-size:14px;border-radius:8px}
+.nav-link:hover,.nav-link:focus-visible{color:var(--cyan)}
