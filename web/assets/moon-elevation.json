@@ -1,0 +1,11 @@
+{
+  "width": 5760,
+  "height": 2880,
+  "encoding": "int16-le",
+  "unit": "m",
+  "referenceRadiusM": 1737400,
+  "minimumM": -8982,
+  "maximumM": 10686,
+  "registration": "pixel-center; north to south; longitude -180 to 180 eastward",
+  "source": "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/ldem_16.tif"
+}

@@ -1,0 +1,574 @@
+import {
+ BoundingSphere, Cartesian2, Cartesian3, Cartographic, Color, ColorMaterialProperty, ConstantPositionProperty, ConstantProperty, DirectionalLight, Ellipsoid, GeographicProjection,
+ Globe, HeadingPitchRange, HeightReference, LabelStyle, Math as CesiumMath, Matrix4, PolylineDashMaterialProperty, Ion,
+ ScreenSpaceEventHandler, ScreenSpaceEventType, SceneMode, SceneTransforms, ShadowMode, VerticalOrigin, Viewer, type Entity,
+} from "cesium";
+import {LANDMARKS, coordinate, type Landmark} from "./landmarks.js";
+import {addImagery, type ImageryHandle, type ImageryState} from "./imagery.js";
+import {MoonTerrainProvider, loadTerrainInfo} from "./terrain.js";
+import type {Candidate, Result} from "./types.js";
+
+const MOON = Ellipsoid.MOON, R = MOON.maximumRadius;
+Ion.defaultAccessToken = "";               // no Cesium ion: all data comes from this app or the public WMS
+Ellipsoid.default = MOON;
+
+type Mode = "map" | "3d";
+interface View { lat: number; lon: number; extent: number; heading: number; pitch: number }
+const FULL_EXTENT = 2 * R * 1.06, MIN_EXTENT = 2000, MAX_EXTENT = FULL_EXTENT * 3, ORTHO_DISTANCE = 60 * R;
+const MISSION_REGIONS: Record<string, string> = {haworth: "haworth", nobile: "nobile-rim-1", malapert: "malapert"};
+const RESEARCH = new Set(Object.keys(MISSION_REGIONS));
+const deg = CesiumMath.toDegrees, rad = CesiumMath.toRadians;
+const wrap180 = (lon: number) => ((lon + 540) % 360) - 180;
+const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]!));
+const metres = (m: number) => m >= 1000 ? `${(m / 1000).toFixed(m >= 10000 ? 0 : 1)} km` : `${Math.round(m)} m`;
+const angular = (a: Landmark, lat: number, lon: number) => {
+ const p = rad(a.lat), q = rad(lat), d = rad(a.lon - lon);
+ return Math.acos(Math.min(1, Math.max(-1, Math.sin(p) * Math.sin(q) + Math.cos(p) * Math.cos(q) * Math.cos(d)))) * R;
+};
+const smooth = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+/** Map-style red teardrop marker with a white centre; its tip sits on the surface point. */
+let pinCache = "";
+function pinImage() {
+ if (pinCache) return pinCache;
+ const c = document.createElement("canvas"); c.width = 68; c.height = 96;
+ const g = c.getContext("2d")!;
+ g.shadowColor = "rgba(0,0,0,.55)"; g.shadowBlur = 6; g.shadowOffsetY = 3;
+ g.beginPath(); g.moveTo(34, 92); g.bezierCurveTo(34, 92, 6, 56, 6, 33); g.arc(34, 33, 28, Math.PI, 0); g.bezierCurveTo(62, 56, 34, 92, 34, 92); g.closePath();
+ g.fillStyle = "#ea4335"; g.fill(); g.shadowColor = "transparent"; g.lineWidth = 3; g.strokeStyle = "#b31412"; g.stroke();
+ g.beginPath(); g.arc(34, 33, 11, 0, 2 * Math.PI); g.fillStyle = "#fff"; g.fill();
+ return pinCache = c.toDataURL();
+}
+
+export interface MoonHooks {
+ /** The user chose to test a dropped pin as the mission location. `site` is the region whose terrain covers it. */
+ onUsePin?: (lat: number, lon: number, site: string) => void;
+ onChooseRegion?: (siteId: string) => void;
+ onSelectCandidate?: (candidate: Candidate) => void;
+}
+
+/** CesiumJS Moon workspace. Visual and geographic only: all mission values come from the mission API. */
+export class MoonView {
+ private viewer: Viewer | undefined;
+ private terrain: MoonTerrainProvider | undefined;
+ private imagery: ImageryHandle | undefined;
+ private mode: Mode = "map";
+ private disposed = false;
+ private labelsOn = true;
+ private view: View = {lat: 8, lon: 12, extent: FULL_EXTENT, heading: 0, pitch: -Math.PI / 2};
+ private animation = 0;
+ private labelButtons: {feature: Landmark; button: HTMLButtonElement}[] = [];
+ private activeLandmark = "";
+ private result: Result | undefined;
+ private missionVisible = true;
+ private showAll = false;
+ private index = 0;
+ private disabled = new Set<string>();
+ private selected = "";
+ private towers = new Map<string, {entity: Entity; link?: Entity}>();
+ private lander: Entity | undefined;
+ private observer: ResizeObserver;
+ private handler: ScreenSpaceEventHandler | undefined;
+ private hover = {x: 0, y: 0, frame: 0};
+ private statusTimer = 0;
+ private settled = false;
+ private pin: {lat: number; lon: number} | undefined;
+ private lightYaw = 40;
+ private lightElevation = 30;
+
+ constructor(private root: HTMLElement, private hooks: MoonHooks = {}) {
+  root.classList.add("moon-workspace");
+  root.dataset.mode = "map";
+  root.innerHTML = `
+  <div class="vw-canvas" id="cesium-host"></div>
+  <div class="vw-labels" aria-label="Lunar feature labels"></div>
+  <div class="vw-left">
+   <div class="vw-search" role="search"><span class="vw-search-icon" aria-hidden="true">⌕</span><input id="vw-search" type="search" placeholder="Search landmarks or regions" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="vw-results" aria-label="Search lunar landmarks and mission regions"><ul id="vw-results" role="listbox" hidden></ul></div>
+   <div class="vw-layers"><button class="vw-chip" data-layers aria-expanded="false" aria-controls="vw-layer-menu">Layers</button>
+    <div id="vw-layer-menu" class="vw-menu" hidden>
+     <label><input type="checkbox" data-labels checked> Feature labels</label>
+     <label class="vw-mission-only" hidden><input type="checkbox" data-mission checked> Mission overlay</label>
+     <label class="vw-mission-only" hidden><input type="checkbox" data-candidates> Screened candidates</label>
+     <label>Imagery <select data-imagery><option value="auto">LROC WAC (live)</option><option value="bundled">Bundled (lower detail)</option></select></label>
+     <p class="vw-note">Terrain is shown at true 1× scale.</p><p class="vw-note">Right-click (or long-press) the Moon to drop a test pin.</p>
+    </div></div>
+  </div>
+  <div class="vw-right" role="group" aria-label="Map controls">
+   <div class="vw-modes" role="group" aria-label="View mode"><button data-mode="map" aria-pressed="true">Map</button><button data-mode="3d" aria-pressed="false">3D</button></div>
+   <div class="vw-stack">
+    <button data-nav="in" aria-label="Zoom in">+</button><button data-nav="out" aria-label="Zoom out">−</button>
+    <button data-nav="north" aria-label="Reset north and view" title="Reset view">⌖</button>
+    <button data-nav="tilt-up" class="vw-3d" aria-label="Tilt up" title="Tilt up" hidden>▲</button><button data-nav="tilt-down" class="vw-3d" aria-label="Tilt down" title="Tilt down" hidden>▼</button>
+   </div>
+  </div>
+  <div class="vw-inspector" role="region" aria-label="Location inspector" aria-live="polite" hidden></div>
+  <div class="vw-toast" role="status" aria-live="polite"></div>
+  <div class="vw-bottom">
+   <span class="vw-readout" data-coords>Hover or click the Moon</span>
+   <span class="vw-scale"><i data-scalebar></i><span data-scaletext></span></span>
+   <span class="vw-res" data-res></span>
+   <span class="vw-light vw-3d" hidden title="Drag to change the inspection light. It does not change mission dates, solar calculations, or communication results.">Interactive lighting</span>
+   <span class="vw-credit">Imagery: <a href="https://quickmap.lroc.im-ldi.com/" target="_blank" rel="noopener noreferrer">LROC QuickMap / NASA GSFC / ASU</a> · Elevation: NASA LOLA · Rendered with <a href="https://cesium.com/platform/cesiumjs/" target="_blank" rel="noopener noreferrer">CesiumJS</a></span>
+  </div>`;
+  this.observer = new ResizeObserver(() => { if (this.viewer && !this.animation) this.apply(this.view); this.positionLabels(); });
+  try { this.create(); }
+  catch (error) { console.error("Moon viewer failed to start", error); this.fallback(); return; }
+  this.bindControls();
+  this.observer.observe(root);
+  void this.attachTerrain();
+ }
+
+ // ---------- scene ----------
+ private create() {
+  const host = this.root.querySelector<HTMLElement>("#cesium-host")!;
+  const viewer = new Viewer(host, {
+   baseLayer: false, baseLayerPicker: false, geocoder: false, homeButton: false, sceneModePicker: false, navigationHelpButton: false,
+   animation: false, timeline: false, fullscreenButton: false, infoBox: false, selectionIndicator: false, vrButton: false,
+   globe: new Globe(MOON), skyBox: false, skyAtmosphere: false, scene3DOnly: true, requestRenderMode: true, maximumRenderTimeChange: Infinity,
+   mapProjection: new GeographicProjection(MOON), sceneMode: SceneMode.SCENE3D, msaaSamples: 4,
+   contextOptions: {webgl: {alpha: false, antialias: true, powerPreference: "high-performance"}},
+  });
+  this.viewer = viewer;
+  const scene = viewer.scene;
+  (viewer.cesiumWidget.creditContainer as HTMLElement).style.display = "none";
+  scene.backgroundColor = Color.BLACK;
+  if (scene.sun) scene.sun.show = false; if (scene.moon) scene.moon.show = false; scene.fog.enabled = false;
+  scene.globe.showGroundAtmosphere = false; scene.globe.baseColor = Color.fromCssColorString("#26272a");
+  scene.globe.depthTestAgainstTerrain = true; scene.globe.maximumScreenSpaceError = 2.6;
+  scene.globe.lightingFadeInDistance = 1e12; scene.globe.lightingFadeOutDistance = 1e12; scene.globe.dynamicAtmosphereLighting = false;
+  scene.light = new DirectionalLight({direction: new Cartesian3(1, 0, 0), intensity: 2});
+  scene.shadowMap.softShadows = true; scene.shadowMap.size = 4096; scene.shadowMap.darkness = 0.42; scene.shadowMap.maximumDistance = 60_000;
+  scene.shadowMap.enabled = false; scene.globe.shadows = ShadowMode.DISABLED;
+  const camera = scene.camera;
+  camera.percentageChanged = 0.0005;
+  const control = scene.screenSpaceCameraController;
+  control.enableCollisionDetection = true; control.minimumZoomDistance = 300; control.maximumZoomDistance = 8 * R;
+  control.inertiaSpin = 0.7; control.inertiaZoom = 0.6;
+  this.imagery = addImagery(viewer, state => this.onImageryState(state));
+  // Continuous rendering only while the camera is moving or lighting is being dragged: idle frames cost nothing.
+  camera.moveStart.addEventListener(() => { scene.requestRenderMode = false; });
+  camera.moveEnd.addEventListener(() => { scene.requestRenderMode = true; scene.requestRender(); this.view = this.readView(); this.clampZoom(); this.refreshReadouts(); });
+  camera.changed.addEventListener(() => { this.clampZoom(); });
+  scene.preRender.addEventListener(() => { if (this.mode === "3d") this.updateLight(); });
+  scene.postRender.addEventListener(() => { this.positionLabels(); if (!scene.globe.tilesLoaded) scene.requestRender(); });   // keep streaming until tiles settle, then idle
+  scene.globe.tileLoadProgressEvent.addEventListener(count => { this.root.dataset.loading = String(count); scene.requestRender(); if (count === 0) this.refreshReadouts(); });
+  this.setupLabels();
+  this.setupPicking();
+  this.apply(this.view);
+  this.applyMode();
+  // The first frames lay out the canvas; re-apply the initial view once it has a real size, then trust the camera.
+  requestAnimationFrame(() => requestAnimationFrame(() => { if (this.viewer && !this.disposed) { this.apply(this.view); this.settled = true; this.refreshReadouts(); } }));
+ }
+ private fallback() {
+  this.root.innerHTML = `<div class="vw-fallback"><span class="fallback-moon" aria-hidden="true"></span><p>The 3D Moon needs WebGL, which is unavailable in this browser. You can still configure a mission and use the 2D maps and tables in the analysis.</p></div>`;
+ }
+ private async attachTerrain() {
+  try {
+   const info = await loadTerrainInfo();
+   if (this.disposed || !this.viewer) return;
+   this.terrain = new MoonTerrainProvider(info);
+   this.viewer.scene.terrainProvider = this.terrain as unknown as typeof this.viewer.scene.terrainProvider;
+   this.viewer.scene.requestRender();
+   this.root.dataset.terrain = "ready";
+  } catch {
+   this.root.dataset.terrain = "unavailable";
+   this.toast("Elevation service unavailable. The Moon is shown without terrain relief.", true);
+  }
+ }
+
+ // ---------- camera ----------
+ private aspect() { const scene = this.viewer!.scene; return scene.drawingBufferWidth / Math.max(1, scene.drawingBufferHeight); }
+ private canvasCenter() { const c = this.viewer!.scene.canvas; return new Cartesian2(c.clientWidth / 2, c.clientHeight / 2); }
+ private surfacePoint(position: Cartesian2) {
+  const scene = this.viewer!.scene, ray = scene.camera.getPickRay(position);
+  if (!ray) return undefined;
+  return scene.globe.pick(ray, scene) ?? scene.camera.pickEllipsoid(position, MOON);
+ }
+ /** Current location, zoom (vertical extent in metres) and orientation, whichever projection is active. */
+ private readView(): View {
+  const camera = this.viewer!.scene.camera;
+  const point = this.surfacePoint(this.canvasCenter());
+  if (!point) return this.view;
+  const c = Cartographic.fromCartesian(point, MOON)!;
+  let extent: number;
+  const frustum = camera.frustum as unknown as {width?: number; aspectRatio: number; fovy?: number};
+  if (this.mode === "map") extent = (frustum.width ?? FULL_EXTENT) / this.aspect();
+  else extent = 2 * Cartesian3.distance(camera.positionWC, point) * Math.tan((frustum.fovy ?? Math.PI / 4) / 2);
+  return {lat: deg(c.latitude), lon: wrap180(deg(c.longitude)), extent: Math.min(MAX_EXTENT, Math.max(MIN_EXTENT, extent)), heading: camera.heading, pitch: this.mode === "map" ? -Math.PI / 2 : Math.min(-0.15, camera.pitch)};
+ }
+ private apply(view: View) {
+  const viewer = this.viewer; if (!viewer) return;
+  const camera = viewer.scene.camera;
+  view = {...view, extent: Math.min(MAX_EXTENT, Math.max(MIN_EXTENT, view.extent))};
+  const target = Cartesian3.fromDegrees(view.lon, view.lat, 0, MOON);
+  if (this.mode === "map") {
+   camera.switchToOrthographicFrustum();
+   camera.lookAt(target, new HeadingPitchRange(view.heading, -Math.PI / 2, ORTHO_DISTANCE));
+   viewer.resize();
+   const frustum = camera.frustum as unknown as {width: number; aspectRatio: number};
+   frustum.aspectRatio = viewer.scene.drawingBufferWidth / viewer.scene.drawingBufferHeight;
+   frustum.width = view.extent * frustum.aspectRatio;
+  } else {
+   camera.switchToPerspectiveFrustum();
+   const frustum = camera.frustum as unknown as {fov: number; fovy: number};
+   frustum.fov = Math.PI / 4;
+   const distance = view.extent / 2 / Math.tan(frustum.fovy / 2);
+   camera.lookAt(target, new HeadingPitchRange(view.heading, view.pitch, distance));
+  }
+  camera.lookAtTransform(Matrix4.IDENTITY);
+  this.view = view;
+  viewer.scene.requestRender();
+ }
+ private clampZoom() {
+  if (this.mode !== "map" || !this.viewer) return;
+  const frustum = this.viewer.scene.camera.frustum as unknown as {width?: number; aspectRatio: number};
+  if (!frustum.width) return;
+  const extent = frustum.width / this.aspect();
+  if (extent < MIN_EXTENT) frustum.width = MIN_EXTENT * this.aspect();
+  else if (extent > MAX_EXTENT) frustum.width = MAX_EXTENT * this.aspect();
+ }
+ private defaultPitch(extent: number) { return -Math.PI / 2 + rad(42) * smooth(1.8 * R, 0.35 * R, extent); }
+ /** Smoothly move to a view without discarding mission state; imagery and terrain continue to stream meanwhile. */
+ flyTo(target: Partial<View>, ms = 1100) {
+  if (!this.viewer) return;
+  cancelAnimationFrame(this.animation);
+  const from = this.readView(), to: View = {...from, ...target};
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const a = Cartesian3.fromDegrees(from.lon, from.lat, 0, MOON), b = Cartesian3.fromDegrees(to.lon, to.lat, 0, MOON);
+  const angle = Cartesian3.angleBetween(a, b);
+  let dh = to.heading - from.heading; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+  const started = performance.now(), scene = this.viewer.scene;
+  const done = () => { this.animation = 0; scene.requestRenderMode = true; scene.requestRender(); this.view = this.readView(); this.refreshReadouts(); };
+  if (reduce || ms <= 0) { this.apply(to); done(); return; }
+  scene.requestRenderMode = false;
+  const step = (now: number) => {
+   if (this.disposed) return;
+   const t = Math.min(1, (now - started) / ms), e = t * t * (3 - 2 * t);
+   const sin = Math.sin(angle), position = angle < 1e-6 ? b : Cartesian3.add(Cartesian3.multiplyByScalar(a, Math.sin((1 - e) * angle) / sin, new Cartesian3()), Cartesian3.multiplyByScalar(b, Math.sin(e * angle) / sin, new Cartesian3()), new Cartesian3());
+   const c = Cartographic.fromCartesian(position, MOON)!;
+   // A short arc outward keeps long hops legible: zoom out in the middle, then back in.
+   const arc = 1 + Math.min(2.2, angle * 1.6) * Math.sin(Math.PI * e);
+   this.apply({lat: deg(c.latitude), lon: wrap180(deg(c.longitude)), extent: Math.exp(Math.log(from.extent) * (1 - e) + Math.log(to.extent) * e) * arc,
+    heading: from.heading + dh * e, pitch: from.pitch + (to.pitch - from.pitch) * e});
+   if (t < 1) this.animation = requestAnimationFrame(step); else { this.apply(to); done(); }
+  };
+  this.animation = requestAnimationFrame(step);
+ }
+ flyToPlace(lat: number, lon: number, extent = 24_000) {
+  const keep3d = this.mode === "3d";
+  this.flyTo({lat, lon, extent, heading: 0, pitch: keep3d ? this.defaultPitch(extent) : -Math.PI / 2});
+ }
+ /** Move to a mission region after a successful calculation. */
+ flyToSite(lat: number, lon: number, extent = 16_000) { this.flyToPlace(lat, lon, extent); }
+ setMode(mode: Mode) {
+  if (!this.viewer || mode === this.mode) return;
+  const view = this.readView();
+  this.mode = mode;
+  this.applyMode();
+  // Preserve the location and zoom; 3D adds perspective and tilt.
+  this.apply({...view, pitch: mode === "3d" ? this.defaultPitch(view.extent) : -Math.PI / 2});
+  this.refreshReadouts();
+ }
+ get currentMode() { return this.mode; }
+ private applyMode() {
+  const viewer = this.viewer!, scene = viewer.scene, three = this.mode === "3d";
+  this.root.dataset.mode = this.mode;
+  scene.globe.enableLighting = three;
+  scene.shadowMap.enabled = three; scene.globe.shadows = three ? ShadowMode.ENABLED : ShadowMode.DISABLED;
+  const control = scene.screenSpaceCameraController;
+  control.enableTilt = three; control.enableLook = three;
+  this.imagery?.setMode(this.mode);
+  this.root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === this.mode)));
+  this.root.querySelectorAll<HTMLElement>(".vw-3d").forEach(node => { node.hidden = !three; });
+  scene.requestRender();
+ }
+ /** Directional light offset above and beside the camera, so dragging sweeps light across slopes. */
+ private updateLight() {
+  const scene = this.viewer!.scene, camera = scene.camera;
+  const e = rad(this.lightElevation), a = rad(this.lightYaw);
+  const toLight = new Cartesian3();
+  Cartesian3.multiplyByScalar(camera.directionWC, -Math.cos(e) * Math.cos(a), toLight);
+  Cartesian3.add(toLight, Cartesian3.multiplyByScalar(camera.upWC, Math.sin(e), new Cartesian3()), toLight);
+  Cartesian3.add(toLight, Cartesian3.multiplyByScalar(camera.rightWC, Math.cos(e) * Math.sin(a), new Cartesian3()), toLight);
+  Cartesian3.negate(toLight, toLight);
+  Cartesian3.normalize(toLight, (scene.light as DirectionalLight).direction);
+  const height = Math.max(this.view.extent, 1000);
+  scene.shadowMap.maximumDistance = Math.min(8e5, Math.max(8000, height * 3));
+ }
+
+ // ---------- UI ----------
+ private bindControls() {
+  const q = <T extends HTMLElement>(s: string) => this.root.querySelector<T>(s)!;
+  this.root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach(b => b.onclick = () => this.setMode(b.dataset.mode as Mode));
+  this.root.querySelectorAll<HTMLButtonElement>("[data-nav]").forEach(b => b.onclick = () => this.navigate(b.dataset.nav!));
+  const layers = q<HTMLButtonElement>("[data-layers]"), menu = q("#vw-layer-menu");
+  layers.onclick = () => { menu.hidden = !menu.hidden; layers.setAttribute("aria-expanded", String(!menu.hidden)); };
+  q<HTMLInputElement>("[data-labels]").onchange = e => { this.labelsOn = (e.target as HTMLInputElement).checked; this.positionLabels(); };
+  q<HTMLInputElement>("[data-mission]").onchange = e => this.setMissionVisible((e.target as HTMLInputElement).checked);
+  q<HTMLInputElement>("[data-candidates]").onchange = e => { this.showAll = (e.target as HTMLInputElement).checked; this.refreshMission(); };
+  q<HTMLSelectElement>("[data-imagery]").onchange = e => this.imagery?.setChoice((e.target as HTMLSelectElement).value as "auto" | "bundled");
+  const canvas = this.viewer!.scene.canvas;
+  canvas.tabIndex = 0;
+  canvas.setAttribute("aria-label", "Interactive Moon. Drag to rotate, scroll or pinch to zoom, click for location details, right-click or long-press to drop a pin. Arrow keys rotate; plus and minus zoom; 0 resets.");
+  canvas.addEventListener("keydown", e => {
+   const map: Record<string, string> = {ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down", "+": "in", "=": "in", "-": "out", "0": "north", Home: "north"};
+   if (map[e.key]) { e.preventDefault(); this.navigate(map[e.key]); }
+  });
+  canvas.addEventListener("pointerdown", () => { this.activeLandmark = ""; });
+  this.bindSearch();
+ }
+ private navigate(action: string) {
+  if (!this.viewer) return;
+  const v = this.readView(), pan = v.extent / 5 / R * 180 / Math.PI;
+  const cos = Math.max(0.05, Math.cos(rad(v.lat)));
+  switch (action) {
+   case "in": return this.flyTo({extent: v.extent * 0.55}, 350);
+   case "out": return this.flyTo({extent: v.extent / 0.55}, 350);
+   case "left": return this.flyTo({lon: wrap180(v.lon - pan / cos)}, 250);
+   case "right": return this.flyTo({lon: wrap180(v.lon + pan / cos)}, 250);
+   case "up": return this.flyTo({lat: Math.min(89.9, v.lat + pan)}, 250);
+   case "down": return this.flyTo({lat: Math.max(-89.9, v.lat - pan)}, 250);
+   case "tilt-up": return this.flyTo({pitch: Math.max(-Math.PI / 2, v.pitch - rad(10))}, 250);
+   case "tilt-down": return this.flyTo({pitch: Math.min(-0.15, v.pitch + rad(10))}, 250);
+   default: { const full = FULL_EXTENT / Math.min(1, this.aspect()); return this.flyTo({lat: 8, lon: 12, extent: full, heading: 0, pitch: this.mode === "3d" ? this.defaultPitch(full) : -Math.PI / 2}, 700); }
+  }
+ }
+ private onImageryState(state: ImageryState) {
+  this.root.dataset.imagery = state;
+  if (state === "fallback") this.toast("Live lunar imagery is unavailable. Showing the bundled lower-detail color map. Your view and mission are unchanged.", true, true);
+  else if (state === "live") this.toast("");
+  this.refreshReadouts();
+ }
+ private toast(message: string, error = false, retry = false) {
+  const node = this.root.querySelector<HTMLElement>(".vw-toast")!;
+  clearTimeout(this.statusTimer);
+  node.classList.toggle("error", error);
+  node.innerHTML = message ? `<span>${escapeHtml(message)}</span>${retry ? '<button data-retry>Retry live imagery</button>' : ""}` : "";
+  node.hidden = !message;
+  node.querySelector<HTMLButtonElement>("[data-retry]")?.addEventListener("click", () => { this.imagery?.retry(); this.toast(""); });
+  if (message && !retry) this.statusTimer = window.setTimeout(() => { node.hidden = true; }, 9000);
+ }
+
+ // ---------- readouts ----------
+ private refreshReadouts() {
+  if (!this.viewer) return;
+  const v = this.view, scene = this.viewer.scene;
+  const point = this.surfacePoint(this.canvasCenter());
+  let perPixel = v.extent / scene.canvas.clientHeight;
+  if (point) {
+   const size = scene.camera.getPixelSize(new BoundingSphere(point, 1), scene.drawingBufferWidth, scene.drawingBufferHeight);
+   if (Number.isFinite(size) && size > 0) perPixel = size * scene.drawingBufferWidth / scene.canvas.clientWidth;
+  }
+  const target = perPixel * 110, magnitude = 10 ** Math.floor(Math.log10(target));
+  const nice = [1, 2, 5, 10].map(k => k * magnitude).find(m => m >= target * 0.6) ?? magnitude;
+  this.root.querySelector<HTMLElement>("[data-scalebar]")!.style.width = `${Math.max(24, nice / perPixel)}px`;
+  this.root.querySelector<HTMLElement>("[data-scaletext]")!.textContent = metres(nice);
+  const terrain = this.terrain?.resolutionAt(v.lat, v.lon);
+  const imagery = this.imagery?.describe(this.mode) ?? "";
+  const display = perPixel;
+  const terrainText = terrain ? `${terrain.resolutionM >= 1000 ? `${(terrain.resolutionM / 1000).toFixed(1)} km` : `${Math.round(terrain.resolutionM)} m`}/px LOLA` : this.root.dataset.terrain === "unavailable" ? "unavailable" : "loading";
+  this.root.querySelector<HTMLElement>("[data-res]")!.innerHTML = `<span>Imagery: ${escapeHtml(imagery)}</span><span>Terrain: ${terrainText}</span><span>Screen: ${display >= 1000 ? (display / 1000).toFixed(1) + " km" : display.toFixed(display < 10 ? 1 : 0) + " m"}/px</span>`;
+  this.root.dataset.extentM = String(Math.round(v.extent));
+  this.root.dataset.centerLat = v.lat.toFixed(3); this.root.dataset.centerLon = v.lon.toFixed(3);
+  this.root.dataset.screenMpp = perPixel.toFixed(1);
+  this.root.dataset.terrainMpp = terrain ? String(Math.round(terrain.resolutionM)) : "";
+  this.root.dataset.tileFailures = String(this.terrain?.failures ?? 0);
+ }
+
+ // ---------- picking, inspector ----------
+ private setupPicking() {
+  const viewer = this.viewer!, scene = viewer.scene;
+  this.handler = new ScreenSpaceEventHandler(scene.canvas);
+  this.handler.setInputAction((event: {position: Cartesian2}) => {
+   const picked = scene.pick(event.position);
+   const id = picked?.id && typeof picked.id === "object" && "id" in picked.id ? String((picked.id as Entity).id) : "";
+   if (id.startsWith("tower:")) { const c = this.result?.candidates.find(c => c.id === id.slice(6)); if (c) { this.hooks.onSelectCandidate?.(c); return; } }
+   const point = this.surfacePoint(event.position);
+   if (point) this.inspect(point);
+  }, ScreenSpaceEventType.LEFT_CLICK);
+  const drop = (position: Cartesian2) => { const point = this.surfacePoint(position); if (point) this.dropPin(point); };
+  this.handler.setInputAction((event: {position: Cartesian2}) => drop(event.position), ScreenSpaceEventType.RIGHT_CLICK);
+  scene.canvas.addEventListener("contextmenu", e => e.preventDefault());
+  let press = 0, start = [0, 0];   // touch: long-press drops a pin
+  scene.canvas.addEventListener("pointerdown", e => { if (e.pointerType !== "touch") return; start = [e.clientX, e.clientY]; const r = scene.canvas.getBoundingClientRect(); press = window.setTimeout(() => drop(new Cartesian2(start[0] - r.left, start[1] - r.top)), 650); });
+  for (const type of ["pointerup", "pointercancel"]) scene.canvas.addEventListener(type, () => clearTimeout(press));
+  scene.canvas.addEventListener("pointermove", e => { if (e.pointerType === "touch" && Math.hypot(e.clientX - start[0], e.clientY - start[1]) > 8) clearTimeout(press); });
+  this.handler.setInputAction((event: {endPosition: Cartesian2}) => {
+   this.hover.x = event.endPosition.x; this.hover.y = event.endPosition.y;
+   if (this.hover.frame) return;
+   this.hover.frame = requestAnimationFrame(() => {
+    this.hover.frame = 0;
+    const point = this.viewer && this.surfacePoint(new Cartesian2(this.hover.x, this.hover.y));
+    const out = this.root.querySelector<HTMLElement>("[data-coords]");
+    if (!out) return;
+    if (!point) { out.textContent = "Off the Moon"; return; }
+    const c = Cartographic.fromCartesian(point, MOON)!;
+    out.textContent = `${coordinate(deg(c.latitude), deg(c.longitude))} · ${(c.height / 1000).toFixed(2)} km`;
+   });
+  }, ScreenSpaceEventType.MOUSE_MOVE);
+ }
+ private inspect(point: Cartesian3) {
+  const c = Cartographic.fromCartesian(point, MOON)!, lat = deg(c.latitude), lon = wrap180(deg(c.longitude));
+  const near = [...LANDMARKS].map(f => ({f, d: angular(f, lat, lon)})).sort((a, b) => a.d - b.d).slice(0, 3);
+  const terrain = this.terrain?.resolutionAt(lat, lon);
+  const node = this.root.querySelector<HTMLElement>(".vw-inspector")!;
+  const region = near.find(n => RESEARCH.has(n.f.id) && n.d < 60_000)?.f;
+  node.innerHTML = `<button class="vw-close" aria-label="Close inspector">×</button><span class="eyebrow">LOCATION</span><h3>${coordinate(lat, lon)}</h3>
+   <dl><dt>Terrain elevation</dt><dd>${Math.round(c.height).toLocaleString()} m <small>above the 1,737.4 km reference sphere</small></dd>
+   <dt>Elevation source</dt><dd>${terrain ? `LOLA · about ${Math.round(terrain.resolutionM).toLocaleString()} m/px` : "Loading terrain tiles…"}</dd>
+   <dt>Nearby features</dt><dd><ul>${near.map(n => `<li><button data-place="${n.f.id}">${escapeHtml(n.f.name)}</button> <small>${n.d < 1000 ? "<1" : Math.round(n.d / 1000).toLocaleString()} km</small></li>`).join("")}</ul></dd></dl>
+   ${region ? `<button class="primary" data-choose="${MISSION_REGIONS[region.id]}">Use ${escapeHtml(region.name)} for a mission →</button>` : ""}`;
+  node.hidden = false;
+  node.querySelector<HTMLButtonElement>(".vw-close")!.onclick = () => { node.hidden = true; };
+  node.querySelectorAll<HTMLButtonElement>("[data-place]").forEach(b => b.onclick = () => { const f = LANDMARKS.find(f => f.id === b.dataset.place); if (f) this.focusLandmark(f); });
+  node.querySelector<HTMLButtonElement>("[data-choose]")?.addEventListener("click", e => this.hooks.onChooseRegion?.((e.currentTarget as HTMLElement).dataset.choose!));
+ }
+
+ /** Drop (or move) the test pin. It can be used as the mission location when it lies inside a supported terrain crop. */
+ private dropPin(point: Cartesian3) {
+  const viewer = this.viewer!, c = Cartographic.fromCartesian(point, MOON)!, lat = deg(c.latitude), lon = wrap180(deg(c.longitude));
+  const position = Cartesian3.fromDegrees(lon, lat, c.height + 5, MOON);
+  const existing = viewer.entities.getById("pin");
+  if (existing) existing.position = new ConstantPositionProperty(position);
+  else viewer.entities.add({id: "pin", position, billboard: {image: pinImage(), width: 34, height: 48, verticalOrigin: VerticalOrigin.BOTTOM, disableDepthTestDistance: 3e5}});
+  this.pin = {lat, lon};
+  const region = this.terrain?.regionAt(lat, lon);
+  const node = this.root.querySelector<HTMLElement>(".vw-inspector")!;
+  node.innerHTML = `<button class="vw-close" aria-label="Close pin card">×</button><span class="eyebrow">PIN · TEST LOCATION</span><h3>${coordinate(lat, lon)}</h3>
+   <dl><dt>Terrain elevation</dt><dd>${Math.round(c.height).toLocaleString()} m</dd></dl>
+   ${region ? `<p class="vw-note">Inside the ${escapeHtml(region.name)} 20 m terrain, so a mission can be tested here.</p><button class="primary" data-use-pin>Test a mission at this pin →</button>`
+    : `<p class="vw-note">Mission calculation needs 20 m terrain, available within about 20 km of Haworth, Nobile Rim 1 or Malapert Massif. Drop the pin there to test it.</p>`}
+   <button data-clear-pin>Remove pin</button>`;
+  node.hidden = false;
+  node.querySelector<HTMLButtonElement>(".vw-close")!.onclick = () => { node.hidden = true; };
+  node.querySelector<HTMLButtonElement>("[data-clear-pin]")!.onclick = () => { this.clearPin(); node.hidden = true; };
+  node.querySelector<HTMLButtonElement>("[data-use-pin]")?.addEventListener("click", () => this.hooks.onUsePin?.(lat, lon, region!.id));
+  viewer.scene.requestRender();
+ }
+ clearPin() { this.viewer?.entities.removeById("pin"); this.pin = undefined; this.viewer?.scene.requestRender(); }
+
+ // ---------- search, labels ----------
+ private bindSearch() {
+  const input = this.root.querySelector<HTMLInputElement>("#vw-search")!, list = this.root.querySelector<HTMLUListElement>("#vw-results")!;
+  let items: Landmark[] = [], cursor = -1;
+  const close = () => { list.hidden = true; input.setAttribute("aria-expanded", "false"); cursor = -1; };
+  const pick = (feature: Landmark) => { input.value = feature.name; close(); this.focusLandmark(feature); };
+  const render = () => {
+   const query = input.value.trim().toLowerCase();
+   items = query ? LANDMARKS.filter(f => (f.name + " " + f.kind).toLowerCase().includes(query)).slice(0, 7) : [];
+   list.innerHTML = items.map((f, i) => `<li role="option" id="vw-opt-${i}" data-i="${i}" aria-selected="${i === cursor}"><strong>${escapeHtml(f.name)}</strong><small>${RESEARCH.has(f.id) ? "Mission region" : escapeHtml(f.kind)}</small></li>`).join("") || (query ? '<li class="empty">No matching landmark or region</li>' : "");
+   list.hidden = !query; input.setAttribute("aria-expanded", String(!!query));
+  };
+  input.oninput = () => { cursor = -1; render(); };
+  input.onkeydown = e => {
+   if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); cursor = (cursor + (e.key === "ArrowDown" ? 1 : -1) + items.length) % Math.max(1, items.length); render(); input.setAttribute("aria-activedescendant", `vw-opt-${cursor}`); }
+   else if (e.key === "Enter") { const f = items[Math.max(0, cursor)]; if (f) { e.preventDefault(); pick(f); } }
+   else if (e.key === "Escape") close();
+  };
+  list.onmousedown = e => { const li = (e.target as HTMLElement).closest<HTMLElement>("li[data-i]"); if (li) { e.preventDefault(); pick(items[Number(li.dataset.i)]); } };
+  input.onblur = () => setTimeout(close, 120);
+ }
+ private setupLabels() {
+  const layer = this.root.querySelector(".vw-labels")!;
+  this.labelButtons = LANDMARKS.map(feature => {
+   const button = document.createElement("button"); button.className = "vw-label"; button.textContent = feature.name; button.hidden = true; button.tabIndex = -1;
+   button.onclick = () => this.focusLandmark(feature); layer.append(button);
+   return {feature, button};
+  });
+ }
+ focusLandmark(feature: Landmark) {
+  this.activeLandmark = feature.id;
+  const extent = RESEARCH.has(feature.id) ? 24_000 : feature.kind.includes("pole") || feature.kind.includes("Hemisphere") ? 1_800_000 : feature.kind.includes("sea") ? 1_200_000 : 300_000;
+  this.flyToPlace(feature.lat, feature.lon, extent);
+  const point = Cartesian3.fromDegrees(feature.lon, feature.lat, 0, MOON);
+  setTimeout(() => { if (!this.disposed) this.inspect(this.viewer ? (this.surfacePoint(this.canvasCenter()) ?? point) : point); }, 1250);
+ }
+ private positionLabels() {
+  if (!this.viewer) return;
+  const scene = this.viewer.scene, stage = this.root, w = stage.clientWidth, h = stage.clientHeight;
+  const camera = scene.camera, boxes: {x: number; y: number; w: number; h: number}[] = [];
+  const extent = this.view.extent, detailed = extent < 1.5 * R;
+  const ordered = [...this.labelButtons].sort((a, b) => Number(b.feature.id === this.activeLandmark) - Number(a.feature.id === this.activeLandmark));
+  for (const {feature, button} of ordered) {
+   button.hidden = true;
+   if (!this.labelsOn) continue;
+   if (feature.minor && !detailed && feature.id !== this.activeLandmark) continue;
+   const point = Cartesian3.fromDegrees(feature.lon, feature.lat, 0, MOON), normal = Cartesian3.normalize(point, new Cartesian3());
+   const toCamera = Cartesian3.normalize(Cartesian3.subtract(camera.positionWC, point, new Cartesian3()), new Cartesian3());
+   if (Cartesian3.dot(normal, toCamera) < 0.08) continue;                      // behind the Moon
+   const screen = SceneTransforms.worldToWindowCoordinates(scene, point);
+   if (!screen) continue;
+   const width = Math.min(190, feature.name.length * 7 + 26), height = 26;
+   if (screen.x < width / 2 + 8 || screen.x > w - width / 2 - 8 || screen.y < 60 || screen.y > h - 70) continue;
+   if (boxes.some(b => Math.abs(screen.x - b.x) < (width + b.w) / 2 + 6 && Math.abs(screen.y - b.y) < (height + b.h) / 2 + 4)) continue;
+   boxes.push({x: screen.x, y: screen.y, w: width, h: height});
+   button.hidden = false; button.style.left = `${screen.x}px`; button.style.top = `${screen.y}px`;
+   button.classList.toggle("active", feature.id === this.activeLandmark);
+   button.classList.toggle("region", RESEARCH.has(feature.id));
+  }
+ }
+
+ // ---------- mission overlay ----------
+ /** Exploration-only until a mission run succeeds. */
+ setMission(result: Result | undefined) {
+  this.result = result; this.index = 0; this.disabled = new Set(); this.selected = result?.recommended[0] ?? "";
+  this.root.querySelectorAll<HTMLElement>(".vw-mission-only").forEach(node => { node.hidden = !result; });
+  this.refreshMission();
+ }
+ setMissionVisible(visible: boolean) {
+  this.missionVisible = visible;
+  const box = this.root.querySelector<HTMLInputElement>("[data-mission]"); if (box) box.checked = visible;
+  this.refreshMission();
+ }
+ update(index: number, disabled: Set<string>, selected: string) {
+  if (this.index === index && this.selected === selected && [...this.disabled].join() === [...disabled].join()) return;
+  this.index = index; this.disabled = new Set(disabled); this.selected = selected; this.refreshMission();
+ }
+ private refreshMission() {
+  const viewer = this.viewer; if (!viewer) return;
+  const r = this.result;
+  if (!r || !this.missionVisible) { for (const e of [...viewer.entities.values]) if (e.id !== "pin") viewer.entities.remove(e); this.towers.clear(); this.lander = undefined; viewer.scene.requestRender(); return; }
+  if (!this.lander) {
+   this.lander = viewer.entities.add({id: "lander", position: Cartesian3.fromDegrees(r.site.lon, r.site.lat, r.site.elevation + 4, MOON),
+    point: {pixelSize: 12, color: Color.fromCssColorString("#84deff"), outlineColor: Color.BLACK, outlineWidth: 2, heightReference: HeightReference.NONE, disableDepthTestDistance: 2e5},
+    label: {text: "LANDER", font: "600 12px IBM Plex Mono, monospace", fillColor: Color.fromCssColorString("#84deff"), outlineColor: Color.BLACK, outlineWidth: 3, style: LabelStyle.FILL_AND_OUTLINE, verticalOrigin: VerticalOrigin.BOTTOM, pixelOffset: new Cartesian2(0, -14), disableDepthTestDistance: 2e5}});
+  }
+  const wanted = new Set(r.candidates.filter(c => r.recommended.includes(c.id) || this.showAll || c.id === this.selected).map(c => c.id));
+  for (const [id, parts] of this.towers) if (!wanted.has(id)) { viewer.entities.remove(parts.entity); if (parts.link) viewer.entities.remove(parts.link); this.towers.delete(id); }
+  for (const c of r.candidates) {
+   if (!wanted.has(c.id)) continue;
+   const recommended = r.recommended.includes(c.id), off = this.disabled.has(c.id), available = !!c.temporal_coverage[this.index] && !off;
+   const color = Color.fromCssColorString(off ? "#f2848c" : recommended ? (available ? "#73d8ae" : "#f4ba72") : "#8a9aaf");
+   let parts = this.towers.get(c.id);
+   const top = Cartesian3.fromDegrees(c.lon, c.lat, c.elevation + 30, MOON);
+   if (!parts) {
+    const entity = viewer.entities.add({id: `tower:${c.id}`, position: top,
+     point: {pixelSize: 11, color, outlineColor: Color.WHITE, outlineWidth: c.id === this.selected ? 3 : 1, disableDepthTestDistance: 2e5},
+     label: {text: c.id, font: "600 12px IBM Plex Mono, monospace", fillColor: color, outlineColor: Color.BLACK, outlineWidth: 3, style: LabelStyle.FILL_AND_OUTLINE, verticalOrigin: VerticalOrigin.BOTTOM, pixelOffset: new Cartesian2(0, -14), disableDepthTestDistance: 2e5}});
+    const link = recommended ? viewer.entities.add({id: `link:${c.id}`, polyline: {positions: [this.lander.position!.getValue(viewer.clock.currentTime)!, top], width: 3, material: color, depthFailMaterial: color}}) : undefined;
+    parts = {entity, link}; this.towers.set(c.id, parts);
+   }
+   parts.entity.point!.color = new ConstantProperty(color);
+   parts.entity.point!.outlineWidth = new ConstantProperty(c.id === this.selected ? 3 : 1);
+   parts.entity.label!.text = new ConstantProperty(c.id + (off ? " · OFF" : ""));
+   parts.entity.label!.fillColor = new ConstantProperty(color);
+   if (parts.link) {
+    const material = () => available ? new ColorMaterialProperty(color) : new PolylineDashMaterialProperty({color, dashLength: 14});
+    parts.link.polyline!.material = material();
+    parts.link.polyline!.depthFailMaterial = material();
+   }
+  }
+  viewer.scene.requestRender();
+ }
+
+ /** For tests and diagnostics: what the viewer is currently showing. */
+ diagnostics() {
+  const terrain = this.terrain;
+  return {mode: this.mode, view: this.view, imagery: this.imagery?.state, imageryCounts: this.imagery?.counts, terrainSuccess: terrain?.successes ?? 0, terrainFailures: terrain?.failures ?? 0};
+ }
+ dispose() {
+  this.disposed = true; cancelAnimationFrame(this.animation); this.observer.disconnect(); this.handler?.destroy();
+  if (this.viewer && !this.viewer.isDestroyed()) this.viewer.destroy();
+  this.viewer = undefined;
+ }
+}

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.staticfiles import StaticFiles
 from spiceypy.utils.exceptions import SpiceyError
 
@@ -8,6 +8,7 @@ from .data import SITES
 from .models import Mission
 from .science import scenario
 from ora.api import router as ora_router
+from . import tiles
 
 app = FastAPI(title="MOONMESH", description="Lunar landing-site and communications planning prototype")
 
@@ -71,6 +72,38 @@ def sensitivity(body: Mission):
                 raise
             rows.append(dict(label=label, error=error.detail))
     return rows
+
+
+@app.get("/api/terrain/info")
+def terrain_info():
+    """Source metadata, units, and regional DEM footprints for the 3D Moon viewer."""
+    try:
+        return tiles.info()
+    except (FileNotFoundError, ValueError) as error:
+        raise HTTPException(503, str(error)) from error
+
+
+@app.get("/api/terrain/tile")
+def terrain_tile(west: float, south: float, east: float, north: float,
+                 size: int = Query(tiles.DEFAULT_SIZE, ge=tiles.MIN_SIZE, le=tiles.MAX_SIZE)):
+    """Read-only elevation samples for one rectangle (degrees).
+
+    Body: little-endian float32, (size + 2) x (size + 2) metres, row 0 = north, one padding sample on every side.
+    Metadata is returned in X-Terrain-* headers. Cesium meshes are built in the browser."""
+    try:
+        data = tiles.tile(west, south, east, north, size)
+    except tiles.TileError as error:
+        raise HTTPException(422, str(error)) from error
+    except (FileNotFoundError, ValueError) as error:
+        raise HTTPException(503, str(error)) from error
+    headers = {
+        "X-Terrain-Size": str(size), "X-Terrain-Padding": str(tiles.PADDING), "X-Terrain-Unit": "m",
+        "X-Terrain-Min": f"{data['minimum']:.2f}", "X-Terrain-Max": f"{data['maximum']:.2f}",
+        "X-Terrain-Resolution-M": f"{data['resolution_m']:.1f}", "X-Terrain-Sources": ",".join(data["sources"]),
+        "Cache-Control": "public, max-age=3600",
+    }
+    return Response(data["heights"].tobytes(), media_type="application/octet-stream", headers=headers)
+
 
 
 app.include_router(ora_router)
