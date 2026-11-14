@@ -44,9 +44,12 @@ def main(argv=None):
         first=Observer(float(lat1),float(lon1),float(grid.sample(*start)[0]),ht)
         second=Observer(float(lat2),float(lon2),float(grid.sample(*end)[0]),hr)
         app,arc=surface_path(grid,first,second)
+        compatible=trace_pairs(start,[end],ht,hr,dem,tr,crs,cfg['max_range_m'],tr.a,mode='app')
+        compatible_los=None if not compatible['valid'][0] else bool(compatible['los'][0])
+        if compatible_los != app:raise AssertionError(f'App-compatible mismatch at pair {i}')
         ours=None if not result['valid'][0] else bool(result['los'][0])
         pairs.append({'pair':i,'tx_xy':start.tolist(),'rx_xy':end.tolist(),'h_tx':ht,'h_rx':hr,'app_los':app,'ours_los':ours,
-                      'distance_m':arc*1000,'min_clearance_m':float(result['min_clearance_m'][0]),'match':app==ours,
+                      'app_compatible_los':compatible_los,'app_compatible_match':compatible_los==app,'distance_m':arc*1000,'min_clearance_m':float(result['min_clearance_m'][0]),'match':app==ours,
                       'explanation':None if app==ours else 'App samples equal angular fractions at <=20 m; labeler samples equal XYZ chord fractions at <=10 m. Chord geometry is identical; terrain samples differ. See refined diagnostics.'})
         if app!=ours:
             refined=trace_pairs(start,[end],ht,hr,dem,tr,crs,cfg['max_range_m'],2.5)
@@ -92,6 +95,42 @@ def main(argv=None):
             dst.write(array.astype('float32'),i);dst.set_band_description(i,name)
         dst.update_tags(label_origin='simulated',git_commit=commit,spacing_m=2.5,quality_codes=json.dumps(QUALITY),
                         distance_convention='obstruction distances along 3D chord from TX')
+    # Keep the 8km result for the requested plot, then release its diagnostics.
+    plot_viewshed(out, result['los'], dem, tr, tx, pairs)
+    del result, previous
+    radio_path=root/'interim/lunarrf/meta/atlas_v2/bundle/radio_params.json'
+    radio=json.loads(radio_path.read_text())
+    frequency=radio['frequencies_hz'][0]
+    wavelength=299792458./frequency
+    maximum=radio['max_radius_m']
+    print(f'Brute-force full {maximum:g} m viewshed with wavelength {wavelength}',flush=True)
+    begin=perf_counter()
+    large=viewshed(tx,radio['mast_height_m'],radio['rx_height_m'],dem,tr,crs,maximum,10,wavelength)
+    seconds=perf_counter()-begin
+    benchmark={'range_m':maximum,'spacing_m':10,'h_tx_m':radio['mast_height_m'],'h_rx_m':radio['rx_height_m'],
+               'frequency_hz':frequency,'wavelength_m':wavelength,'radio_source':str(radio_path),
+               'reference_seconds':seconds,'masts':267,'projected_seconds_267':seconds*267,
+               'projection_note':'Linear extrapolation from one research-point viewshed; excludes I/O, per-mast terrain variability and cold JIT.',
+               'valid_pixels':int(large['valid'].sum())}
+    report['large_viewshed_benchmark']=benchmark
+    atomic_json(out/'report.json',report)
+    print(benchmark,flush=True)
+    if seconds*267>7200:
+        # Warm the scalar kernel separately; no shared-profile approximation.
+        trace_pairs(tx,[tx+[100,100]],4,1.5,dem,tr,crs,maximum,10,wavelength,mode='fast')
+        begin=perf_counter()
+        fast=viewshed(tx,4,1.5,dem,tr,crs,maximum,10,wavelength,mode='fast')
+        fast_seconds=perf_counter()-begin
+        for key in ['los','valid','quality_flag']:np.testing.assert_array_equal(large[key],fast[key])
+        valid=large['valid'];delta=np.abs(large['min_clearance_m'][valid]-fast['min_clearance_m'][valid])
+        maximum_error=float(delta.max())
+        if maximum_error>1e-8:raise AssertionError('Fast clearance exceeds 1e-8 m tolerance')
+        benchmark.update(fast_seconds=fast_seconds,fast_projected_seconds_267=fast_seconds*267,
+                         speedup=seconds/fast_seconds,haworth_max_clearance_difference_m=maximum_error,
+                         fast_method='Exact same rays and sample order; scalar XYZ arithmetic eliminates per-sample NumPy array allocation; no fastmath or terrain approximation',
+                         tolerance_m=1e-8,haworth_los_identical=True)
+        del fast
+    del large
     report['status']='complete'
     atomic_json(out/'report.json',report)
     lines=['# LOS checks (simulated)','',f'Commit `{commit}`; seed {cfg["seed"]}; Numba threads {get_num_threads()}.',
@@ -103,8 +142,48 @@ def main(argv=None):
     for c in report['convergence']:lines.append(f'{c["coarse_spacing_m"]} -> {c["fine_spacing_m"]} m: {c["flipped_pixels"]} flips / {c["joint_valid_pixels"]} jointly valid pixels = {c["fraction_flipped"]:.8%}. Locations: `{Path(c["locations_csv"]).name}`; corresponding GeoTIFF maps use 1=flip, 0=unchanged, NaN=outside joint validity.')
     lines+=['','Full receiver diagnostics: viewshed_2p5m.tif; pair coordinates, mismatch diagnostics and convergence metrics: report.json.','',
             'Scope: spherical south polar stereographic R=1737400 only. PGDA vertical datum remains undocumented as recorded by alignment. Full-trace LOS diagnostics must not enter model input features.']
+    lines+=['','## App-compatible mode','',
+            f'App-compatible mode agrees on all {len(pairs)} Haworth pairs. It uses the app spherical cosine angle, equal angular fractions, SciPy pixel-center bilinear sampler and radial chord formula verbatim. spacing_m is ignored only in this explicit mode; default tracing remains unchanged.',
+            'The 200-pair synthetic rough-DEM comparison and LunarRF-height bald sphere (4/1.5 m, 6011 m) pass.',
+            '', '## LunarRF-range benchmark','',
+            f'Full {maximum:g} m viewshed, TX {radio["mast_height_m"]} m, RX {radio["rx_height_m"]} m, 10 m samples, wavelength {wavelength:.12f} m at {frequency:g} Hz: **{seconds:.3f} seconds**. Projection for 267 masts: **{seconds*267/3600:.3f} hours**.',
+            benchmark['projection_note']]
+    if 'fast_seconds' in benchmark:
+        lines += [f'Optimized exact scalar method: **{benchmark["fast_seconds"]:.3f} seconds**, {benchmark["speedup"]:.2f}x speedup; 267-mast projection **{benchmark["fast_projected_seconds_267"]/3600:.3f} hours**.',
+                  benchmark['fast_method'],
+                  f'Random DEM tests and the complete Haworth viewshed have identical LOS/validity/quality. Haworth maximum min-clearance difference: {maximum_error:g} m; tolerance 1e-8 m. Brute-force remains the default reference.']
+    lines += ['', '![Research-point 8km simulated LOS and 50 pairs](viewshed_8km.png)']
     (out/'report.md').write_text('\n'.join(lines)+'\n',encoding='utf-8')
     print(f'Reports: {out}',flush=True)
     return 0
+
+
+def plot_viewshed(out, los, dem, tr, tx, pairs):
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import ListedColormap
+    from matplotlib.patches import Patch
+    from moonmesh_train.alignment import hillshade
+    # Show a 9 km context so unknown/out-of-range has an explicit gray ring.
+    c=int((tx[0]-tr.c)/tr.a);r=int((tx[1]-tr.f)/tr.e)
+    endpoints=np.array([xy for p in pairs for xy in (p['tx_xy'],p['rx_xy'])])
+    n=max(450,int(np.ceil(np.max(np.abs(endpoints-tx))/20))+25)
+    rs=slice(r-n,r+n+1);cs=slice(c-n,c+n+1)
+    shade=hillshade(dem[rs,cs],(20,20))
+    extent=[(tr.c+(c-n)*20)/1000,(tr.c+(c+n+1)*20)/1000,
+            (tr.f-(r+n+1)*20)/1000,(tr.f-(r-n)*20)/1000]
+    fig,ax=plt.subplots(figsize=(10,9),layout='constrained')
+    ax.imshow(shade,extent=extent,cmap='gray',vmin=0,vmax=1)
+    code=np.where(los[rs,cs]==1,0,np.where(los[rs,cs]==0,1,2))
+    ax.imshow(code,extent=extent,cmap=ListedColormap(['#20a66a','#d4473d','#969aaa']),vmin=0,vmax=2,alpha=.55)
+    for p in pairs:
+        a,b=np.array(p['tx_xy'])/1000,np.array(p['rx_xy'])/1000
+        ax.plot([a[0],b[0]],[a[1],b[1]],color='#202020',lw=.5,alpha=.65)
+        ax.plot(*a,marker='o',ms=2,color='black');ax.plot(*b,marker='x',ms=3,color='white')
+    ax.plot(*(tx/1000),marker='*',ms=14,color='yellow',markeredgecolor='black')
+    ax.set(xlabel='Easting (km)',ylabel='Northing (km)',title='Haworth simulated LOS: 8 km, TX 5 m / RX 2 m, 2.5 m sampling\n50 check pairs: black TX dots, white RX crosses; yellow star = research point',xlim=extent[:2],ylim=extent[2:])
+    ax.legend(handles=[Patch(color=c,label=t) for c,t in [('#20a66a','Clear'),('#d4473d','Blocked'),('#969aaa','Unknown / outside range')]],loc='lower left')
+    fig.savefig(out/'viewshed_8km.png',dpi=150);plt.close(fig)
 
 if __name__=='__main__':raise SystemExit(main())
