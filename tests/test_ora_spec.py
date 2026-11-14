@@ -158,3 +158,59 @@ def test_app_scorer_matches_prior_width():
     from ora.train import MODELS
     from ora.features import PRIOR_FEATURES
     assert joblib.load(MODELS / "ora_siting_prior.joblib").n_features_in_ == len(PRIOR_FEATURES)
+
+
+
+def square(half=3000.0, lat=-89.67, lon=129.78):
+    from lunar_core.terrain import polar_stereographic_south as forward
+    from lunar_core.terrain import polar_stereographic_south_inverse as inverse
+    x, y = forward(lat, lon)
+    return [tuple(float(v) for v in inverse(x + dx, y + dy)) for dx, dy in ((-half, -half), (half, -half), (half, half), (-half, half))]
+
+
+def test_drawn_area_info_reports_size_and_centre():
+    from ora.area import info
+    meta = info(square())
+    assert meta["area_km2"] == pytest.approx(36.0, abs=0.1)
+    assert meta["lat"] == pytest.approx(-89.67, abs=0.01)
+
+
+def test_drawn_area_rejects_bad_shapes():
+    from ora.area import AreaError, info
+    for bad in ([(-89.0, 0.0), (-89.1, 10.0)],                       # too few corners
+                [(-60.0, 0.0), (-60.0, 10.0), (-61.0, 5.0)],         # outside the polar cap
+                square(half=200.0),                                  # too small
+                square(half=20_000.0)):                              # too large for exact line of sight
+        with pytest.raises(AreaError):
+            info(bad)
+
+
+def test_polygon_mask_covers_the_shape():
+    from lunar_core.terrain import TerrainGrid
+    from lunar_core.terrain import polar_stereographic_south as forward
+    from ora.area import polygon_mask
+    x, y = forward(-89.67, 129.78)
+    grid = TerrainGrid(np.zeros((1000, 1000), np.float32), x - 10_000, y + 10_000, 20.0)
+    mask = polygon_mask(grid, square(half=3000.0))
+    assert mask.sum() * 20.0 ** 2 / 1e6 == pytest.approx(36.0, abs=1.0)
+    assert mask[500, 500] and not mask[0, 0]
+
+
+def test_loop_layout_removes_single_path_links():
+    import networkx as nx
+    from ora.area import loop_layout
+    H = nx.cycle_graph(6)
+    for a, b in H.edges:
+        H.edges[a, b]["dist"] = 1.0
+    tree = nx.minimum_spanning_tree(H, weight="dist")
+    assert len(list(nx.bridges(tree))) == 5
+    assert len(list(nx.bridges(loop_layout(H, tree)))) == 0
+
+
+def test_analyse_compares_three_layouts():
+    from ora.api import NetworkBody, analyse_area
+    out = analyse_area(NetworkBody(polygon=square()))
+    assert set(out["layouts"]) == {"tree", "loop", "mesh"}
+    assert out["recommended"] in out["layouts"]
+    assert out["layouts"]["tree"]["links"] <= out["layouts"]["mesh"]["links"]
+    assert {"gateway", "mine"} <= {n["role"] for n in out["nodes"]}

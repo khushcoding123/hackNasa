@@ -10,9 +10,10 @@
   <ol>
    <li><button data-view="landing" aria-current="step"><span class="nav-number">1</span><span class="nav-text">Explore</span></button></li>
    <li><button data-view="configure"><span class="nav-number">2</span><span class="nav-text">Configure</span></button></li>
-   <li><button data-view="overview" disabled><span class="nav-number">3</span><span class="nav-text">Network</span></button></li>
-   <li><button data-view="communication" disabled><span class="nav-number">4</span><span class="nav-text">Blackouts</span></button></li>
-   <li><button data-view="resilience" disabled><span class="nav-number">5</span><span class="nav-text">Resilience</span></button></li>
+   <li><button data-view="layout" disabled><span class="nav-number">3</span><span class="nav-text">Layout</span></button></li>
+   <li><button data-view="overview" disabled><span class="nav-number">4</span><span class="nav-text">Earth link</span></button></li>
+   <li><button data-view="communication" disabled><span class="nav-number">5</span><span class="nav-text">Blackouts</span></button></li>
+   <li><button data-view="resilience" disabled><span class="nav-number">6</span><span class="nav-text">Resilience</span></button></li>
   </ol>
  </nav>
  <div class="topbar-tools">
@@ -28,7 +29,7 @@
  <div class="panel-head"><div><p class="eyebrow" id="chapter">STEP 1 OF 5 / EXPLORE</p><h1 id="title" tabindex="-1">Start with the Moon.</h1><p id="purpose" class="subtitle">Explore the surface, then build a communication plan for your mission.</p></div><button id="panel-close" aria-label="Collapse mission panel">✕</button></div>
  <form id="mission" class="panel configuration" hidden>
   <div class="config-heading"><span class="eyebrow">MISSION PARAMETERS</span><span id="dirty" class="state-label" role="status">Preparing scenario</span></div>
-  <div class="fields mission-fields"><label>Landing region<select name="site" required></select></label><label>Start · UTC<input name="start" type="date" required></label><label>End · UTC<input name="end" type="date" required></label><label>Sampling<select name="minutes"><option value="5">5 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select></label><button class="primary" type="submit" disabled>Calculate network <span aria-hidden="true">↗</span></button></div>
+  <div class="fields mission-fields"><label hidden>Landing region<select name="site" required></select></label><label>Start · UTC<input name="start" type="date" required></label><label>End · UTC<input name="end" type="date" required></label><label>Sampling<select name="minutes"><option value="5">5 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select></label><button class="primary" type="submit" disabled>Calculate network <span aria-hidden="true">↗</span></button></div>
   <fieldset class="mission-requirements"><legend>What does your mission need?</legend><p class="muted">Set the coverage goal and the number of relay towers you can deploy. Technical radio and battery assumptions are in Expert settings.</p><div id="basic-constraints" class="fields"></div></fieldset>
   <details id="advanced"><summary>Expert settings <span class="muted">/ constraints, radio &amp; power</span></summary><div id="expert" class="fields"></div></details>
  </form>

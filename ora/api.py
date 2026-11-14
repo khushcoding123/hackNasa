@@ -10,6 +10,7 @@ import numpy as np
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from . import area as drawn_area
 from . import breadcrumb, resilience, twin
 from .data import ALL_SITES
 from .graph import degree_matched_disk, unit_disk_graph
@@ -34,14 +35,26 @@ class NetworkBody(BaseModel):
     extra_relays: int | None = Field(default=None, ge=0, le=8)
     start: date | None = None
     seed: int | None = Field(default=None, ge=0, le=9999)
+    polygon: list[tuple[float, float]] | None = Field(default=None, description="Drawn area as (lat, lon east) vertices")
 
     def resolve(self):
         try:
             base = load(self.scenario)
         except FileNotFoundError as error:
             raise HTTPException(404, f"Unknown scenario {self.scenario}.") from error
-        fields = set(NetworkBody.model_fields) - {"scenario"}
+        fields = set(NetworkBody.model_fields) - {"scenario", "polygon", "site"}
         changes = {k: getattr(self, k) for k in fields if getattr(self, k) is not None}
+        if self.polygon:
+            try:
+                key, _, meta = drawn_area.register(self.polygon)
+            except drawn_area.AreaError as error:
+                raise HTTPException(422, str(error)) from error
+            except FileNotFoundError as error:
+                raise HTTPException(503, "LOLA terrain is missing. Run python -m moonmesh.data.") from error
+            changes.update(site=key, polygon=tuple(tuple(p) for p in self.polygon), radius_km=meta["radius_m"] / 1000 + 0.3,
+                           name=f"drawn_{key}")
+        elif self.site:
+            changes["site"] = self.site
         return replace(base, **changes)
 
 
@@ -296,6 +309,16 @@ def coverage_sites(body: CoverageBody):
     result["sites"] = [dict(id=int(i), x=float(cells[i][0]), y=float(cells[i][1]), lat=float(net["lat"][i]), lon=float(net["lon"][i]),
                             elevation=float(net["ground"][i])) for i in result["chosen"]]
     return result
+
+
+@router.post("/area")
+def analyse_area(body: NetworkBody):
+    """Plan relays inside a drawn area and compare tree, loop and mesh layouts. Body: the usual network fields plus ``polygon``."""
+    if not body.polygon:
+        raise HTTPException(422, "Draw an area first.")
+    net = network_for(body)
+    meta = drawn_area.info(body.polygon)
+    return drawn_area.analyse(net, meta)
 
 
 @router.get("/dte")

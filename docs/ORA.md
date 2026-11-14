@@ -110,6 +110,10 @@ The plan's hypothesis was that the resilience-aware policy would win on collapse
 
 The surrogate screens candidates; the app still computes exact line of sight for the final set. Siting scores in the app are 80% surrogate and 20% Earth prior, because the prior alone does not rank lunar cells by visibility. The stress suite (`python -m ora stress`) passes 23 of 24 checks; `docs/ORA_TRAINING.md` lists the one that fails and the weak spots.
 
+### Drawn areas and layouts (main app, step 3)
+
+The main MOONMESH app no longer starts from fixed landing regions. Draw a square or a free-form shape anywhere between 85 S and the pole (about 2 to 24 km across); `POST /api/ora/area` crops 20 m LOLA terrain for it, plans relays, gateways and mining sites inside the shape, and compares three layouts over the same sites: a tree, a tree with loops, and a full mesh. The best layout survives the most single relay or link failures with the fewest links. If nothing inside the shape sees Earth or links up, sites in a 6 km ring around it are used and marked as outside. Every ORA endpoint also accepts `polygon`. Drawn terrain is cached under `.moonmesh-data/terrain/area-*` (the 12 most recent are kept).
+
 ## What ORA does not claim
 
 - No placement is optimal. The search is a heuristic over screened candidates.

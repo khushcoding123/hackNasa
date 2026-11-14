@@ -16,7 +16,7 @@ def slope_deg(dem, px_m):
 
 
 def candidate_sites(dem, px_m, count, center=None, radius_m=None, slope_limit=20.0, peak_window_m=400,
-                    min_spacing_m=300, seed=0):
+                    min_spacing_m=300, seed=0, mask=None):
     """Candidate relay sites as (N, 2) pixel coordinates (col, row).
 
     Half are the highest local terrain maxima (ridges and rims, where towers see farthest).
@@ -30,6 +30,8 @@ def candidate_sites(dem, px_m, count, center=None, radius_m=None, slope_limit=20
     if center is not None and radius_m is not None:
         yy, xx = np.ogrid[:rows, :cols]
         ok &= np.hypot(xx - center[0], yy - center[1]) * px_m <= radius_m
+    if mask is not None:
+        ok &= mask  # a drawn area: only cells inside it
     window = max(3, int(round(peak_window_m / px_m)) | 1)
     peaks = ok & (dem == maximum_filter(np.nan_to_num(dem, nan=-np.inf), size=window))
     py, px = np.nonzero(peaks)
