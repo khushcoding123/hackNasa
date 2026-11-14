@@ -1,0 +1,13 @@
+# Processing choices for Prompt 4, not inferred source/radio metadata.
+seed: 42
+site_config: exp_b_haworth_pilot.yaml
+reference_radius_m: 1737400
+master_pixel_m: 20
+relative_elevation_radii_m: [200, 1000]
+roughness_radius_m: 100
+registration_upsample_factor: 10
+registration_fail_shift_px: 0.5
+# Visualization choices, used identically for all DEMs.
+hillshade_azimuth_deg: 315
+hillshade_altitude_deg: 45
+processing_tile_pixels: 512
