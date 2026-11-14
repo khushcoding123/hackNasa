@@ -71,12 +71,27 @@ class TileTests(unittest.TestCase):
         with self.assertRaises(tiles.TileError):
             tiles.tile(0, 0, 1, 1, size=2)
 
+    def test_site_patch_supports_any_location_and_seams(self):
+        east = tiles.site_patch(12, 180, 175_000, 129)
+        west = tiles.site_patch(12, -180, 175_000, 129)
+        np.testing.assert_allclose(east["heights"], west["heights"], atol=1e-3)
+        self.assertEqual(east["source"], "global")
+        self.assertGreater(east["resolution_m"], 1000)
+        pole = tiles.site_patch(-90, 0, 175_000, 129)
+        self.assertTrue(np.isfinite(pole["heights"]).all())
+        self.assertEqual(pole["heights"].shape, (129, 129))
+
+    def test_site_patch_rejects_invalid_centres(self):
+        for lat, lon in [(91, 0), (float("nan"), 0), (0, float("inf"))]:
+            with self.assertRaises(tiles.TileError):
+                tiles.site_patch(lat, lon, 7000, 129)
+
     def test_endpoint_headers(self):
         try:
             from fastapi.testclient import TestClient
             from moonmesh.server import app
-        except ImportError:
-            self.skipTest("httpx is not installed")
+        except (ImportError, RuntimeError):
+            self.skipTest("Starlette's optional test client dependency is not installed")
         client = TestClient(app)
         response = client.get("/api/terrain/tile", params=dict(west=-23, south=-86.85, east=-22.6, north=-86.75, size=33))
         self.assertEqual(response.status_code, 200)

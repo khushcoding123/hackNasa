@@ -105,5 +105,20 @@ def terrain_tile(west: float, south: float, east: float, north: float,
     return Response(data["heights"].tobytes(), media_type="application/octet-stream", headers=headers)
 
 
+@app.get("/api/terrain/site")
+def terrain_site(lat: float, lon: float, half_width_m: float, size: int):
+    """A local elevation patch centered on an arbitrary clicked lunar point."""
+    try:
+        data = tiles.site_patch(lat, lon, half_width_m, size)
+    except tiles.TileError as error:
+        raise HTTPException(422, str(error)) from error
+    except (FileNotFoundError, ValueError) as error:
+        raise HTTPException(503, str(error)) from error
+    headers = {"X-Terrain-Unit": "m", "X-Terrain-Resolution-M": f"{data['resolution_m']:.1f}",
+               "X-Terrain-Source": data["source"], "X-Terrain-Sources": ",".join(data["sources"]),
+               "Cache-Control": "public, max-age=3600"}
+    return Response(data["heights"].tobytes(), media_type="application/octet-stream", headers=headers)
+
+
 app.include_router(ora_router)
 app.mount("/", StaticFiles(directory=Path(__file__).resolve().parents[1] / "web", html=True), name="web")

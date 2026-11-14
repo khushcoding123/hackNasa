@@ -22,7 +22,7 @@ const deg = CesiumMath.toDegrees, rad = CesiumMath.toRadians;
 const wrap180 = (lon: number) => ((lon + 540) % 360) - 180;
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]!));
 const metres = (m: number) => m >= 1000 ? `${(m / 1000).toFixed(m >= 10000 ? 0 : 1)} km` : `${Math.round(m)} m`;
-const angular = (a: Landmark, lat: number, lon: number) => {
+const angular = (a: Pick<Landmark, "lat" | "lon">, lat: number, lon: number) => {
  const p = rad(a.lat), q = rad(lat), d = rad(a.lon - lon);
  return Math.acos(Math.min(1, Math.max(-1, Math.sin(p) * Math.sin(q) + Math.cos(p) * Math.cos(q) * Math.cos(d)))) * R;
 };
@@ -113,12 +113,12 @@ export class MoonView {
      <label class="vw-mission-only" hidden><input type="checkbox" data-candidates> Screened candidates</label>
      <div class="vw-pins"><strong>Pins</strong><ul data-pinlist></ul></div>
      <label>Imagery <select data-imagery><option value="auto">LROC WAC (live)</option><option value="bundled">Bundled (lower detail)</option></select></label>
-     <p class="vw-note">Terrain is shown at true 1× scale.</p><p class="vw-note">Right-click (or long-press) the Moon to drop a test pin.</p>
+     <p class="vw-note">Terrain is shown at true 1× scale.</p><p class="vw-note">Click the Moon to drop a pin, then open its 3D site view.</p>
     </div></div>
   </div>
   <div class="vw-right" role="group" aria-label="Map controls">
    <div class="vw-modes" role="group" aria-label="View mode"><button data-mode="map" aria-pressed="true">Map</button><button data-mode="3d" aria-pressed="false">3D</button></div>
-   <button class="vw-site-btn" data-site3d title="Real-scale three.js close-up of a mission region (prototype)">Site 3D ▸</button>
+   <button class="vw-site-btn" data-site3d title="Open the selected pin or current Moon location in three dimensions">Site 3D ▸</button>
    <div class="vw-stack">
     <button data-nav="in" aria-label="Zoom in">+</button><button data-nav="out" aria-label="Zoom out">−</button>
     <button data-nav="north" aria-label="Reset north and view" title="Reset view">⌖</button>
@@ -336,7 +336,7 @@ export class MoonView {
   q<HTMLSelectElement>("[data-imagery]").onchange = e => this.imagery?.setChoice((e.target as HTMLSelectElement).value as "auto" | "bundled");
   const canvas = this.viewer!.scene.canvas;
   canvas.tabIndex = 0;
-  canvas.setAttribute("aria-label", "Interactive Moon. Drag to rotate, scroll or pinch to zoom, click for location details, right-click or long-press to drop a pin. Arrow keys rotate; plus and minus zoom; 0 resets.");
+  canvas.setAttribute("aria-label", "Interactive Moon. Drag to rotate, scroll or pinch to zoom, click to drop a pin, then select it to open the 3D site. Arrow keys rotate; plus and minus zoom; 0 resets.");
   canvas.addEventListener("keydown", e => {
    const map: Record<string, string> = {ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down", "+": "in", "=": "in", "-": "out", "0": "north", Home: "north"};
    if (map[e.key]) { e.preventDefault(); this.navigate(map[e.key]); }
@@ -412,7 +412,7 @@ export class MoonView {
    if (id.startsWith("pin:")) { this.selectPin(Number(id.slice(4))); return; }
    if (id.startsWith("tower:")) { const c = this.result?.candidates.find(c => c.id === id.slice(6)); if (c) { this.hooks.onSelectCandidate?.(c); return; } }
    const point = this.surfacePoint(event.position);
-   if (point) this.inspect(point);
+   if (point) this.dropPin(point);
   }, ScreenSpaceEventType.LEFT_CLICK);
   const drop = (position: Cartesian2) => { const point = this.surfacePoint(position); if (point) this.dropPin(point); };
   this.handler.setInputAction((event: {position: Cartesian2}) => drop(event.position), ScreenSpaceEventType.RIGHT_CLICK);
@@ -452,7 +452,7 @@ export class MoonView {
   node.querySelector<HTMLButtonElement>("[data-choose]")?.addEventListener("click", e => this.hooks.onChooseRegion?.((e.currentTarget as HTMLElement).dataset.choose!));
  }
 
- /** Drop a new pin. Several can coexist; the newest is highlighted. A pin can be used as the mission location inside a supported terrain crop. */
+ /** Drop a new pin anywhere; mission calculations remain restricted to their supported terrain crops. */
  private dropPin(point: Cartesian3) {
   if (this.pins.size >= MAX_PINS) { this.toast(`You can keep up to ${MAX_PINS} pins. Remove one to add another.`, true); return; }
   const c = Cartographic.fromCartesian(point, MOON)!;
@@ -483,13 +483,15 @@ export class MoonView {
    <label class="vw-rename">Name<input data-pin-name type="text" maxlength="40" value="${escapeHtml(pin.name)}" aria-label="Pin name"></label>
    <h3>${coordinate(pin.lat, pin.lon)}</h3>
    <dl><dt>Terrain elevation</dt><dd>${Math.round(pin.h).toLocaleString()} m</dd></dl>
-   ${region ? `<p class="vw-note">Inside the ${escapeHtml(region.name)} 20 m terrain, so a mission can be tested here.</p><button class="primary" data-use-pin>Test a mission at this pin →</button>`
-    : `<p class="vw-note">Mission calculation needs 20 m terrain, available within about 20 km of Haworth, Nobile Rim 1 or Malapert Massif. Drop the pin there to test it.</p>`}
+   <button class="primary" data-open-site>Explore this site in 3D →</button>
+   ${region ? `<p class="vw-note">Inside the ${escapeHtml(region.name)} 20 m terrain, so a mission can be tested here.</p><button data-use-pin>Test a mission at this pin →</button>`
+    : `<p class="vw-note">3D exploration uses the best available LOLA terrain. Mission calculations need a supported 20 m region.</p>`}
    <button data-clear-pin>Remove pin</button>`;
   node.hidden = false;
   node.querySelector<HTMLButtonElement>(".vw-close")!.onclick = () => { node.hidden = true; this.deselectPin(); };
   node.querySelector<HTMLInputElement>("[data-pin-name]")!.oninput = e => { pin.name = (e.target as HTMLInputElement).value.trim() || `Pin ${pin.id}`; this.renderPinList(); this.viewer?.scene.requestRender(); };
   node.querySelector<HTMLButtonElement>("[data-clear-pin]")!.onclick = () => { this.removePin(pin.id); node.hidden = true; };
+  node.querySelector<HTMLButtonElement>("[data-open-site]")!.onclick = () => this.openSite({lat: pin.lat, lon: pin.lon, name: pin.name});
   node.querySelector<HTMLButtonElement>("[data-use-pin]")?.addEventListener("click", () => this.hooks.onUsePin?.(pin.lat, pin.lon, region!.id));
  }
  private deselectPin() {
@@ -559,6 +561,7 @@ export class MoonView {
  }
  focusLandmark(feature: Landmark) {
   this.activeLandmark = feature.id;
+  if (this.selectedPin) this.deselectPin();
   const extent = RESEARCH.has(feature.id) ? 24_000 : feature.kind.includes("pole") || feature.kind.includes("Hemisphere") ? 1_800_000 : feature.kind.includes("sea") ? 1_200_000 : 300_000;
   this.flyToPlace(feature.lat, feature.lon, extent);
   const point = Cartesian3.fromDegrees(feature.lon, feature.lat, 0, MOON);
@@ -646,15 +649,19 @@ export class MoonView {
  }
 
  // ---------- three.js site view ----------
- /** Open the real-scale three.js close-up for the mission site, or for the 20 m region under the current view. */
+ /** Open a local Three.js close-up centered on a pin or the current Moon view. */
  openSite(target?: {lat: number; lon: number; name: string}) {
   if (this.site) return;
+  if (!document.body.classList.contains("panel-collapsed")) document.querySelector<HTMLButtonElement>("#panel-close")?.click();
   const r = this.result;
+  const pin = this.pins.get(this.selectedPin);
   const region = this.terrain?.regionAt(this.view.lat, this.view.lon);
-  const place = target ?? (r ? {lat: r.site.lat, lon: r.site.lon, name: r.site.name} : region ? {lat: region.lat, lon: region.lon, name: region.name} : undefined);
-  if (!place) { this.toast("Fly to Haworth, Nobile Rim 1 or Malapert Massif first: the 3D site view needs the 20 m terrain.", true); return; }
+  const landmark = LANDMARKS.find(feature => feature.id === this.activeLandmark && angular(feature, this.view.lat, this.view.lon) < 1000);
+  const place = target ?? (pin ? {lat: pin.lat, lon: pin.lon, name: pin.name} : {lat: this.view.lat, lon: this.view.lon, name: region?.name ?? landmark?.name ?? "Moon site"});
+  const detail = this.terrain?.detailAt(place.lat, place.lon) ?? "global";
+  const mission = r && angular(r.site, place.lat, place.lon) < 500 ? r : undefined;
   this.root.dataset.site = "open";
-  this.site = new SiteView(this.root, {...place, result: r, index: this.index, disabled: this.disabled, onClose: () => this.closeSite()});
+  this.site = new SiteView(this.root, {...place, detail, result: mission, index: this.index, disabled: this.disabled, onClose: () => this.closeSite()});
  }
  closeSite() { this.site?.dispose(); this.site = undefined; delete this.root.dataset.site; }
 

@@ -54,6 +54,14 @@ export class MoonTerrainProvider {
   const [x, y] = polarStereographicSouth(latDeg, lonDeg);
   return this.info.regions.find(r => r.near && x >= r.near.x_min && x <= r.near.x_max && y >= r.near.y_min && y <= r.near.y_max);
  }
+ /** Best DEM available at a clicked point; visual exploration can use the global grid everywhere. */
+ detailAt(latDeg: number, lonDeg: number): "near" | "far" | "global" {
+  if (latDeg > -70) return "global";
+  const [x, y] = polarStereographicSouth(latDeg, lonDeg);
+  if (this.info.regions.some(r => r.near && x >= r.near.x_min && x <= r.near.x_max && y >= r.near.y_min && y <= r.near.y_max)) return "near";
+  if (this.info.regions.some(r => r.far && x >= r.far.x_min && x <= r.far.x_max && y >= r.far.y_min && y <= r.far.y_max)) return "far";
+  return "global";
+ }
  /** Resolution (m) of the most detailed loaded tile under a point. */
  resolutionAt(latDeg: number, lonDeg: number): TileMeta | undefined {
   const position = Cartographic.fromDegrees(lonDeg, latDeg);
