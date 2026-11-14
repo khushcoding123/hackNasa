@@ -24,11 +24,13 @@ python -m uvicorn moonmesh.server:app --host 127.0.0.1 --port 8765
 ## Demonstration
 
 1. Run the default Haworth mission for November 2026. This is the repository's research window.
-2. Open **Landing sites** to compare Haworth, Nobile Rim 1 and Malapert Massif using the same period.
-3. Open **Communication analysis** and select a blackout start time to inspect the Earth elevation, terrain angle, RF margin and distance to the controlling horizon sample.
-4. Set the availability, maximum blackout, mast, power and deployment constraints in **Expert settings**. Open **Relay planner** and optimize. The search returns the smallest screened configuration that meets the requirements, or the best evaluated configuration when the requirements are infeasible.
-5. Open **Resilience simulator** and disable a selected relay. Inspect the resulting timeline and the per-relay criticality table. Enable **Require N−1** and run again to optimize for the worst individual relay failure.
+2. Open **Sites** to compare Haworth, Nobile Rim 1 and Malapert Massif using the same period.
+3. Open **Blackouts** and select a blackout start time to inspect the Earth elevation, terrain angle, RF margin and distance to the controlling horizon sample.
+4. Set the availability, maximum blackout, mast, power and deployment constraints in **Expert settings**. Open **Relays** and optimize. The search returns the smallest screened configuration that meets the requirements, or the best evaluated configuration when the requirements are infeasible.
+5. Open **Resilience** and disable a selected relay. Inspect the resulting timeline and the per-relay criticality table. Enable **Require N−1** and run again to optimize for the worst individual relay failure.
 6. Run **Sensitivity analysis** or export the current mission. JSON includes the scenario, provenance and failure results. CSV includes the timeline and completed comparison or sensitivity runs. **Print report** opens a printable mission summary.
+
+The interface follows **Mission → Sites → Blackouts → Relays → Resilience**. Sensitivity and Data & assumptions are secondary analysis tools. Configuration changes are labeled **Changes not applied** until you run the mission. Exports are in the header menu. See [UI_REDESIGN_PLAN.md](UI_REDESIGN_PLAN.md) for the visual and interaction specification.
 
 ## Model and validation
 
