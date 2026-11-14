@@ -1,7 +1,7 @@
 import type {Result, Candidate} from "./types.js";
 
-export function powerTimeline(candidate:Candidate, capacity:number, index:number) {
-  const {ctx,w,h}=canvas("power-timeline");
+export function powerTimeline(candidate:Candidate, capacity:number, index:number, target:string|HTMLCanvasElement="power-timeline") {
+  const {ctx,w,h}=canvas(target);
   const left=69, step=(w-left-10)/candidate.powered.length;
   ctx.font="11px monospace";
   const tracks:[string,boolean[],string][]=[["Sunlight",candidate.sunlight,"#ffca7e"],["Powered",candidate.powered,"#6ee2b4"]];
@@ -22,10 +22,11 @@ export function powerTimeline(candidate:Candidate, capacity:number, index:number
   ctx.fillStyle="#eaf2ff";ctx.fillRect(left+index*step,5,1,h-10);
 }
 
-function canvas(id:string, ratio=1) {
-  const element=document.querySelector<HTMLCanvasElement>("#"+id)!;
+// Detached canvases (used for printed reports) have no layout size, so they fall back to a fixed one.
+function canvas(target:string|HTMLCanvasElement, fallback:[number,number]=[640,100]) {
+  const element=typeof target==="string"?document.querySelector<HTMLCanvasElement>("#"+target)!:target;
   const bounds=element.getBoundingClientRect();
-  const w=bounds.width, h=bounds.height, dpi=devicePixelRatio*ratio;
+  const w=bounds.width||fallback[0], h=bounds.height||fallback[1], dpi=devicePixelRatio;
   element.width=Math.round(w*dpi); element.height=Math.round(h*dpi);
   const ctx=element.getContext("2d")!;
   ctx.scale(dpi,dpi);
@@ -123,30 +124,67 @@ export function timeline(result:Result, network:boolean[], assisted:boolean[], i
 
 export function horizon(result:Result, index:number) {
   const {ctx,w,h}=canvas("horizon");
-  const padding=34, width=w-padding-17, height=h-40;
-  const values=result.horizon.elevation.filter((v):v is number=>v!==null);
-  const earth=result.samples.earth_el[index], sun=result.samples.sun_el[index];
-  const lo=Math.floor(Math.min(-2,earth,sun,...values)-1), hi=Math.ceil(Math.max(2,earth,sun,...values)+1);
-  const px=(az:number)=>padding+az/360*width;
-  const py=(el:number)=>10+(hi-el)/(hi-lo)*height;
-  ctx.font="10px monospace";ctx.strokeStyle="#29435a";
+  const s=result.samples, clearance=Number(result.config.clearance)||0, terrain=result.horizon.elevation;
+  const left=40, right=w-14, top=26, bottom=h-24;
+  const values=terrain.filter((v):v is number=>v!==null);
+  const earth=s.earth_el[index], sun=s.sun_el[index], limit=s.earth_limit[index];
+  const lo=Math.floor(Math.min(-2,earth,sun,...values)-1), hi=Math.ceil(Math.max(2,earth,sun,...values)+clearance+1);
+  const ax=(az:number)=>left+az/360*(right-left);
+  const px=(az:number)=>ax(((az%360)+360)%360);
+  const py=(el:number)=>top+(hi-el)/(hi-lo)*(bottom-top);
+  ctx.font="10px monospace";ctx.strokeStyle="#29435a";ctx.lineWidth=1;ctx.textAlign="right";
   for(let line=0;line<=4;line++){
     const el=lo+(hi-lo)*line/4,y=py(el);
-    ctx.beginPath();ctx.moveTo(padding,y);ctx.lineTo(w-17,y);ctx.stroke();
-    ctx.fillStyle="#a0b1c9";ctx.fillText(el.toFixed(1)+"°",1,y+3);
+    ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(right,y);ctx.stroke();
+    ctx.fillStyle="#a0b1c9";ctx.fillText(el.toFixed(1)+"°",left-5,y+3);
   }
-  ["N","E","S","W","N"].forEach((label,i)=>ctx.fillText(label,px(i*90)-3,h-9));
-  ctx.strokeStyle="#76d7f4";ctx.lineWidth=1.6;ctx.beginPath();
-  let open=false;
-  [...result.horizon.elevation,result.horizon.elevation[0]].forEach((el,i)=>{
-    if(el===null){open=false;return;}
-    const x=px(i*360/result.horizon.azimuth.length);
-    if(open)ctx.lineTo(x,py(el));else ctx.moveTo(x,py(el));
-    open=true;
-  });
-  ctx.stroke();
-  [[result.samples.earth_az[index],earth,"#6ee2b4"],[result.samples.sun_az[index],sun,"#ffca7e"]].forEach(row=>{
+  ctx.textAlign="center";
+  ["N","E","S","W","N"].forEach((label,i)=>ctx.fillText(label,ax(i*90),h-9));
+  // Terrain profile, then the same profile raised by the clearance allowance.
+  const profile=(offset:number)=>{
+    ctx.beginPath();
+    let open=false;
+    [...terrain,terrain[0]].forEach((el,i)=>{
+      if(el===null){open=false;return;}
+      const x=ax(i*360/result.horizon.azimuth.length), y=py(el+offset);
+      if(open)ctx.lineTo(x,y);else ctx.moveTo(x,y);
+      open=true;
+    });
+    ctx.stroke();
+  };
+  if(clearance>0){ctx.strokeStyle="rgba(118,215,244,.5)";ctx.setLineDash([4,4]);profile(clearance);ctx.setLineDash([]);}
+  ctx.strokeStyle="#76d7f4";ctx.lineWidth=1.6;profile(0);
+  // Line from Earth to the elevation it has to clear in its direction.
+  const ex=px(s.earth_az[index]), ey=py(earth);
+  const blocked=limit!==null&&!s.terrain[index];
+  const state=limit===null?"#bd864d":blocked?"#f18d94":"#6ee2b4";
+  if(limit!==null){
+    const need=py(limit+clearance);
+    ctx.strokeStyle=state;ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(ex,ey);ctx.lineTo(ex,need);ctx.moveTo(ex-6,need);ctx.lineTo(ex+6,need);ctx.stroke();
+  }
+  [[s.earth_az[index],earth,"#6ee2b4"],[s.sun_az[index],sun,"#ffca7e"]].forEach(row=>{
     const [az,el,color]=row as [number,number,string];
     ctx.fillStyle=color;ctx.beginPath();ctx.arc(px(az),py(el),5,0,Math.PI*2);ctx.fill();
+  });
+  const distance=s.obstruction_m[index];
+  const note=limit===null?"terrain data incomplete"
+    :!blocked?`clear by ${(s.earth_clearance[index]??0).toFixed(1)}°${s.direct[index]?"":" · RF margin too low"}`
+    :s.reason[index]==="Earth below geometric horizon"?"below the horizon"
+    :earth>limit?`inside the ${clearance}° clearance allowance`
+    :`blocked by terrain${distance===null?"":` ${(distance/1000).toFixed(1)} km away`}`;
+  // Keep the label inside the plot: prefer the side away from the nearest edge, then clamp.
+  const label="Earth: "+note;
+  ctx.font="11px monospace";
+  if(ctx.measureText(label).width>right-left-8)ctx.font="10px monospace";
+  ctx.fillStyle=state;ctx.textAlign="left";
+  const textW=ctx.measureText(label).width;
+  const preferred=ex>(left+right)/2?ex-10-textW:ex+10;
+  ctx.fillText(label,Math.max(left+4,Math.min(right-textW,preferred)),Math.max(top+12,Math.min(bottom-6,ey-9)));
+  // Legend
+  ctx.textAlign="left";ctx.font="10px monospace";
+  let x=left;
+  ([["━ terrain","#76d7f4"],["┅ clearance allowance","rgba(118,215,244,.7)"],["● Earth","#6ee2b4"],["● Sun","#ffca7e"]] as [string,string][]).forEach(([label,color])=>{
+    ctx.fillStyle=color;ctx.fillText(label,x,12);x+=ctx.measureText(label).width+14;
   });
 }
