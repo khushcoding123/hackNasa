@@ -734,3 +734,5 @@ h1{font-size:clamp(22px,2.2vw,30px);font-weight:500;letter-spacing:-.04em;line-h
 .site3d-panel{max-height:70vh;overflow:auto}
 .site3d-panel summary{cursor:pointer;font-weight:600;margin-bottom:6px}
 .site3d-panel:not([open]) summary{margin:0}
+.nav-link{display:block;padding:10px 12px;color:var(--muted);text-decoration:none;font-size:14px;border-radius:8px}
+.nav-link:hover,.nav-link:focus-visible{color:var(--cyan)}

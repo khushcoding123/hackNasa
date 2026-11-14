@@ -32,6 +32,16 @@ python -m uvicorn moonmesh.server:app --host 127.0.0.1 --port 8765
 
 The guided flow and product priorities are documented in [PRODUCT_FLOW.md](PRODUCT_FLOW.md). The original visual direction remains in [UI_REDESIGN_PLAN.md](UI_REDESIGN_PLAN.md). The workspace is a full-screen **CesiumJS** Moon (1,737,400 m radius, no Earth imagery, atmosphere or Cesium ion). **Map** mode is orthographic with even lighting; **3D** adds perspective, tilt, true-scale (1×) terrain with vertex normals, terrain shadows and *Interactive lighting* — dragging sweeps a directional light across slopes. It is an exploration aid and never affects mission dates, solar geometry or communication results. Imagery streams as tiles from the public LROC WAC WMS (`luna_wac_global` in Map mode, `luna_wac_normalized_reflectance` in 3D, 100 m/pixel source limit); the bundled color map is an explicitly labelled lower-detail fallback if the service fails. Elevation comes from the read-only `GET /api/terrain/tile` endpoint (`/api/terrain/info` lists sources, units and region footprints): the global LOLA grid everywhere, LOLA 240 m and 20 m DEMs around Haworth, Nobile Rim 1 and Malapert Massif. The browser builds the Cesium quantized-mesh tiles and normals itself (`frontend/terrain-mesh.ts`). Detail stops at each source's resolution and the status bar reports imagery, terrain and screen resolution separately. `npm run build` bundles Cesium and copies its workers/assets to `web/cesium`. Tests: `npm run test:terrain` and `python -m unittest tests.test_terrain_tiles`.
 
+## ORA relay lab
+
+Open [the ORA lab](http://127.0.0.1:8765/ora.html) from the MOONMESH menu. ORA places relays for a lunar mining site on real terrain, tests the network against node failures, runs it through time as a digital twin, sizes batteries for the lunar night, and takes the same graph engine underground. See [docs/ORA.md](docs/ORA.md) for what is built and the measured results, and [docs/ORA_TRAINING.md](docs/ORA_TRAINING.md) for the training procedure and datasets.
+
+```shell
+python -m ora.data --earth
+python -m ora.train
+python -m ora --help
+```
+
 ## Model and validation
 
 - Terrain uses [LOLA PDS products](https://imbrium.mit.edu/DATA/LOLA_GDR/POLAR/IMG/) at 20 m locally and 240 m farther out. Horizon rays include lunar curvature, sample every 2° and extend up to 150 km. Missing terrain is treated as uncertain and excluded from credited availability.

@@ -8,6 +8,7 @@ from .data import SITES
 from .models import Mission
 from .science import scenario
 from . import tiles
+from ora.api import router as ora_router
 
 app = FastAPI(title="MOONMESH", description="Lunar landing-site and communications planning prototype")
 
@@ -104,4 +105,5 @@ def terrain_tile(west: float, south: float, east: float, north: float,
     return Response(data["heights"].tobytes(), media_type="application/octet-stream", headers=headers)
 
 
+app.include_router(ora_router)
 app.mount("/", StaticFiles(directory=Path(__file__).resolve().parents[1] / "web", html=True), name="web")

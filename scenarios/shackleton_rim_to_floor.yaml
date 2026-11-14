@@ -1,0 +1,15 @@
+# Mining ice on the permanently shadowed floor of Shackleton crater, relayed up to the sunlit rim.
+site: shackleton
+candidates: 220
+radius_km: 14
+max_range_km: 12
+relay_mast_m: 10
+demand_mast_m: 2
+mining_sites: 3
+gateways: 2
+extra_relays: 3
+start: 2026-11-01
+days: 30
+step_h: 2
+seed: 0
+notes: Floor sites are the lowest gentle ground near the crater centre. Coordinates are approximate research points.

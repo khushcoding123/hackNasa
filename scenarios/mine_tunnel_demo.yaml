@@ -1,0 +1,9 @@
+# Underground dig twin.
+# Run with: python -m ora run scenarios/mine_tunnel_demo.yaml
+kind: tunnel
+layout: drift        # drift or room
+seeds: 10            # mine layouts to average over
+loops: true
+ghz: 2.4
+alpha_db_per_100m: 4
+bend_db_per_90deg: 14
