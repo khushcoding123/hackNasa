@@ -1,0 +1,8 @@
+scenario: haworth_research_5m_2m
+dem: derived/terrain/haworth/pgda90_dem_20m.tif
+latitude_deg: -86.8
+longitude_deg: 337.2
+h_tx_m: 5
+h_rx_m: 2
+radio_profile: moonmesh_2p4_ref
+seed: 42
