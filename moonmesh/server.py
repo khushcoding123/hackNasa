@@ -12,9 +12,10 @@ from ora.api import router as ora_router
 from . import tiles
 try:  # Surface coverage needs the optional training environment (rasterio, numba, prepared terrain).
     from moonmesh_train.coverage import router as coverage_router
+    from moonmesh_train.ml_compare import router as ml_compare_router  # experimental, not approved
 except ImportError as error:
     import logging
-    coverage_router = None
+    coverage_router = ml_compare_router = None
     logging.getLogger("moonmesh").warning("Surface coverage disabled (%s); start with the training venv to enable it.", error)
 
 app = FastAPI(title="MOONMESH", description="Lunar landing-site and communications planning prototype")
@@ -120,4 +121,5 @@ def terrain_tile(request: Request, west: float, south: float, east: float, north
 app.include_router(ora_router)
 if coverage_router is not None:
     app.include_router(coverage_router)
+    app.include_router(ml_compare_router)
 app.mount("/", StaticFiles(directory=Path(__file__).resolve().parents[1] / "web", html=True), name="web")
