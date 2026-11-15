@@ -5,6 +5,9 @@
   "buildCommand": "npm run build",
   "outputDirectory": "web",
   "cleanUrls": true,
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "https://pull-paragraphs-economic-informative.trycloudflare.com/api/:path*" }
+  ],
   "headers": [
     {
       "source": "/cesium/(.*)",
