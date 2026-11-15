@@ -18,7 +18,7 @@ import numpy as np
 
 from lunar_core.terrain import MOON_RADIUS_M, TerrainGrid, polar_stereographic_south
 
-from .data import DATA, SITES
+from .data import DATA, LOCAL, SITES
 
 ROOT = Path(__file__).resolve().parents[1]
 GLOBAL_META = ROOT / "web" / "assets" / "moon-elevation.json"
@@ -129,7 +129,7 @@ def level_for(resolution_m: float, size: int = DEFAULT_SIZE) -> int:
 def info(size: int = DEFAULT_SIZE):
     grid = global_grid()
     regions = []
-    for key, (name, lat, lon) in SITES.items():
+    for key, (name, lat, lon) in [i for i in SITES.items() if i[0] not in LOCAL]:
         near, far = region_grid(key, "near20km"), region_grid(key, "far")
         if near is None and far is None:
             continue
@@ -169,7 +169,7 @@ def sample_points(lat, lon):
     if np.any(lat < -70):
         x, y = polar_stereographic_south(lat, lon)
         regional = []
-        for key in SITES:
+        for key in [k for k in SITES if k not in LOCAL]:
             for suffix, resolution in (("far", 240.0), ("near20km", 20.0)):
                 grid = region_grid(key, suffix)
                 if grid is not None:

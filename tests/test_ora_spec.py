@@ -251,3 +251,25 @@ def test_analyse_compares_three_layouts():
     assert out["recommended"] in out["layouts"]
     assert out["layouts"]["tree"]["links"] <= out["layouts"]["mesh"]["links"]
     assert {"gateway", "mine"} <= {n["role"] for n in out["nodes"]}
+
+
+def test_mission_and_site_key_requests_work_for_a_non_polar_area():
+    from lunar_core.terrain import set_frame
+    from moonmesh import data as moon_data
+    from moonmesh import globaldem
+    from moonmesh.models import Mission
+    from moonmesh.science import scenario
+    from ora.api import NetworkBody, network_for
+    from ora.area import register
+    if not globaldem.available():
+        pytest.skip("ldem_64.img not installed")
+    try:
+        key, _, _ = register([(0.4, 23.0), (0.4, 23.5), (-0.1, 23.5), (-0.1, 23.0)])
+        moon_data.SITES.pop(key)
+        moon_data.LOCAL.discard(key)
+        set_frame(None)
+        assert scenario(Mission(site=key, start="2026-03-01", end="2026-03-02", minutes=60), include_map=False)["site"]["name"]
+        set_frame(None)
+        assert network_for(NetworkBody(site=key, radius_km=11.0))["n_relays"] > 0
+    finally:
+        set_frame(None)

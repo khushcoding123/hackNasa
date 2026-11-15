@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.staticfiles import StaticFiles
 from spiceypy.utils.exceptions import SpiceyError
 
-from .data import SITES
+from .data import LOCAL, SITES
 from .models import Mission
 from .science import scenario
 from ora.api import router as ora_router
@@ -27,7 +27,7 @@ def compute(mission, **kwargs):
 
 @app.get("/api/config")
 def config():
-    return dict(defaults=Mission(), sites=SITES)
+    return dict(defaults=Mission(), sites={k: v for k, v in SITES.items() if k not in LOCAL})
 
 
 @app.post("/api/mission")
@@ -38,7 +38,7 @@ def mission(body: Mission):
 @app.post("/api/compare")
 def compare(body: Mission):
     output = []
-    for site in SITES:
+    for site in [s for s in SITES if s not in LOCAL]:
         result = compute(body.model_copy(update=dict(site=site, latitude=None, longitude=None)), include_map=False)
         output.append({key: result[key] for key in ("site", "direct", "solar", "network", "worst", "recommended", "feasible")})
     return output

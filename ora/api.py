@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from lunar_core.terrain import set_frame
+from moonmesh import data as moon_data
 from . import area as drawn_area
 from . import breadcrumb, resilience, twin
 from .data import ALL_SITES
@@ -59,7 +60,9 @@ class NetworkBody(BaseModel):
                 changes.setdefault(name, value)
             changes.update(site=key, polygon=tuple(tuple(p) for p in self.polygon), radius_km=radius_km + 0.3, name=f"drawn_{key}")
         elif self.site:
-            set_frame(None)
+            moon_data.activate(self.site)   # restores the local projection for drawn areas outside the polar cap
+            if self.site in moon_data.SITES:
+                ALL_SITES.setdefault(self.site, moon_data.SITES[self.site])
             changes["site"] = self.site
         else:
             set_frame(None)

@@ -137,10 +137,15 @@ def register(polygon):
         if not path.is_file():
             partial = path.with_suffix(".partial")
             data = globaldem.crop(extent, stride) if local else thin(moon_data.crop(site, product, extent), stride)
+            if local and suffix == "near20km":
+                data.update(frame=meta["frame"], name=name, lat=meta["lat"], lon=meta["lon"])
             with partial.open("wb") as file:
                 np.savez_compressed(file, **data)
             partial.replace(path)
-    if not local:
+    if local:
+        moon_data.SITES[key] = site
+        moon_data.LOCAL.add(key)
+    else:
         moon_data.SITES[key] = site   # only polar crops can be drawn by the Moon viewer's polar terrain tiles
     ora_data.ALL_SITES[key] = site
     prune(keep=key)
