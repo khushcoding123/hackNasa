@@ -7,7 +7,8 @@ import {
 import {LANDMARKS, coordinate, type Landmark} from "./landmarks.js";
 import {addImagery, type ImageryHandle, type ImageryState} from "./imagery.js";
 import {MoonTerrainProvider, loadTerrainInfo} from "./terrain.js";
-import {SiteView} from "./site3d.js";
+import {SiteView, detailForReach} from "./site3d.js";
+import {LoadingCover} from "./loading.js";
 import {icon} from "./icons.js";
 import type {AreaResult, Candidate, ReferenceFailure, ReferenceMission, Result} from "./types.js";
 import {boresightHit, orbitPeriod, satelliteAccess, satellitePosition, satelliteState, surfacePosition} from "./orbital-preview.js";
@@ -25,6 +26,8 @@ const deg = CesiumMath.toDegrees, rad = CesiumMath.toRadians;
 const SATELLITE_MODEL = "/assets/cassini-satellite.glb", SATELLITE_PIXELS = 220;
 /** The supplied Cassini model is about 700 units across; scaled so the spacecraft body is roughly 7 m, its real size. */
 const CASSINI_SCALE = 0.0135;
+/** Live satellite pass: simulated seconds per real second (a 500 km orbit then loops in about two minutes). */
+const PASS_SPEED = 60;
 const ORBIT_COLOR = Color.fromCssColorString("#ffd479"), SATELLITE_LINK_COLOR = Color.fromCssColorString("#ff5ad0");
 const satelliteModel = () => ({uri: SATELLITE_MODEL, minimumPixelSize: SATELLITE_PIXELS, scale: CASSINI_SCALE, lightColor: new Color(1.8, 1.8, 1.8, 1), maximumScale: 4_000_000, shadows: ShadowMode.DISABLED});
 /** Cassini in Cesium's entity frame (+x forward, +y left, +z up): the high-gain dish looks along the model's +x and its long magnetometer boom
@@ -81,6 +84,8 @@ export interface MoonHooks {
  onSelectCandidate?: (candidate: Candidate) => void;
  /** A square or free-form area was drawn: vertices as [latitude, east longitude]. */
  onArea?: (polygon: [number, number][]) => void;
+ /** The live satellite pass moved: seconds after the overhead pass, a few times a second. */
+ onSatelliteTime?: (seconds: number) => void;
 }
 
 /** CesiumJS Moon workspace. Visual and geographic only: all mission values come from the mission API. */
@@ -143,6 +148,15 @@ export class MoonView {
  private lightYaw = 40;
  private lightElevation = 30;
  private site: SiteView | undefined;
+ private loader: LoadingCover | undefined;
+ private loadingDone = 0;
+ private cameraMoving = false;
+ private layoutResult: AreaResult | undefined;
+ private layoutFormat = "";
+ private satelliteSeconds = 0;
+ private pass = {playing: !matchMedia("(prefers-reduced-motion: reduce)").matches, base: 0, startedAt: performance.now()};
+ private live: {result: AreaResult; nodes: {node: AreaResult["nodes"][number]; at: Cartesian3}[]; visible: boolean[]; satellite: Cartesian3; aim: Cartesian3;
+  orientation: Quaternion; linked: number; seconds: number; reported: number} | undefined;
  private drawKind: "rect" | "free" | undefined;
  private drawing: {start: Cartesian2; screen: Cartesian2[]; points: Cartesian3[]} | undefined;
  private draft: Cartesian3[] = [];
@@ -173,6 +187,8 @@ export class MoonView {
    <div class="vw-modes" role="group" aria-label="View mode"><button data-mode="map" aria-pressed="true">Map</button><button data-mode="3d" aria-pressed="false">3D</button></div>
    <button class="vw-site-btn" data-site3d title="Open the selected pin or current Moon location in three dimensions">${icon("terrain")} Site view</button>
   </div>
+  <div class="vw-pass" hidden role="group" aria-label="Satellite pass"><button type="button" data-pass>❚❚</button><span data-pass-text aria-live="off"></span></div>
+  <button class="vw-detail-btn" data-detail hidden title="Open a close-up 3D cut-out of the calculated area with its nodes, links and relay satellite">${icon("terrain")}<span><strong>Detailed view</strong><small>3D close-up of the calculated area</small></span></button>
   <div class="vw-inspector" role="region" aria-label="Location inspector" aria-live="polite" hidden></div>
   <div class="vw-toast" role="status" aria-live="polite"></div>
   <div class="vw-bottom">
@@ -182,11 +198,13 @@ export class MoonView {
    <span class="vw-light vw-3d" hidden title="Drag to change the inspection light. It does not change mission dates, solar calculations, or communication results.">Interactive lighting</span>
    <span class="vw-credit">Imagery: <a href="https://quickmap.lroc.im-ldi.com/" target="_blank" rel="noopener noreferrer">LROC QuickMap / NASA GSFC / ASU</a> · Elevation: NASA LOLA · Rendered with <a href="https://cesium.com/platform/cesiumjs/" target="_blank" rel="noopener noreferrer">CesiumJS</a></span>
   </div>`;
-  this.observer = new ResizeObserver(() => { if (this.viewer && !this.animation) this.apply(this.view); this.positionLabels(); });
+  this.observer = new ResizeObserver(() => { if (this.viewer && !this.animation) this.apply(this.view); this.positionLabels(); this.trackBottomBar(); });
+  this.loader = new LoadingCover(root, "vw-loader");
   try { this.create(); }
   catch (error) { console.error("Moon viewer failed to start", error); this.fallback(); return; }
   this.bindControls();
   this.observer.observe(root);
+  const bar = root.querySelector<HTMLElement>(".vw-bottom"); if (bar) this.observer.observe(bar);
   void this.attachTerrain();
  }
 
@@ -222,10 +240,11 @@ export class MoonView {
   this.imagery = addImagery(viewer, state => this.onImageryState(state));
   this.setupSatellite();
   // Camera motion and the orbit both request frames as needed.
-  camera.moveStart.addEventListener(() => { scene.requestRenderMode = false; });
-  camera.moveEnd.addEventListener(() => { scene.requestRenderMode = true; scene.requestRender(); this.view = this.readView(); this.clampZoom(); this.refreshReadouts(); });
+  camera.moveStart.addEventListener(() => { scene.requestRenderMode = false; this.cameraMoving = true; });
+  camera.moveEnd.addEventListener(() => { this.cameraMoving = false; scene.requestRenderMode = true; scene.requestRender(); this.view = this.readView(); this.clampZoom(); this.refreshReadouts(); });
   camera.changed.addEventListener(() => { this.clampZoom(); });
   scene.preRender.addEventListener(() => { if (this.mode === "3d") this.updateLight(); });
+  scene.preUpdate.addEventListener(() => { if (this.live) this.updateLive(); });
   scene.postRender.addEventListener(() => { this.positionLabels(); if (!scene.globe.tilesLoaded) scene.requestRender(); });
   scene.globe.tileLoadProgressEvent.addEventListener(count => { this.root.dataset.loading = String(count); scene.requestRender(); if (count === 0) this.refreshReadouts(); });
   this.setupLabels();
@@ -413,6 +432,8 @@ export class MoonView {
    b.onkeydown = event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); this.navigate(b.dataset.nav!); } };
   });
   q<HTMLButtonElement>("[data-site3d]").onclick = () => this.openSite();
+  q<HTMLButtonElement>("[data-detail]").onclick = () => this.openDetail();
+  q<HTMLButtonElement>("[data-pass]").onclick = () => this.setPassPlaying(!this.pass.playing);
   const layers = q<HTMLButtonElement>("[data-layers]"), menu = q("#vw-layer-menu");
   layers.onclick = () => { menu.hidden = !menu.hidden; layers.setAttribute("aria-expanded", String(!menu.hidden)); };
   this.root.querySelectorAll<HTMLButtonElement>("[data-draw]").forEach(b => b.onclick = () => {
@@ -702,6 +723,7 @@ export class MoonView {
   this.site?.setMission(result, 0, this.disabled);
   this.root.querySelectorAll<HTMLElement>(".vw-mission-only").forEach(node => { node.hidden = !result; });
   this.refreshMission();
+  this.updateDetailButton();
  }
  setMissionVisible(visible: boolean) {
   this.missionVisible = visible;
@@ -760,11 +782,71 @@ export class MoonView {
   const pin = this.pins.get(this.selectedPin);
   const region = this.terrain?.regionAt(this.view.lat, this.view.lon);
   const landmark = LANDMARKS.find(feature => feature.id === this.activeLandmark && angular(feature, this.view.lat, this.view.lon) < 1000);
-  const place = target ?? (pin ? {lat: pin.lat, lon: pin.lon, name: pin.name} : {lat: this.view.lat, lon: this.view.lon, name: region?.name ?? landmark?.name ?? "Moon site"});
-  const detail = this.terrain?.detailAt(place.lat, place.lon) ?? "global";
-  const mission = r && angular(r.site, place.lat, place.lon) < 500 ? r : undefined;
+  // With no pin selected, a calculated plan is the whole setup the user wants to see: open on it, wherever the map is looking.
+  const plan = this.layoutResult ? {lat: this.layoutResult.site.lat, lon: this.layoutResult.site.lon, name: `${this.layoutResult.site.name} · network`}
+   : r ? {lat: r.site.lat, lon: r.site.lon, name: `${r.site.name} · mission`} : undefined;
+  const place = target ?? (pin ? {lat: pin.lat, lon: pin.lon, name: pin.name} : plan ?? {lat: this.view.lat, lon: this.view.lon, name: region?.name ?? landmark?.name ?? "Moon site"});
+  // Show the same layers as the map: the planned area network and the mission, whenever they are near this place.
+  const L = this.layoutResult;
+  const far = (list: {lat: number; lon: number}[]) => list.reduce((m, p) => Math.max(m, angular(p, place.lat, place.lon)), 0);
+  const areaReach = L ? far([...L.nodes, ...L.polygon.map(([lat, lon]) => ({lat, lon}))]) : Infinity;
+  const missionReach = r ? far([r.site, ...r.candidates.filter(c => r.recommended.includes(c.id))]) : Infinity;
+  const near = (reach: number) => reach <= 30_000;
+  const reach = Math.max(near(areaReach) ? areaReach : 0, near(missionReach) ? missionReach : 0);
+  const detail = detailForReach(this.terrain?.detailAt(place.lat, place.lon) ?? "global", reach);
   this.root.dataset.site = "open";
-  this.site = new SiteView(this.root, {...place, detail, result: mission, index: this.index, disabled: this.disabled, onClose: () => this.closeSite()});
+  this.site = new SiteView(this.root, {...place, detail, result: near(missionReach) ? r : undefined, index: this.index, disabled: this.disabled, focus: !target && !pin && plan && L ? "area" : "site", heading: this.mapHeading(),
+   area: L && near(areaReach) ? {result: L, format: this.layoutFormat || L.recommended, seconds: this.live ? this.passSeconds() : this.satelliteSeconds} : undefined, onClose: () => this.closeSite()});
+ }
+ /** Close-up of the calculated area: the terrain cut-out with the planned nodes, the chosen layout's links,
+  * the lander and recommended relays, and the assumed relay satellite in its true direction. */
+ openDetail() {
+  if (this.site) return;
+  const L = this.layoutResult, r = this.result;
+  if (!L && !r) return;
+  const centre = L ? {lat: L.site.lat, lon: L.site.lon} : {lat: r!.site.lat, lon: r!.site.lon};
+  const points: {lat: number; lon: number}[] = [...(L?.nodes ?? []), ...(L?.polygon.map(([lat, lon]) => ({lat, lon})) ?? [])];
+  const missionPoints = r ? [r.site, ...r.candidates.filter(c => r.recommended.includes(c.id))] : [];
+  const reach = (list: {lat: number; lon: number}[]) => list.reduce((m, p) => Math.max(m, angular(p, centre.lat, centre.lon)), 500);
+  const areaReach = reach(points), missionReach = reach(missionPoints);
+  // The mission lander and relays join the close-up when they sit near the area; a far-off lander would only shrink the view.
+  const withMission = !!r && (!L || missionReach <= Math.max(areaReach * 3, 8000));
+  const detail = detailForReach(this.terrain?.detailAt(centre.lat, centre.lon) ?? "global", Math.max(areaReach, withMission ? missionReach : 0));
+  if (!document.body.classList.contains("panel-collapsed")) document.querySelector<HTMLButtonElement>("#panel-close")?.click();
+  this.root.dataset.site = "open";
+  const name = L ? `${L.site.name} · mission area` : `${r!.site.name} · mission`;
+  this.site = new SiteView(this.root, {...centre, name, detail, result: withMission ? r : undefined, index: this.index, disabled: this.disabled, focus: "area", heading: this.mapHeading(),
+   area: L ? {result: L, format: this.layoutFormat || L.recommended, seconds: this.live ? this.passSeconds() : this.satelliteSeconds} : undefined, onClose: () => this.closeSite()});
+ }
+ /** The map camera's heading, so a close-up opens facing the same way. */
+ private mapHeading() { const h = this.viewer?.scene.camera.heading; return h === undefined || !Number.isFinite(h) ? undefined : h; }
+ /** Expose the readout bar's height so the Detailed view button can sit above it on narrow views. */
+ private trackBottomBar() {
+  const bar = this.root.querySelector<HTMLElement>(".vw-bottom");
+  if (bar) this.root.style.setProperty("--vw-bottom-h", `${bar.offsetHeight}px`);
+ }
+ private updateDetailButton() {
+  const button = this.root.querySelector<HTMLButtonElement>("[data-detail]"); if (!button) return;
+  button.hidden = !(this.layoutResult || this.result);
+ }
+ /** Cover the view while a calculation runs. Call with a title to show or update it; call with none to remove it once the
+  * Moon has finished flying to the result and loading its terrain tiles (capped, so a slow tile never traps the cover). */
+ setLoading(title?: string, detail = "") {
+  const loader = this.loader; if (!loader) return;
+  clearTimeout(this.loadingDone); this.loadingDone = 0;
+  if (title) { loader.show(title, detail); return; }
+  if (!loader.visible) return;
+  const viewer = this.viewer, started = performance.now();
+  loader.show("Rendering the result", "Drawing the network and streaming terrain…");
+  const check = () => {
+   const waited = performance.now() - started;
+   const settled = !viewer || viewer.isDestroyed() || (!this.animation && !this.cameraMoving && viewer.scene.globe.tilesLoaded);
+   if ((settled && waited > 250) || waited > 9000) { this.loadingDone = 0; loader.hide(); return; }
+   viewer?.scene.requestRender();
+   // Timers, not animation frames: frames stop while the window is in the background, which would leave the cover up.
+   this.loadingDone = window.setTimeout(check, 120);
+  };
+  this.loadingDone = window.setTimeout(check, 120);
  }
  closeSite() { this.site?.dispose(); this.site = undefined; delete this.root.dataset.site; this.viewer?.scene.requestRender(); }
  // ---------- drawn area ----------
@@ -838,6 +920,8 @@ export class MoonView {
  setLayout(result: AreaResult | undefined, format: string, seconds = 0) {
   const viewer = this.viewer; if (!viewer) return;
   for (const e of [...viewer.entities.values]) if (String(e.id).startsWith("layout")) viewer.entities.remove(e);
+  this.layoutResult = result; this.layoutFormat = format; this.satelliteSeconds = seconds;
+  this.updateDetailButton();
   if (result) {
    const colors = {gateway: "#84deff", relay: "#73d8ae", mine: "#f4ba72"} as const, letter = {gateway: "G", relay: "R", mine: "M"} as const;
    const at = new Map(result.nodes.map(n => [n.id, this.lift(n.lat, n.lon, 30)]));
@@ -903,18 +987,61 @@ export class MoonView {
   viewer.scene.requestRender();
  }
 
- /** Geometry-only preview: radio paths are straight and hidden below the elevation mask. */
+ /** Seconds after the overhead pass that the satellite is at now: the paused time, or that time plus the live clock. */
+ passSeconds() {
+  const p = this.pass, period = orbitPeriod();
+  const t = p.playing ? p.base + (performance.now() - p.startedAt) / 1000 * PASS_SPEED : p.base;
+  return ((t % period) + period) % period;
+ }
+ /** Play or pause the live pass. While it plays, the satellite flies its orbit and every link re-aims at it each frame. */
+ setPassPlaying(playing: boolean) {
+  const now = this.passSeconds();
+  this.pass = {...this.pass, playing, base: now, startedAt: performance.now()};
+  this.renderPassControl();
+  this.viewer?.scene.requestRender();
+ }
+ /** Recompute the satellite, its antenna axis and every node's access once per frame; entity callbacks read this. */
+ private updateLive() {
+  const L = this.live; if (!L) return;
+  const t = this.passSeconds();
+  const state = satelliteState(L.result.site.lat, L.result.site.lon, t);
+  const vec = (v: number[], out: Cartesian3) => Cartesian3.fromElements(v[0], v[1], v[2], out);
+  vec(state.position, L.satellite);
+  satelliteAttitude(vec(state.radial, new Cartesian3()), vec(state.tangent, new Cartesian3()), L.orientation, vec(state.boresight, new Cartesian3()));
+  const hit = boresightHit(state), reach = Math.hypot(...state.position) - R;
+  if (hit) vec(hit, L.aim); else Cartesian3.add(L.satellite, Cartesian3.multiplyByScalar(vec(state.boresight, new Cartesian3()), reach * 1.5, new Cartesian3()), L.aim);
+  let linked = 0;
+  L.nodes.forEach((n, i) => { const a = satelliteAccess(n.node, state.position, state.boresight); L.visible[i] = a.visible; if (a.visible) linked++; });
+  L.linked = linked; L.seconds = t;
+  // Tell the panel (slider, table) a few times a second, not every frame.
+  const now = performance.now();
+  if (now - L.reported > 250) { L.reported = now; this.renderPassControl(); this.hooks.onSatelliteTime?.(t); }
+ }
+ private renderPassControl() {
+  const box = this.root.querySelector<HTMLElement>(".vw-pass"); if (!box) return;
+  const L = this.live; box.hidden = !L; if (!L) return;
+  const playing = this.pass.playing, button = box.querySelector<HTMLButtonElement>("button")!;
+  button.textContent = playing ? "❚❚" : "▶"; button.setAttribute("aria-label", playing ? "Pause the satellite pass" : "Play the satellite pass");
+  box.querySelector<HTMLElement>("[data-pass-text]")!.innerHTML = `S1 ${playing ? "live pass" : "paused"} · +${(L.seconds / 60).toFixed(1)} min · <span class="on">${L.linked} of ${L.nodes.length} nodes linked</span>`;
+ }
+
+ /** Geometry-only preview: radio paths are straight and hidden below the elevation mask. The satellite flies its orbit
+  * (PASS_SPEED times real time) and each node's link follows it until that node loses it, then returns on the next pass. */
  setSatellitePreview(result: AreaResult | undefined, seconds = 0) {
   const viewer = this.viewer; if (!viewer) return;
   for (const e of [...viewer.entities.values]) {
    if (String(e.id).startsWith("layout:orbital:")) viewer.entities.remove(e);
    if (String(e.id).startsWith("satellite:")) e.show = !result;
   }
+  this.live = undefined;
   if (result) {
-   const state = satelliteState(result.site.lat, result.site.lon, seconds);
-   const satellite = state.position, position = new Cartesian3(...satellite);
-   const vec = (v: number[]) => new Cartesian3(v[0], v[1], v[2]);
-   viewer.entities.add({id: "layout:orbital:satellite", position, orientation: satelliteAttitude(vec(state.radial), vec(state.tangent), new Quaternion(), vec(state.boresight)), model: satelliteModel(),
+   this.satelliteSeconds = seconds;
+   this.pass = {...this.pass, base: seconds, startedAt: performance.now()};
+   const nodes = result.nodes.map(node => ({node, at: new Cartesian3(...surfacePosition(node.lat, node.lon, node.elevation + 10))}));
+   const live = this.live = {result, nodes, visible: nodes.map(() => false), satellite: new Cartesian3(), aim: new Cartesian3(), orientation: new Quaternion(), linked: 0, seconds, reported: 0};
+   this.updateLive();
+   viewer.entities.add({id: "layout:orbital:satellite", position: new CallbackPositionProperty((_t, out) => Cartesian3.clone(live.satellite, out), false),
+    orientation: new CallbackProperty((_t, out) => Quaternion.clone(live.orientation, out), false), model: satelliteModel(),
     label: {text: "S1 · assumed relay satellite", font: "600 13px IBM Plex Mono, monospace", fillColor: ORBIT_COLOR,
      outlineColor: Color.BLACK, outlineWidth: 3, style: LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cartesian2(0, -(SATELLITE_PIXELS / 2 + 12)), disableDepthTestDistance: Number.POSITIVE_INFINITY}});
    const period = orbitPeriod();
@@ -922,18 +1049,16 @@ export class MoonView {
    viewer.entities.add({id: "layout:orbital:track", polyline: {positions: orbit, arcType: ArcType.NONE, width: 4,
     material: new PolylineGlowMaterialProperty({color: ORBIT_COLOR.withAlpha(0.8), glowPower: 0.2})}});
    // The antenna axis: where the satellite is facing. It ends on the Moon, or just past the limb when it points away.
-   const hit = boresightHit(state), reach = Math.hypot(...satellite) - R;
-   const aimEnd = hit ? vec(hit) : Cartesian3.add(position, Cartesian3.multiplyByScalar(vec(state.boresight), reach * 1.5, new Cartesian3()), new Cartesian3());
-   viewer.entities.add({id: "layout:orbital:boresight", name: "Antenna pointing", polyline: {positions: [position, aimEnd], arcType: ArcType.NONE, width: 2,
+   viewer.entities.add({id: "layout:orbital:boresight", name: "Antenna pointing", polyline: {positions: new CallbackProperty(() => [live.satellite, live.aim], false), arcType: ArcType.NONE, width: 2,
     material: new PolylineDashMaterialProperty({color: Color.fromCssColorString("#6ee7a8"), dashLength: 10})}});
    const dotted = () => new PolylineDashMaterialProperty({color: SATELLITE_LINK_COLOR, gapColor: Color.TRANSPARENT, dashLength: 12, dashPattern: 0b0011001100110011});
-   for (const node of result.nodes) {
-    if (!satelliteAccess(node, satellite, state.boresight).visible) continue;
-    viewer.entities.add({id: `layout:orbital:link:${node.id}`, polyline: {
-     positions: [new Cartesian3(...surfacePosition(node.lat, node.lon, node.elevation + 10)), position],
+   nodes.forEach((n, i) => {
+    viewer.entities.add({id: `layout:orbital:link:${n.node.id}`, polyline: {
+     positions: new CallbackProperty(() => [n.at, live.satellite], false), show: new CallbackProperty(() => live.visible[i], false),
      arcType: ArcType.NONE, width: 3, material: dotted(), depthFailMaterial: dotted()}});
-   }
+   });
   }
+  this.renderPassControl();
   viewer.scene.requestRender();
  }
  showSatelliteOverview(result: AreaResult, seconds = 0) {
@@ -954,7 +1079,7 @@ export class MoonView {
   return {mode: this.mode, view: this.view, imagery: this.imagery?.state, imageryCounts: this.imagery?.counts, terrainSuccess: terrain?.successes ?? 0, terrainFailures: terrain?.failures ?? 0};
  }
  dispose() {
-  this.disposed = true; this.closeSite(); clearInterval(this.satelliteTimer); cancelAnimationFrame(this.animation); this.observer.disconnect(); this.handler?.destroy();
+  this.disposed = true; this.closeSite(); this.loader?.dispose(); clearTimeout(this.loadingDone); clearInterval(this.satelliteTimer); cancelAnimationFrame(this.animation); this.observer.disconnect(); this.handler?.destroy();
   if (this.viewer && !this.viewer.isDestroyed()) this.viewer.destroy();
   this.viewer = undefined;
  }

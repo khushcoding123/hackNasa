@@ -231,22 +231,34 @@ function values(){
 }
 
 async function run(){
- if(!configured||busy||!area||!form.reportValidity())return;
+ if(!configured||busy||!area)return;
+ // A field inside the collapsed Expert settings would otherwise make Calculate silently do nothing: open it and say which.
+ if(!form.checkValidity()){
+  const bad=form.querySelector<HTMLInputElement>("input:invalid, select:invalid");   // fieldsets match :invalid too
+  bad?.closest("details")?.setAttribute("open","");
+  const label=bad?.closest("label")?.firstChild?.textContent?.trim()||bad?.name||"a required field";
+  status(`Calculation not started: "${label}" is empty or out of range. Fix it in the settings (now open), then calculate again. If several are empty, restart the MOONMESH server so it sends current defaults.`,true);
+  bad?.scrollIntoView({block:"center"});form.reportValidity();
+  return;
+ }
  busy=true;
  document.body.classList.add("computing");$("#view").setAttribute("aria-busy","true");
  $<HTMLButtonElement>('button[type="submit"]').disabled=true;
  status("Computing terrain, ephemerides and candidate relay paths…");
+ moon?.setLoading("Calculating your mission","Computing terrain, ephemerides and candidate relay paths…");
  try{
    const limits=values();
    const layoutRequest={polygon:area,max_relays:limits.max_relays,budget_usd:limits.budget_usd,relay_cost_usd:limits.relay_cost_usd};
    const fresh=layoutKey!==JSON.stringify(layoutRequest);
    if(fresh){
     status("Choosing relay sites and comparing layouts inside your area… about 20 seconds, up to a minute or two for very large areas.");
+    moon?.setLoading("Planning your network","Choosing relay sites and comparing layouts inside your area. About 20 seconds, longer for very large areas.");
     layout=await api<AreaResult>("ora/area",layoutRequest);layoutKey=JSON.stringify(layoutRequest);layoutFormat=layout.recommended;
     const region=$<HTMLSelectElement>('[name="site"]');if(!region.querySelector(`option[value="${layout.site.key}"]`))region.add(new Option(layout.site.name,layout.site.key));
     region.value=layout.site.key;for(const name of ["latitude","longitude"])$<HTMLInputElement>(`[name="${name}"]`).value="";
     sites[layout.site.key]=[layout.site.name,layout.site.lat,layout.site.lon];
     status("Computing terrain, ephemerides and candidate relay paths…");
+    moon?.setLoading("Calculating your mission","Computing terrain, ephemerides and candidate relay paths…");
    }
    const requested=values(), key=JSON.stringify(requested);
    const next=await api<Result>("mission",requested);
@@ -267,9 +279,12 @@ async function run(){
    navigate(fresh?"layout":"overview");
    if(!fresh)moon?.flyToSite(result.site.lat,result.site.lon);
  }catch(error){status((result?"Previous results shown. ":"")+(error as Error).message,true);if(!result)outlet.innerHTML=`<section class="panel initial-state"><h2>Mission could not be computed</h2><p class="muted">Review the settings and use Run mission to retry. The error is shown above.</p></section>`;}
- finally{busy=false;document.body.classList.remove("computing");$("#view").setAttribute("aria-busy","false");$<HTMLButtonElement>('button[type="submit"]').disabled=false;}
+ finally{busy=false;moon?.setLoading();document.body.classList.remove("computing");$("#view").setAttribute("aria-busy","false");$<HTMLButtonElement>('button[type="submit"]').disabled=false;}
 }
 
+// run() validates itself, so an invalid field hidden in the collapsed Expert settings is opened and named instead of
+// the browser silently refusing to submit.
+form.noValidate=true;
 form.onsubmit=e=>{e.preventDefault();void run();};
 document.addEventListener("click",event=>{
  const button=(event.target as HTMLElement).closest<HTMLButtonElement>("button[data-view]");
@@ -474,6 +489,14 @@ function render(){
  connect();paint();
 }
 
+/** The map's live satellite pass moved on: keep the pass slider and the node table in step, unless the slider is being dragged. */
+function onSatelliteTime(seconds:number){
+ satelliteSeconds=Math.round(seconds);
+ const slider=document.querySelector<HTMLInputElement>("#satellite-time");
+ if(!slider||!layout||document.activeElement===slider)return;
+ slider.value=String(satelliteSeconds);
+ const readout=document.querySelector<HTMLElement>("#satellite-readout");if(readout)readout.innerHTML=satelliteReadout(layout);
+}
 function satelliteReadout(L:AreaResult){
  const state=satelliteState(L.site.lat,L.site.lon,satelliteSeconds), o=getOrbit();
  const access=L.nodes.map(v=>satelliteAccess(v,state.position,state.boresight));
@@ -853,7 +876,7 @@ function usePin(lat:number,lon:number,_site:string){
 function startMoon(attempt=0){
  const host=$("#moon"), box=host.getBoundingClientRect();
  if((box.width<2||box.height<2||document.hidden)&&attempt<50){setTimeout(()=>startMoon(attempt+1),200);return;}
- moon=new MoonView(host,{onUsePin:usePin,onChooseRegion:chooseRegion,onSelectCandidate:selectTower,onArea});
+ moon=new MoonView(host,{onUsePin:usePin,onChooseRegion:chooseRegion,onSelectCandidate:selectTower,onArea,onSatelliteTime});
  (window as unknown as {__moonview?:MoonView}).__moonview=moon;   // diagnostics hook for browser tests
  if(host.querySelector(".vw-fallback")&&attempt<53){
   const failed=moon;setTimeout(()=>{if(moon!==failed)return;failed.dispose();host.replaceChildren();startMoon(Math.max(attempt,50)+1);},800);

@@ -1,12 +1,15 @@
 import {
- ACESFilmicToneMapping, AmbientLight, BoxGeometry, BufferAttribute, BufferGeometry, CanvasTexture, Color, ConeGeometry, CylinderGeometry, DataTexture, DirectionalLight, DoubleSide, Group, Line, LineBasicMaterial, LineDashedMaterial,
+ ACESFilmicToneMapping, AmbientLight, Box3, BoxGeometry, BufferAttribute, BufferGeometry, CanvasTexture, Color, ConeGeometry, CylinderGeometry, DataTexture, DirectionalLight, DoubleSide, Group, Line, LineBasicMaterial, LineDashedMaterial,
  Mesh, MeshBasicMaterial, MeshStandardMaterial, PerspectiveCamera, RepeatWrapping, Scene, SphereGeometry, Spherical, Vector2, Vector3, WebGLRenderer, PCFSoftShadowMap, SRGBColorSpace,
 } from "three";
 import {OrbitControls} from "three/examples/jsm/controls/OrbitControls.js";
+import {GLTFLoader} from "three/examples/jsm/loaders/GLTFLoader.js";
 import {ViewCube, type Vec3} from "./viewcube.js";
 import {MOON_RADIUS_M} from "./terrain-mesh.js";
 import {loadBundledPatch, loadWacPatch, loadWmsPatch, nacLayerAt, withNac} from "./site-imagery.js";
-import type {Result} from "./types.js";
+import {satelliteAccess, satelliteState} from "./orbital-preview.js";
+import {LoadingCover} from "./loading.js";
+import type {AreaNode, AreaResult, Result} from "./types.js";
 
 /** Three.js close-up of any lunar location: a real-scale mesh of the best available LOLA terrain, aligned LROC imagery,
  * adjustable inspection lighting, and mission objects where available. Visual only: all mission values come from the mission API.
@@ -17,6 +20,15 @@ const PATCHES = {
  far: {half: 45_000, size: 385, inner: 10_000, innerSize: 257, nacHeight: 1800, wacHeight: 4800},
  global: {half: 175_000, size: 257, inner: 20_000, innerSize: 257, nacHeight: 5000, wacHeight: 9000},
 } as const;
+export type SiteDetail = keyof typeof PATCHES;
+/** The finest patch that the terrain allows and that still holds everything within `reach` metres of the centre. */
+export function detailForReach(best: SiteDetail, reach: number): SiteDetail {
+ const order: SiteDetail[] = ["near", "far", "global"];
+ for (const d of order.slice(order.indexOf(best))) if (reach * 1.3 <= PATCHES[d].half) return d;
+ return "global";
+}
+const ROLE_COLOR = {gateway: 0x84deff, relay: 0x73d8ae, mine: 0xf4ba72} as const, ROLE_LETTER = {gateway: "G", relay: "R", mine: "M"} as const;
+const SATELLITE_LINK = 0xff5ad0, SATELLITE_MODEL = "/assets/cassini-satellite.glb";
 const rad = (d: number) => d * Math.PI / 180;
 const clamp = (x: number, a: number, b: number) => Math.min(b, Math.max(a, x));
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&#39;"}[c]!));
@@ -47,10 +59,20 @@ async function loadGrid(lat: number, lon: number, half: number, size: number, si
   sources: (response.headers.get("X-Terrain-Sources") ?? "").split(",").filter(Boolean)};
 }
 
+/** A planned area network to show in the close-up: its nodes, the links of the chosen layout and the assumed relay satellite. */
+export interface SiteArea { result: AreaResult; format: string; seconds: number }
+
 export interface SiteOptions {
- lat: number; lon: number; name: string; detail: "near" | "far" | "global"; result?: Result; index?: number; disabled?: Set<string>;
+ lat: number; lon: number; name: string; detail: SiteDetail; result?: Result; index?: number; disabled?: Set<string>;
+ area?: SiteArea;
+ /** Opened from the Detailed view button: framed on the area rather than on a pin. */
+ focus?: "area" | "site";
+ /** Map camera heading in radians (0 = looking north), so the close-up opens facing the way the map did. */
+ heading?: number;
  onClose: () => void;
 }
+
+interface AreaPart { node: AreaNode; base: Vector3; mast: Mesh; head: Mesh; label: {el: HTMLElement; world: Vector3} }
 
 export class SiteView {
  private renderer: WebGLRenderer;
@@ -83,6 +105,15 @@ export class SiteView {
  private lander: Vector3 | undefined;
  private el$: HTMLElement;
  private observer: ResizeObserver;
+ private loader: LoadingCover;
+ // Detailed view of a planned area.
+ private areaParts: AreaPart[] = [];
+ private areaEdges: {a: AreaPart; b: AreaPart; line: Line}[] = [];
+ private areaOutline: {points: Vector2[]; line: Line} | undefined;
+ private areaReach = 0;
+ private areaCentre = new Vector2();
+ private planRing: {points: Vector2[]; line: Line; label: {el: HTMLElement; world: Vector3}} | undefined;
+ private satellite: {group: Group; dir: Vector3; label: {el: HTMLElement; world: Vector3}; links: {part: AreaPart; line: Line}[]; size: number} | undefined;
 
  constructor(private root: HTMLElement, private options: SiteOptions) {
   this.result = options.result; this.index = options.index ?? 0; this.disabled = new Set(options.disabled ?? []);
@@ -95,7 +126,7 @@ export class SiteView {
    <canvas class="site3d-canvas" tabindex="0" aria-label="3D terrain close-up of ${escapeHtml(options.name)}. Drag to orbit, scroll to zoom, right-drag to pan."></canvas>
    <div class="site3d-labels" aria-hidden="true"></div>
    <div class="site3d-bar">
-    <div><span class="site3d-kicker">LUNAR SURFACE / SITE EXPLORER</span><strong>${escapeHtml(options.name)}</strong><span class="site3d-sub">${Math.abs(options.lat).toFixed(4)}°${options.lat < 0 ? "S" : "N"} · ${((options.lon % 360) + 360) % 360 < 180 ? (((options.lon % 360) + 360) % 360).toFixed(4) + "°E" : (360 - (((options.lon % 360) + 360) % 360)).toFixed(4) + "°W"}</span></div>
+    <div><span class="site3d-kicker">${options.focus === "area" ? "MISSION AREA / DETAILED VIEW" : "LUNAR SURFACE / SITE EXPLORER"}</span><strong>${escapeHtml(options.name)}</strong><span class="site3d-sub">${Math.abs(options.lat).toFixed(4)}°${options.lat < 0 ? "S" : "N"} · ${((options.lon % 360) + 360) % 360 < 180 ? (((options.lon % 360) + 360) % 360).toFixed(4) + "°E" : (360 - (((options.lon % 360) + 360) % 360)).toFixed(4) + "°W"}</span></div>
     <button data-close>← Back to Moon</button>
    </div>
    <div class="site3d-hud"><span data-imagery>Imagery · loading</span><span data-quality>Terrain · loading</span><span>1× measured relief · close-up grain is illustrative</span><span>Drag to orbit · scroll to zoom</span></div>
@@ -106,10 +137,12 @@ export class SiteView {
     <label class="site3d-time" hidden>Mission time <output data-time-out></output><input data-time type="range" min="0" max="0" step="1" value="0"></label>
     <label>Tower size <output data-scale-out></output><input data-scale type="range" min="1" max="30" step="1" value="${this.scale}"></label>
     <label>Height exaggeration <output data-ex-out></output><input data-ex type="range" min="1" max="4" step="0.25" value="1"></label>
-    <div class="site3d-buttons"><button data-camera="site">At site</button><button data-camera="top">Overview</button><button data-camera="lander">From lander</button><select data-stand aria-label="View from a tower"><option value="">From tower…</option></select></div>
+    <div class="site3d-buttons"><button data-camera="area" ${options.area ? "" : "hidden"}>Mission area</button><button data-camera="satellite" ${options.area ? "" : "hidden"}>With satellite</button><button data-camera="site">At site</button><button data-camera="top">Overview</button><button data-camera="lander">From lander</button><select data-stand aria-label="View from a tower"><option value="">From tower…</option></select></div>
     <p class="site3d-note" data-note>Loading lunar terrain…</p>
    </details>`;
   root.append(this.el$);
+  this.loader = new LoadingCover(this.el$, "site3d-loader");
+  this.loader.show(options.focus === "area" ? "Rendering detailed view" : "Rendering site view", "Loading LOLA terrain and LROC imagery for this cut-out…");
   const canvas = this.el$.querySelector<HTMLCanvasElement>("canvas")!;
   this.renderer = new WebGLRenderer({canvas, antialias: true, powerPreference: "high-performance"});
   this.renderer.setPixelRatio(Math.min(2, devicePixelRatio));
@@ -158,7 +191,9 @@ export class SiteView {
   };
   this.q("[data-close]").onclick = () => this.options.onClose();
   this.q("[data-camera='top']").onclick = () => { this.moved = true; this.overview(); };
-  this.q("[data-camera='site']").onclick = () => { this.moved = true; this.flyover(); };
+  this.q("[data-camera='site']").onclick = () => { this.moved = true; this.flyover(true); };
+  this.q("[data-camera='area']").onclick = () => { this.moved = true; this.frameArea(); };
+  this.q("[data-camera='satellite']").onclick = () => { this.moved = true; this.frameSatellite(); };
   this.q("[data-camera='lander']").onclick = () => this.stand(this.lander);
   this.q<HTMLSelectElement>("[data-stand]").onchange = e => {
    const id = (e.target as HTMLSelectElement).value; const t = this.towers.get(id);
@@ -183,12 +218,20 @@ export class SiteView {
    const source = grid.source === "near20km" ? "20 m regional LOLA" : grid.source === "far" ? "240 m regional LOLA" : "Global LOLA";
    this.q("[data-quality]").textContent = `${source} terrain · ${Number.isFinite(m) ? Math.round(m).toLocaleString() : "?"} m source`;
    this.note(`${(grid.half * 2 / 1000).toFixed(0)} km terrain context · source ${grid.sources.join(" + ")} · true scale`);
-   void this.loadOuterImagery(grid);
-   void this.loadInner();
+   this.loader.show(this.options.focus === "area" ? "Rendering detailed view" : "Rendering site view", "Draping LROC imagery over the terrain…");
+   // Keep the cover up until the imagery is on the terrain, but never longer than 12 s: slow imagery keeps streaming behind it.
+   const imagery = Promise.allSettled([this.loadOuterImagery(grid), this.loadInner()]);
+   await Promise.race([imagery, new Promise(resolve => setTimeout(resolve, 12_000))]);
+   if (!this.disposed) requestAnimationFrame(() => requestAnimationFrame(() => this.loader.hide()));
   } catch (error) {
    if (this.disposed || (error as Error).name === "AbortError") return;
    console.error(error);
    this.note("Terrain could not be loaded for this site.");
+   const message = (error as Error).message;
+   this.loader.fail("Site view could not load terrain",
+    /\(404\)/.test(message) ? "The MOONMESH server running now is older than this page and has no site-terrain endpoint. Restart the server (Ctrl+C in its window, then start it again), reload the page and open Site view again."
+     : `${message} Check that the MOONMESH server is running, then try again.`,
+    {label: "← Back to Moon", run: () => this.options.onClose()});
   }
  }
 
@@ -339,7 +382,7 @@ export class SiteView {
  /** Mission objects. Lander and towers are real-metre objects; "Tower size" scales them so they stay findable at 14 km. */
  private buildMarkers() {
   this.markers.traverse(o => { if (o instanceof Mesh || o instanceof Line) { o.geometry.dispose(); (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m.dispose()); } });
-  this.markers.clear(); this.towers.clear(); this.labels.forEach(l => l.el.remove()); this.labels = [];
+  this.markers.clear(); this.towers.clear(); this.labels.forEach(l => l.el.remove()); this.labels = []; this.planRing = undefined;
   const select = this.q<HTMLSelectElement>("[data-stand]");
   select.length = 1;
   const labelLayer = this.q(".site3d-labels");
@@ -351,9 +394,11 @@ export class SiteView {
   const head = new Mesh(new SphereGeometry(4 * pinSize, 24, 16), red); head.position.y = 11 * pinSize;
   const tip = new Mesh(new ConeGeometry(3.5 * pinSize, 8 * pinSize, 24), red); tip.rotation.z = Math.PI; tip.position.y = 5 * pinSize;
   const eye = new Mesh(new SphereGeometry(1.6 * pinSize, 16, 12), white); eye.position.set(0, 11 * pinSize, 3.6 * pinSize);
-  pin.add(head, tip, eye); this.markers.add(pin);
-  label(this.options.name.toUpperCase(), new Vector3(0, 20 * pinSize, 0), "site");
-  const r = this.result; if (!r) { this.lander = undefined; return; }
+  pin.add(head, tip, eye);
+  // The detailed view is centred on the area, not on a dropped pin: the area's own nodes mark it instead.
+  if (this.options.focus !== "area") { this.markers.add(pin); label(this.options.name.toUpperCase(), new Vector3(0, 20 * pinSize, 0), "site"); }
+  this.buildArea(labelLayer);
+  const r = this.result; if (!r) { this.lander = undefined; this.applyScale(); return; }
   const lander = toLocal(this.basis, r.site.lat, r.site.lon, r.site.elevation);
   this.lander = lander.clone();
   const body = new Mesh(new BoxGeometry(3, 2.5, 3), new MeshStandardMaterial({color: 0xc9d2d8, roughness: 0.48, metalness: 0.55}));
@@ -393,6 +438,16 @@ export class SiteView {
    label(c.id, top.clone().add(new Vector3(0, 14, 0)));
    select.append(new Option(c.id, c.id));
   }
+  // Same outline as the Moon map: the lander and every recommended relay, 30% margin, at least 1.5 km.
+  const reach = r.candidates.filter(c => r.recommended.includes(c.id)).reduce((m, c) => { const b = toLocal(this.basis, c.lat, c.lon, c.elevation); return Math.max(m, Math.hypot(b.x - lander.x, b.z - lander.z)); }, 0);
+  const radius = Math.max(1500, reach * 1.3);
+  const points = Array.from({length: 145}, (_, i) => { const a = i / 144 * 2 * Math.PI; return new Vector2(lander.x + radius * Math.sin(a), lander.z - radius * Math.cos(a)); });
+  const ringLine = new Line(new BufferGeometry(), new LineDashedMaterial({color: 0x84deff, dashSize: radius / 30, gapSize: radius / 50}));
+  this.markers.add(ringLine);
+  const ringLabel = document.createElement("span"); ringLabel.className = "site3d-label plan"; ringLabel.textContent = `MISSION PLAN AREA · ${radius >= 1000 ? (radius / 1000).toFixed(1) + " km" : Math.round(radius) + " m"} radius`;
+  labelLayer.append(ringLabel);
+  const ringEntry = {el: ringLabel, world: new Vector3()}; this.labels.push(ringEntry);
+  this.planRing = {points, line: ringLine, label: ringEntry};
   this.applyScale(); this.paint();
  }
  private applyScale() {
@@ -422,6 +477,157 @@ export class SiteView {
    const p = tops.get(id); if (p) lab.world.copy(p).add(new Vector3(0, 12 * this.scale, 0));
    else if (lab.el.classList.contains("lander") && l) lab.world.set(l.x, l.y * ex + 8 * this.scale, l.z);
   });
+  this.placeArea();
+  const ring = this.planRing;
+  if (ring) {
+   const pts = ring.points.map(q => new Vector3(q.x, this.groundAt(q.x, q.y) * ex + 6, q.y));
+   ring.line.geometry.setFromPoints(pts); ring.line.computeLineDistances();
+   ring.label.world.copy(pts[72]).add(new Vector3(0, 20, 0));   // the south side, like the map label
+  }
+ }
+
+ // ---------- detailed view: planned area network and relay satellite ----------
+ /** Nodes as real-metre masts coloured by role, the chosen layout's links, the drawn outline draped on the terrain,
+  * and the assumed relay satellite. The satellite keeps its true direction from the area; its distance is shortened to fit. */
+ private buildArea(labelLayer: HTMLElement) {
+  this.areaParts = []; this.areaEdges = []; this.areaOutline = undefined; this.satellite = undefined;
+  const area = this.options.area; if (!area) return;
+  const L = area.result;
+  const addLabel = (text: string, cls: string) => {
+   const el = document.createElement("span"); el.className = `site3d-label ${cls}`; el.textContent = text; labelLayer.append(el);
+   const entry = {el, world: new Vector3()}; this.labels.push(entry); return entry;
+  };
+  const metal = new MeshStandardMaterial({color: 0xcfd6df, roughness: 0.48, metalness: 0.65});
+  const byId = new Map<number, AreaPart>();
+  for (const node of L.nodes) {
+   const base = toLocal(this.basis, node.lat, node.lon, node.elevation);
+   const tall = node.role === "mine" ? 12 : 30;
+   const mast = new Mesh(new CylinderGeometry(0.5, 0.8, tall, 10), metal); mast.castShadow = true;
+   mast.userData.tall = tall;
+   const foot = new Mesh(new CylinderGeometry(2.4, 2.4, 0.5, 12), new MeshStandardMaterial({color: 0xb8934b, roughness: 0.55, metalness: 0.55}));
+   foot.position.y = -tall / 2 + 0.25; mast.add(foot);
+   const head = new Mesh(new SphereGeometry(node.role === "mine" ? 2.6 : 2.2, 16, 12), new MeshBasicMaterial({color: ROLE_COLOR[node.role]}));
+   const label = addLabel(`${ROLE_LETTER[node.role]}${node.id}`, `area ${node.role}`);
+   const part = {node, base, mast, head, label};
+   this.markers.add(mast, head); this.areaParts.push(part); byId.set(node.id, part);
+  }
+  for (const [a, b] of L.layouts[area.format]?.edges ?? []) {
+   const pa = byId.get(a), pb = byId.get(b); if (!pa || !pb) continue;
+   const line = new Line(new BufferGeometry(), new LineBasicMaterial({color: 0x73d8ae}));
+   this.markers.add(line); this.areaEdges.push({a: pa, b: pb, line});
+  }
+  if (L.polygon.length >= 3) {
+   const ring = [...L.polygon, L.polygon[0]].map(([lat, lon]) => { const p = toLocal(this.basis, lat, lon, 0); return new Vector2(p.x, p.z); });
+   // Densify so the outline follows the ground instead of cutting through hills.
+   const points: Vector2[] = [];
+   for (let i = 0; i < ring.length - 1; i++) {
+    const steps = Math.max(1, Math.ceil(ring[i].distanceTo(ring[i + 1]) / 40));
+    for (let s = 0; s < steps; s++) points.push(ring[i].clone().lerp(ring[i + 1], s / steps));
+   }
+   points.push(ring[ring.length - 1]);
+   const line = new Line(new BufferGeometry(), new LineDashedMaterial({color: 0x84deff, dashSize: 45, gapSize: 28}));
+   this.markers.add(line); this.areaOutline = {points, line};
+  }
+  const flat = [...this.areaParts.map(p => new Vector2(p.base.x, p.base.z)), ...(this.areaOutline?.points ?? [])];
+  const lo = new Vector2(Infinity, Infinity), hi = new Vector2(-Infinity, -Infinity);
+  for (const p of flat) { lo.min(p); hi.max(p); }
+  this.areaCentre = flat.length ? lo.clone().add(hi).multiplyScalar(0.5) : new Vector2();
+  this.areaReach = Math.max(400, ...flat.map(p => p.distanceTo(this.areaCentre)));
+  this.buildSatellite(addLabel("", "satellite"));
+ }
+
+ private buildSatellite(label: {el: HTMLElement; world: Vector3}) {
+  const area = this.options.area!; const L = area.result;
+  const state = satelliteState(L.site.lat, L.site.lon, area.seconds);
+  const from = this.basis.origin, sat = new Vector3(...state.position), delta = sat.clone().sub(from);
+  const rangeKm = delta.length() / 1000;
+  const dir = new Vector3(delta.dot(this.basis.east), delta.dot(this.basis.up), -delta.dot(this.basis.north)).normalize();
+  const elevation = Math.asin(clamp(dir.y, -1, 1)) * 180 / Math.PI;
+  // Shown just above the horizon when it is below it, so its bearing is still readable; the label states the real elevation.
+  if (elevation < 4) { const flat = new Vector3(dir.x, 0, dir.z).normalize(); dir.copy(flat.multiplyScalar(Math.cos(rad(4)))).setY(Math.sin(rad(4))); }
+  const group = new Group(); group.name = "satellite";
+  this.markers.add(group);
+  label.el.textContent = `S1 · assumed relay satellite · ${Math.round(rangeKm).toLocaleString()} km away · ${elevation.toFixed(0)}° ${elevation < 0 ? "below horizon" : "up"} · distance not to scale`;
+  const links: {part: AreaPart; line: Line}[] = [];
+  for (const part of this.areaParts) {
+   if (!satelliteAccess(part.node, state.position, state.boresight).visible) continue;
+   const line = new Line(new BufferGeometry(), new LineDashedMaterial({color: SATELLITE_LINK, dashSize: 30, gapSize: 22}));
+   this.markers.add(line); links.push({part, line});
+  }
+  this.satellite = {group, dir, label, links, size: 1};
+  this.q<HTMLElement>(".site3d-hud span:nth-child(3)").textContent = `1× measured relief · satellite ${Math.round(rangeKm).toLocaleString()} km away, drawn closer · ${links.length} of ${this.areaParts.length} nodes see it`;
+  const fallback = () => {
+   const body = new Mesh(new BoxGeometry(1, 1, 1.2), new MeshStandardMaterial({color: 0xd9dde2, roughness: 0.4, metalness: 0.7}));
+   const wing = new MeshStandardMaterial({color: 0x173148, roughness: 0.35, metalness: 0.3});
+   for (const s of [-1, 1]) { const p = new Mesh(new BoxGeometry(2.6, 0.05, 0.9), wing); p.position.x = s * 1.9; body.add(p); }
+   const dish = new Mesh(new ConeGeometry(0.7, 0.35, 24, 1, true), new MeshStandardMaterial({color: 0xf0f0ea, side: DoubleSide})); dish.position.y = -0.7; body.add(dish);
+   return body;
+  };
+  const place = (model: Group | Mesh, across: number) => { model.userData.across = across; group.add(model); this.placeArea(); };
+  new GLTFLoader().load(SATELLITE_MODEL, gltf => {
+   if (this.disposed) return;
+   const model = gltf.scene;
+   model.traverse(o => { if (o instanceof Mesh) { o.castShadow = false; const m = o.material as MeshStandardMaterial; if (m) m.envMapIntensity = 1; } });
+   // Cassini's high-gain dish faces the model's +Y; point it at the area.
+   const box = new Box3().setFromObject(model), size = box.getSize(new Vector3()), centre = box.getCenter(new Vector3());
+   model.position.sub(centre);
+   const holder = new Group(); holder.add(model);
+   place(holder, Math.max(size.x, size.y, size.z));
+  }, undefined, () => { if (!this.disposed) place(fallback(), 4.5); });
+ }
+
+ /** Re-seat the area objects on the (possibly exaggerated) terrain at the current tower size. */
+ private placeArea() {
+  if (!this.options.area) return;
+  const ex = this.terrain?.scale.y ?? 1, k = this.scale;
+  const ground = (x: number, z: number) => this.groundAt(x, z) * ex;
+  for (const p of this.areaParts) {
+   const tall = p.mast.userData.tall as number, y = (this.grid ? this.groundAt(p.base.x, p.base.z) : p.base.y) * ex;
+   p.mast.scale.setScalar(k); p.mast.position.set(p.base.x, y + tall / 2 * k, p.base.z);
+   p.head.scale.setScalar(k); p.head.position.set(p.base.x, y + tall * k, p.base.z);
+   p.label.world.copy(p.head.position).add(new Vector3(0, 9 * k, 0));
+  }
+  for (const e of this.areaEdges) e.line.geometry.setFromPoints([e.a.head.position, e.b.head.position]);
+  if (this.areaOutline) {
+   this.areaOutline.line.geometry.setFromPoints(this.areaOutline.points.map(p => new Vector3(p.x, ground(p.x, p.y) + 4, p.y)));
+   this.areaOutline.line.computeLineDistances();
+  }
+  const s = this.satellite; if (!s) return;
+  const distance = clamp(this.areaReach * 2.4, 1500, this.half * 0.85 - this.areaCentre.length());
+  const c = this.areaCentre, anchor = new Vector3(c.x, ground(c.x, c.y), c.y), at = anchor.clone().addScaledVector(s.dir, distance);
+  s.group.position.copy(at);
+  const model = s.group.children[0];
+  if (model) {
+   const across = model.userData.across as number;
+   model.scale.setScalar(distance * 0.11 / across);
+   // Dish (+Y of the model) toward the area centre; the long boom stays roughly horizontal.
+   model.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), anchor.clone().sub(at).normalize());
+  }
+  s.label.world.copy(at).add(new Vector3(0, distance * 0.09, 0));
+  for (const link of s.links) { link.line.geometry.setFromPoints([link.part.head.position, at]); link.line.computeLineDistances(); }
+  const dash = distance / 70;
+  for (const link of s.links) { const m = link.line.material as LineDashedMaterial; m.dashSize = dash; m.gapSize = dash * 0.7; }
+ }
+ /** Horizontal unit vector from the target back toward the camera: opposite the map heading, or from the south-west. */
+ private behind() {
+  const h = this.options.heading;
+  if (h === undefined || !Number.isFinite(h)) return new Vector3(-0.67, 0, 0.74);
+  return new Vector3(-Math.sin(h), 0, Math.cos(h));   // looking along (sin h east, cos h north); scene z is south
+ }
+ private frameArea() {
+  const reach = this.areaReach || 1500, c = this.areaCentre, ex = this.terrain?.scale.y ?? 1;
+  const centre = new Vector3(c.x, this.groundAt(c.x, c.y) * ex, c.y), d = reach * 2.6;
+  this.camera.position.copy(centre).addScaledVector(this.behind(), d * 0.94).add(new Vector3(0, d * 0.62, 0));
+  this.controls.target.copy(centre); this.controls.update(); this.updateSun();
+ }
+ private frameSatellite() {
+  const s = this.satellite; if (!s) { this.frameArea(); return; }
+  const c = this.areaCentre, centre = new Vector3(c.x, this.groundAt(c.x, c.y) * (this.terrain?.scale.y ?? 1), c.y), target = centre.clone().lerp(s.group.position, 0.5);
+  const span = s.group.position.distanceTo(centre);
+  const side = new Vector3(s.dir.z, 0, -s.dir.x); if (side.lengthSq() < 1e-6) side.set(1, 0, 0); side.normalize();
+  // Level with the midpoint and far enough back that the ground network and the satellite both fit, even when it is overhead.
+  this.camera.position.copy(target).addScaledVector(side, span * 1.6).add(new Vector3(0, span * 0.05, 0));
+  this.controls.target.copy(target); this.controls.update(); this.updateSun();
  }
  /** Colour each tower and its link by whether the mission path is available at the selected time. */
  private paint() {
@@ -509,10 +715,12 @@ export class SiteView {
   const radius = MOON_RADIUS_M + elevation, norm = Math.hypot(MOON_RADIUS_M, x, z);
   return MOON_RADIUS_M * radius / norm - this.basis.origin.length();
  }
- private flyover() {
+ /** The opening camera. A detailed view frames the whole planned area; `atSite` forces the plain site flyover. */
+ private flyover(atSite = false) {
+  if (this.options.focus === "area" && !atSite) { this.frameArea(); return; }
   const patch = PATCHES[this.options.detail];
   const height = (this.imagery === "nac" ? patch.nacHeight : patch.wacHeight) * (this.imagery === "bundled" ? 1.25 : 1);
-  const x = -height * 1.7, z = height * 1.9;
+  const back = this.behind(), x = back.x * height * 2.55, z = back.z * height * 2.55;
   this.camera.position.set(x, Math.max(this.groundAt(x, z), this.groundAt(0, 0)) + height, z);
   this.controls.target.set(0, 0, 0);
   this.controls.update();
@@ -576,7 +784,7 @@ export class SiteView {
  }
 
  dispose() {
-  this.disposed = true; this.cube?.dispose(); cancelAnimationFrame(this.frame); this.abort.abort(); this.controls.dispose(); this.observer.disconnect();
+  this.disposed = true; this.cube?.dispose(); this.loader.dispose(); cancelAnimationFrame(this.frame); this.abort.abort(); this.controls.dispose(); this.observer.disconnect();
   this.scene.traverse(o => { if (o instanceof Mesh || o instanceof Line) { o.geometry.dispose(); (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => { if (m instanceof MeshStandardMaterial) { m.map?.dispose(); m.normalMap?.dispose(); m.alphaMap?.dispose(); } m.dispose(); }); } });
   this.renderer.dispose(); this.el$.remove();
  }

@@ -537,3 +537,61 @@ button.primary { box-shadow: none !important; }
   .planner .panel-head h1 { font-size: 36px; }
   .ora-app main>header h1 { font-size: 46px; }
 }
+
+/* ---------- Detailed view button (bottom right of the Moon view, after a calculation) ---------- */
+.vw-detail-btn { position: absolute; right: 20px; bottom: 14px; z-index: 6; display: inline-flex; align-items: center; gap: 12px; min-height: 58px; padding: 10px 22px 10px 16px; border-radius: 18px; background: #fff; color: #000; border: 1px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.4), 0 18px 44px rgba(0,0,0,.6), 0 0 34px rgba(132,222,255,.28); text-align: left; transition: transform .25s var(--ease), box-shadow .25s var(--ease); animation: detail-in .5s var(--ease); }
+.vw-detail-btn[hidden] { display: none; }
+.vw-detail-btn svg { width: 24px; height: 24px; flex: none; }
+.vw-detail-btn span { display: grid; gap: 1px; }
+.vw-detail-btn strong { font: 600 16px/1.1 var(--display); letter-spacing: -.02em; }
+.vw-detail-btn small { font: 500 11px var(--mono); color: #3f3f46; letter-spacing: .01em; }
+.vw-detail-btn:hover:not(:disabled) { background: #fff; transform: translateY(-2px); box-shadow: 0 0 0 1px rgba(0,0,0,.4), 0 22px 50px rgba(0,0,0,.65), 0 0 44px rgba(132,222,255,.42); }
+.vw-detail-btn:focus-visible { outline: 3px solid #84deff; outline-offset: 3px; }
+.moon-workspace[data-site=open] .vw-detail-btn { display: none; }
+@keyframes detail-in { from { opacity: 0; transform: translateY(10px); } }
+/* The readout bar sits bottom-left. Wide views keep it clear of the button; narrow views lift the button above it. */
+.moon-workspace { container-type: inline-size; }
+@container (min-width: 760px) { .moon-workspace:has(.vw-detail-btn:not([hidden])) .vw-bottom { max-width: calc(100% - 330px); } }
+@container (max-width: 759px) {
+  .vw-detail-btn { right: 12px; bottom: calc(var(--vw-bottom-h, 48px) + 22px); min-height: 48px; padding: 8px 16px 8px 12px; }
+  .vw-detail-btn small { display: none; }
+}
+
+/* ---------- Orbit loading cover (calculation and 3D rendering) ---------- */
+.orbit-loader { position: absolute; inset: 0; z-index: 15; display: grid; place-items: center; background: rgba(0,0,0,.58); opacity: 1; transition: opacity .32s var(--ease); }
+.orbit-loader[hidden] { display: none; }
+.orbit-loader.leaving { opacity: 0; pointer-events: none; }
+.site3d .orbit-loader { z-index: 30; background: rgba(0,0,0,.72); }
+.orbit-loader-card { display: grid; justify-items: center; gap: 6px; padding: 22px 30px 24px; max-width: min(380px, calc(100% - 32px)); text-align: center; background: #111113; border: 1px solid #2a2a2e; border-radius: 22px; }
+.orbit-loader-art { width: 168px; height: 168px; overflow: visible; }
+.orbit-loader-card strong { font: 600 19px/1.2 var(--display); letter-spacing: -.02em; color: #fff; }
+.orbit-loader-card span { font: 12px/1.45 var(--mono); color: #b9c3cc; }
+.ol-path { fill: none; stroke: #3a3a40; stroke-width: 2; stroke-dasharray: 3 7; stroke-linecap: round; }
+.ol-moon { fill: #c9c9c4; }
+.ol-craters circle { fill: #a6a6a0; }
+.ol-orbit { transform-origin: 100px 100px; animation: ol-spin 3.6s linear infinite; }
+.ol-body { fill: #ffd479; }
+.ol-panel { fill: #4f8fd6; }
+.ol-strut { fill: #e4e4e7; }
+.ol-beam { stroke: #ff5ad0; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 0.1 6; animation: ol-beam .7s linear infinite; }
+@keyframes ol-spin { to { transform: rotate(360deg); } }
+@keyframes ol-beam { to { stroke-dashoffset: -12; } }
+@media (prefers-reduced-motion: reduce) { .ol-orbit { animation-duration: 14s; } .ol-beam { animation: none; } }
+
+/* Detailed view labels */
+.site3d-label.area.gateway { color: #84deff; }
+.site3d-label.area.mine { color: #f4ba72; }
+.site3d-label.area.relay { color: #73d8ae; }
+.site3d-label.satellite { color: #ffd479; font-size: 12.5px; white-space: normal; width: max-content; max-width: 260px; text-align: center; }
+.site3d-label.plan { color: #84deff; letter-spacing: .04em; }
+.orbit-loader.failed .ol-orbit, .orbit-loader.failed .ol-beam { animation: none; }
+.orbit-loader.failed .orbit-loader-card strong { color: #ffb84d; }
+.orbit-loader-action { margin-top: 10px; min-height: 36px; padding: 6px 16px; border-radius: 999px; background: #fff; color: #000; border: 1px solid #fff; font-weight: 600; }
+
+/* Live satellite pass control on the Moon map */
+.vw-pass { position: absolute; left: 50%; bottom: calc(var(--vw-bottom-h, 48px) + 24px); transform: translateX(-50%); z-index: 6; display: inline-flex; align-items: center; gap: 10px; padding: 6px 14px 6px 6px; background: var(--glass); border: 1px solid var(--line); border-radius: 999px; -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); box-shadow: var(--shadow); font: 11.5px var(--mono); color: #e4e4e7; white-space: nowrap; }
+.vw-pass[hidden] { display: none; }
+.vw-pass button { width: 30px; height: 30px; min-height: 30px; padding: 0; border-radius: 50%; background: #ffd479; color: #000; border: 0; font-size: 12px; line-height: 1; }
+.vw-pass .on { color: #ff5ad0; }
+.moon-workspace[data-site=open] .vw-pass { display: none; }
+@container (max-width: 759px) { .vw-pass { bottom: calc(var(--vw-bottom-h, 48px) + 82px); } }
