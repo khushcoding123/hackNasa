@@ -22,7 +22,7 @@ export function surfaceCoverage(root:HTMLElement){
  <canvas id="surface-map" width="160" height="160" style="width:100%;image-rendering:pixelated;cursor:crosshair" aria-label="Polar coverage map: click to inspect, shift-click to move transmitter"></canvas>
  <button id="surface-export" disabled>Export native GeoTIFF layers + JSON</button><div id="surface-inspect" aria-live="polite"></div>
  <section id="surface-ml" style="margin-top:18px;padding:12px;border:1px dashed #b98cff;border-radius:8px"><h3>Experimental: compare with your ML model</h3>
- <p><strong>Not approved for planning.</strong> The final evaluation ships the physics map above. This runs the trained LightGBM model at the same transmitter and shows where it disagrees with physics. It only covers what the model was trained on (Haworth, MOONMESH 2.4 GHz, TX 5–50 m, RX 2 m, range up to 8 km), needs the trained model files on this computer, and takes about 1–2 minutes.</p>
+ <p><strong>Not approved for planning.</strong> The final evaluation ships the physics map above. This runs the trained LightGBM model at the same transmitter and shows where it disagrees with physics. It only covers what the model was trained on (Haworth, MOONMESH 2.4 GHz, TX 5–50 m, RX 2 m, range up to 8 km), needs the trained model files on this computer, and can take about 5 minutes at the full 8 km range (shorter ranges are faster). You can keep using the map while it runs.</p>
  <button id="surface-ml-run" disabled>Compare with ML model</button><p id="surface-ml-state" role="status" aria-live="polite">Calculate surface coverage first, then compare.</p>
  <div id="surface-ml-maps" style="display:none;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">${[['physics','Physics (approved)'],['ml','Your ML model'],['diff','Where they disagree']].map(([k,t])=>`<figure style="margin:0"><figcaption>${t}</figcaption><canvas id="surface-ml-${k}" width="160" height="160" style="width:100%;image-rendering:pixelated" aria-label="${t} map"></canvas></figure>`).join('')}</div>
  <p>Physics and ML maps: covered green · dead orange · unknown purple hatch. Disagreement map: agree gray · <span style="color:#f04141">red = model says covered but physics says dead (the risky mistake)</span> · <span style="color:#3c8cff">blue = model says dead but physics says covered</span>.</p>
@@ -93,8 +93,12 @@ export function surfaceCoverage(root:HTMLElement){
  mlButton.onclick=async()=>{
   if(!applied||!data?.layers.valid)return;mlController?.abort();const current=++mlVersion,version=generation,scenario=applied,started=Date.now();mlController=new AbortController();
   mlButton.disabled=true;mlScores.textContent='';mlMaps.style.display='none';
-  const tick=()=>{if(current===mlVersion)mlState.textContent=`Running your ML model… ${Math.round((Date.now()-started)/1000)} s (usually 1–2 minutes)`;};tick();const timer=setInterval(tick,1000);
-  try{const r=await (await post('/ml-compare',scenario,mlController.signal)).json() as Comparison;if(current!==mlVersion||version!==generation||!root.isConnected)return;
+  const tick=()=>{if(current===mlVersion)mlState.textContent=`Running your ML model… ${Math.round((Date.now()-started)/1000)} s (about 5 minutes at 8 km)`;};tick();const timer=setInterval(tick,1000);
+  const signal=mlController.signal,pause=(ms:number)=>new Promise<void>((done,fail)=>{const t=setTimeout(done,ms);signal.addEventListener('abort',()=>{clearTimeout(t);fail(new DOMException('Aborted','AbortError'));},{once:true});});
+  try{const {job_id}=await (await post('/ml-compare/jobs',scenario,signal)).json() as {job_id:string};let r:Comparison|undefined;
+   while(!r){await pause(2000);const response=await fetch('/api/coverage/ml-compare/jobs/'+job_id,{signal});const job=await response.json() as {status:string;detail?:unknown;result?:Comparison};
+    if(!response.ok||job.status==='error')throw new Error(typeof job.detail==='string'?job.detail:JSON.stringify(job.detail));if(job.status==='done')r=job.result;}
+   if(current!==mlVersion||version!==generation||!root.isConnected)return;
    const s=r.scores,m=r.metadata,pct=(v:number|null)=>v===null?'none in range':`${(100*v).toFixed(2)}%`;
    drawGrid('physics',r.layers.physics_class,classColour,m);drawGrid('ml',r.layers.ml_class,classColour,m);drawGrid('diff',r.layers.disagreement,diffColour,m);mlMaps.style.display='grid';
    mlState.textContent=`Experimental comparison done · model ${m.model_seconds.toFixed(1)} s vs physics ${m.physics_cache_hit?'(already calculated)':`${m.physics_seconds.toFixed(1)} s`}. Simulated; not approved for planning.`;

@@ -1,5 +1,6 @@
 """Experimental ML comparison route: scores, layers and refusals, with a stand-in for the trained model."""
 import json
+import time
 
 import numpy as np
 import pytest
@@ -110,6 +111,59 @@ def test_missing_model_files_are_reported(terrain):
     response = client.post('/api/coverage/ml-compare', json=dict(range_m=300))
     assert response.status_code == 503
     assert 'kept outside git' in response.json()['detail']
+
+
+def wait_for(client, job_id):
+    for _ in range(600):
+        job = client.get(f'/api/coverage/ml-compare/jobs/{job_id}').json()
+        if job['status'] != 'running':
+            return job
+        time.sleep(0.05)
+    raise AssertionError('job did not finish')
+
+
+def test_background_job_matches_direct_comparison(terrain):
+    client, monkeypatch = terrain
+    m.JOBS.clear()
+    use_model(monkeypatch, FakeModel())
+    body = dict(range_m=300)
+    started = client.post('/api/coverage/ml-compare/jobs', json=body)
+    assert started.status_code == 200
+    job = wait_for(client, started.json()['job_id'])
+    assert job['status'] == 'done'
+    direct = client.post('/api/coverage/ml-compare', json=body).json()
+    assert job['result']['scores'] == direct['scores']
+    assert job['result']['layers'] == direct['layers']
+    again = client.post('/api/coverage/ml-compare/jobs', json=body).json()
+    assert again['job_id'] == started.json()['job_id'] and again['status'] == 'done'
+
+
+def test_background_job_refuses_fast_and_reports_failures(terrain):
+    client, monkeypatch = terrain
+    m.JOBS.clear()
+    assert client.post('/api/coverage/ml-compare/jobs', json=dict(range_m=300)).status_code == 503
+    use_model(monkeypatch, FakeModel())
+    assert client.post('/api/coverage/ml-compare/jobs', json=dict(range_m=300, h_rx=5)).status_code == 422
+    assert m.JOBS == {}
+    assert client.get('/api/coverage/ml-compare/jobs/unknown').status_code == 404
+
+    class Broken(FakeModel):
+        def predict(self, *args):
+            raise RuntimeError('boom')
+    use_model(monkeypatch, Broken())
+    job = wait_for(client, client.post('/api/coverage/ml-compare/jobs', json=dict(range_m=300)).json()['job_id'])
+    assert job['status'] == 'error' and job['code'] == 500 and 'boom' in job['detail']
+
+
+def test_newer_job_supersedes_waiting_one(terrain):
+    client, monkeypatch = terrain
+    m.JOBS.clear()
+    use_model(monkeypatch, FakeModel())
+    with m.MODEL_LOCK:  # hold the model so the first job is still waiting when the second arrives
+        first = client.post('/api/coverage/ml-compare/jobs', json=dict(range_m=300)).json()['job_id']
+        second = client.post('/api/coverage/ml-compare/jobs', json=dict(range_m=300, threshold=10)).json()['job_id']
+    assert wait_for(client, first)['detail'] == 'A newer comparison replaced this one.'
+    assert wait_for(client, second)['status'] == 'done'
 
 
 def test_main_coverage_route_still_ships_deterministic(terrain):

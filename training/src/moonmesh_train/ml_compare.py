@@ -5,10 +5,13 @@ ships the deterministic map, and the main coverage route never uses the model. T
 exists so the learned model can be demonstrated and inspected next to the physics map it imitates.
 All results are simulated.
 """
+from collections import OrderedDict
 from functools import lru_cache
-from threading import Lock
+import logging
+from threading import Lock, Thread
 from time import perf_counter
 from types import SimpleNamespace
+from uuid import uuid4
 
 import numpy as np
 import rasterio
@@ -23,6 +26,15 @@ router = APIRouter(prefix='/api/coverage', tags=['surface coverage (experimental
 MODEL_LOCK = Lock()
 MODEL_NAMES = ('los', 'margin', 'clearance')
 EVAL_CONFIG = 'eval_haworth.yaml'
+# A full 8 km map takes minutes, longer than a browser should hold one request open,
+# so the app starts a background job and polls it. Only the newest job runs the model.
+JOBS = OrderedDict()
+JOBS_LOCK = Lock()
+MAX_JOBS = 4
+
+
+class Superseded(Exception):
+    pass
 
 
 def eval_config():
@@ -49,11 +61,9 @@ def learned_context():
     return Context(eval_config())
 
 
-def compare(body):
-    t0 = perf_counter()
-    entry, meta = cov.calculate(body)
-    physics_s = perf_counter()-t0
-    if entry is None:
+def refuse(entry_missing, meta):
+    """Fast refusals, shared by the job start (before any heavy work) and the comparison itself."""
+    if entry_missing:
         raise HTTPException(409, meta.get('message', 'Surface coverage is unavailable for this request.'))
     if not meta['in_evaluated_domain']:
         raise HTTPException(422, 'The experimental model only covers what it was trained on: Haworth, '
@@ -63,6 +73,13 @@ def compare(body):
         raise HTTPException(503, f'Trained model files were not found under {data_root()}. They are created by '
                                  'training steps 9 and 10 and are kept outside git, so this only works on a '
                                  'computer that ran the training.')
+
+
+def compare(body, should_stop=lambda: False):
+    t0 = perf_counter()
+    entry, meta = cov.calculate(body)
+    physics_s = perf_counter()-t0
+    refuse(entry is None, meta)
     a = entry['arrays']
     tr = entry['transform']
     shape = a['valid_mask'].shape
@@ -73,6 +90,8 @@ def compare(body):
                           frequency_ghz=radio['frequency_ghz'], max_range_m=radio['max_range_m'],
                           required_margin_db=threshold)
     with MODEL_LOCK:
+        if should_stop():
+            raise Superseded
         ctx = learned_context()
         t0 = perf_counter()
         pred = ctx.predict(row, tr, shape, 'lightgbm')
@@ -132,3 +151,59 @@ def ml_compare_route(body: cov.CoverageRequest):
         return compare(body)
     except (ValueError, FileNotFoundError) as error:
         raise HTTPException(422, str(error)) from error
+
+
+def run_job(job, body):
+    try:
+        job['result'] = compare(body, should_stop=lambda: job['superseded'])
+        job['status'] = 'done'
+    except Superseded:
+        job.update(status='error', code=409, detail='A newer comparison replaced this one.')
+    except HTTPException as error:
+        job.update(status='error', code=error.status_code, detail=error.detail)
+    except (ValueError, FileNotFoundError) as error:
+        job.update(status='error', code=422, detail=str(error))
+    except Exception as error:  # report, do not lose, unexpected failures in the background thread
+        logging.getLogger(__name__).exception('Experimental ML comparison failed')
+        job.update(status='error', code=500, detail=f'{type(error).__name__}: {error}')
+    finally:
+        job['seconds'] = round(perf_counter()-job['started'], 1)
+
+
+@router.post('/ml-compare/jobs')
+def start_job(body: cov.CoverageRequest):
+    """Refuse fast, then run the comparison in the background; poll the returned job id."""
+    try:
+        context, meta = cov.prepare(body)
+    except (ValueError, FileNotFoundError) as error:
+        raise HTTPException(422, str(error)) from error
+    refuse(context is None, meta)
+    key = body.model_dump_json()
+    with JOBS_LOCK:
+        for job_id, job in JOBS.items():
+            if job['key'] == key and job['status'] in ('running', 'done'):
+                return dict(job_id=job_id, status=job['status'])  # same request again: reuse it
+        for job in JOBS.values():
+            job['superseded'] = True  # only the newest request waits for the model
+        job_id = uuid4().hex
+        job = dict(key=key, status='running', superseded=False, started=perf_counter())
+        JOBS[job_id] = job
+        while len(JOBS) > MAX_JOBS:
+            JOBS.popitem(last=False)
+    Thread(target=run_job, args=(job, body), daemon=True, name='ml-compare-'+job_id[:8]).start()
+    return dict(job_id=job_id, status='running')
+
+
+@router.get('/ml-compare/jobs/{job_id}')
+def job_status(job_id: str):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(404, 'Unknown or expired comparison job; start the comparison again.')
+    seconds = job.get('seconds', round(perf_counter()-job['started'], 1))
+    out = dict(status=job['status'], seconds=seconds)
+    if job['status'] == 'done':
+        out['result'] = job['result']
+    elif job['status'] == 'error':
+        out.update(code=job['code'], detail=job['detail'])
+    return out
