@@ -16,6 +16,7 @@ import yaml
 from lunar_core.geometry import Body, SurfacePoint, horizontal_arrays
 from lunar_core.kernels import load_kernels
 from lunar_core.terrain import polar_stereographic_south
+from moonmesh.costs import cost_report, relay_limit
 from moonmesh.data import DATA
 from moonmesh.science import Observer, mask_for
 
@@ -44,6 +45,9 @@ class Scenario:
     polygon: tuple = ()  # optional drawn area as (lat, lon east) vertices; relays and mines stay inside it
     gateways: int = 2
     extra_relays: int = 3
+    max_relays: int | None = None
+    budget_usd: float | None = None
+    relay_cost_usd: float | None = None
     slope_limit: float = 20.0
     start: date = date(2026, 11, 1)
     days: int = 30
@@ -219,7 +223,11 @@ def _build(scenario):
     prior = {i: float(score[i]) * (0.5 if outside_flag[i] else 1.0) for i in range(n_relays)}
     # A relay that sits in shadow has to be kept alive through it, so chains pay heavily for shade.
     shade = {i: 4.0 * (1.0 - float(sun_frac[i])) for i in range(n_relays)}
-    plan = place(G, demand, gateways, candidates, prior, scenario.extra_relays, shade_penalty=shade)
+    fixed_nodes = len(gateways) + len(demand)
+    limit = relay_limit(len(candidates) if scenario.max_relays is None else scenario.max_relays,
+                        scenario.budget_usd, scenario.relay_cost_usd, fixed_nodes=fixed_nodes)
+    plan = place(G, demand, gateways, candidates, prior, scenario.extra_relays, shade_penalty=shade, max_relays=limit)
+    plan["cost"] = cost_report(fixed_nodes + len(plan["chosen"]), scenario.budget_usd, scenario.relay_cost_usd)
     return dict(scenario=scenario, grid=grid, center=center, sites=sites, heights=heights, lat=lat, lon=lon, ground=ground,
                 n_relays=n_relays, demand=demand, gateways=gateways, candidates=candidates, G=G, times=times, lit=lit,
                 earth=earth, sun_frac=sun_frac, earth_frac=earth_frac, score=score, features=features,

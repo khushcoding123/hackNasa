@@ -16,6 +16,14 @@ The current MOONMESH planner calculates direct lander-to-Earth service and indep
 
 The ORA lab also retains its current surface-network and Earth-visible gateway model. Its published measurements do not validate the proposed orbital architecture.
 
+### Satellite access preview
+
+The Network layout step includes a geometry-only satellite preview. It draws straight blue paths from each planned surface node to an assumed satellite when the satellite is at least 10° above that node's local spherical horizon. The pass slider reports elevation and slant range for every node, including nodes with no access. The satellite marker is enlarged; positions and paths use metre coordinates.
+
+The hypothetical scenario is one circular polar satellite at 500 km altitude, with its plane chosen to pass over the selected area's centre at preview time zero. Its approximately 158.3 minute period uses lunar GM = 4902.800118 km³/s² ([JPL](https://ssd.jpl.nasa.gov/astro_par.html)); uniform body rotation uses a 27.321661 day period. This is a relative pass demonstration, not a mission-date ephemeris or an operational constellation. Each node uses its terrain elevation plus an assumed 10 m antenna height. Terrain screening beyond the spherical elevation mask, RF, pointing, capacity, power and satellite-to-Earth access are not evaluated. The preview does not change placement, coverage, blackout or failure results.
+
+Geometry checks: `node --experimental-strip-types tests/test_orbital_preview.mjs frontend/orbital-preview.ts` (Node 22.6+).
+
 ## Required satellite model
 
 - Define each satellite's trajectory or orbital inputs, epoch, coordinate frame, mission-time coverage, and source. Earth/Sun ephemerides alone do not supply a communications satellite trajectory.

@@ -5,7 +5,9 @@ export interface Site {name:string; lat:number; lon:number; elevation:number; me
 export interface Candidate {environment:Record<string,EnvironmentState>; id:string; x:number; y:number; lat:number; lon:number; distance:number; slope:number; elevation:number; los:boolean|null; surface_margin:number; earth:Metrics; solar:Metrics; power:Metrics; coverage:Metrics; recovered:number; temporal_coverage:boolean[]; unknown_samples:number; minimum_reserve:number; sunlight:boolean[]; powered:boolean[]; reserve:number[]; minimum_earth_margin:number}
 export interface Outage {start:string; end:string; first:number; last:number; hours:number; causes:string[]}
 export interface Comparison {site:Site; direct:Metrics; solar:Metrics; network:Metrics; worst:Metrics; recommended:string[]; feasible:boolean}
+export interface CostReport {currency:string; budget_usd:number|null; relay_cost_usd:number; total_usd:number; remaining_usd:number|null; within_budget:boolean; assumptions:string; pricing_basis:"illustrative"|"user"; items:{category:string; item:string; quantity:number; unit_cost_usd:number; total_usd:number}[]}
 export interface Result extends Comparison {
+ cost:CostReport;
  environment:EnvironmentReport; config:Record<string, unknown>; times:string[]; redundant:number; darkness_meets:boolean; eligible:number;
  outages:Outage[]; darkness:Outage[]; candidates:Candidate[];
  failures:{id:string; metrics:Metrics; meets:boolean; windows_lost:number; availability_lost:number; blackout_increase:number}[];
@@ -18,6 +20,7 @@ export interface Result extends Comparison {
 export interface LayoutMetrics {name:string; blurb:string; edges:[number,number][]; links:number; link_km:number; nominal_served:number; single_points_of_failure:number; single_path_links:number; worst_after_node_loss:number; mean_after_node_loss:number; worst_after_link_loss:number; schneider_r_random:number}
 export interface AreaNode {id:number; role:"relay"|"gateway"|"mine"; lat:number; lon:number; elevation:number; sun:number; earth:number; score:number|null; outside:boolean}
 export interface AreaResult {
+ cost:CostReport;
  site:{key:string; name:string; lat:number; lon:number; area_km2:number; radius_m:number; resolution_m:number; ring_m:number; projection:"polar"|"local"; source:string};
  polygon:[number,number][]; nodes:AreaNode[]; layouts:Record<string,LayoutMetrics>; recommended:string; reason:string; score_method:string; candidates:number;
  plan:{served:number; worst_after_failure:number; feasible:boolean; chosen:number[]; gateways:number[]; mines:number[]; unreachable:number[]};

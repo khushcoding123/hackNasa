@@ -31,6 +31,9 @@ class NetworkBody(BaseModel):
     scenario: str = "shackleton_rim_to_floor"
     site: str | None = None
     candidates: int | None = Field(default=None, ge=40, le=600)
+    max_relays: int | None = Field(default=None, ge=0, le=600)
+    budget_usd: float | None = Field(default=None, ge=0, le=1e12, allow_inf_nan=False)
+    relay_cost_usd: float | None = Field(default=None, ge=0, le=1e12, allow_inf_nan=False)
     max_range_km: float | None = Field(default=None, ge=1, le=20)
     relay_mast_m: float | None = Field(default=None, ge=1, le=100)
     mining_sites: int | None = Field(default=None, ge=1, le=6)

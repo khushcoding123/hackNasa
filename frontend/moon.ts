@@ -1,4 +1,5 @@
 import {
+ ArcType,
  BoundingSphere, CallbackPositionProperty, CallbackProperty, Cartesian2, Cartesian3, Cartographic, Color, ColorMaterialProperty, ConstantPositionProperty, ConstantProperty, DirectionalLight, Ellipsoid, GeographicProjection,
  Globe, HeadingPitchRange, HeightReference, LabelStyle, Math as CesiumMath, Matrix3, Matrix4, Quaternion, PolylineDashMaterialProperty, Ion,
  ScreenSpaceEventHandler, ScreenSpaceEventType, SceneMode, SceneTransforms, ShadowMode, VerticalOrigin, Viewer, type Entity,
@@ -9,6 +10,7 @@ import {MoonTerrainProvider, loadTerrainInfo} from "./terrain.js";
 import {SiteView} from "./site3d.js";
 import {icon} from "./icons.js";
 import type {AreaResult, Candidate, Result} from "./types.js";
+import {ORBIT_PERIOD, satelliteAccess, satellitePosition, surfacePosition} from "./orbital-preview.js";
 
 const MOON = Ellipsoid.MOON, R = MOON.maximumRadius;
 Ion.defaultAccessToken = "";               // no Cesium ion: all data comes from this app or the public WMS
@@ -162,6 +164,9 @@ export class MoonView {
    contextOptions: {webgl: {alpha: false, antialias: true, powerPreference: "high-performance"}},
   });
   this.viewer = viewer;
+  // Cesium normally renders at CSS-pixel resolution. Raise the drawing buffer on
+  // high-density displays so the Moon and labels stay crisp without exceeding 2×.
+  viewer.resolutionScale = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
   const scene = viewer.scene;
   (viewer.cesiumWidget.creditContainer as HTMLElement).style.display = "none";
   scene.backgroundColor = Color.BLACK;
@@ -795,7 +800,7 @@ export class MoonView {
   viewer.scene.requestRender();
  }
  /** Draw the planned network for a drawn area: nodes by role, links of the chosen layout. Pass undefined to clear. */
- setLayout(result: AreaResult | undefined, format: string) {
+ setLayout(result: AreaResult | undefined, format: string, seconds = 0) {
   const viewer = this.viewer; if (!viewer) return;
   for (const e of [...viewer.entities.values]) if (String(e.id).startsWith("layout")) viewer.entities.remove(e);
   if (result) {
@@ -813,7 +818,46 @@ export class MoonView {
      label: {text: `${letter[n.role]}${n.id}`, font: "600 12px IBM Plex Mono, monospace", fillColor: color, outlineColor: Color.BLACK, outlineWidth: 3, style: LabelStyle.FILL_AND_OUTLINE, verticalOrigin: VerticalOrigin.BOTTOM, pixelOffset: new Cartesian2(0, -14), disableDepthTestDistance: 2e5}});
    }
   }
+  this.setSatellitePreview(result, seconds);
   viewer.scene.requestRender();
+ }
+
+ /** Geometry-only preview: radio paths are straight and hidden below the elevation mask. */
+ setSatellitePreview(result: AreaResult | undefined, seconds = 0) {
+  const viewer = this.viewer; if (!viewer) return;
+  for (const e of [...viewer.entities.values]) {
+   if (String(e.id).startsWith("layout:orbital:")) viewer.entities.remove(e);
+   if (String(e.id).startsWith("satellite:")) e.show = !result;
+  }
+  if (result) {
+   const satellite = satellitePosition(result.site.lat, result.site.lon, seconds);
+   const position = new Cartesian3(...satellite), cyan = Color.fromCssColorString("#84deff");
+   viewer.entities.add({id: "layout:orbital:satellite", position,
+    billboard: {image: "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 50"><path d="M8 14h20v24H8zM52 14h20v24H52z" fill="#164b86" stroke="#84deff" stroke-width="2"/><path d="M18 14v24m44-24v24M8 26h20m24 0h20M28 25h24" stroke="#84deff" stroke-width="2"/><rect x="30" y="15" width="20" height="22" rx="3" fill="#d8b96c" stroke="#fff" stroke-width="2"/><path d="M40 15V5m-8 0q8 12 16 0" fill="none" stroke="#fff" stroke-width="2"/></svg>'), width: 64, height: 40},
+    label: {text: "S1 · assumed relay satellite", font: "600 13px IBM Plex Mono, monospace", fillColor: cyan,
+     outlineColor: Color.BLACK, outlineWidth: 3, style: LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cartesian2(0, -24)}});
+   const orbit = Array.from({length: 181}, (_, i) => new Cartesian3(...satellitePosition(result.site.lat, result.site.lon, i * ORBIT_PERIOD / 180)));
+   viewer.entities.add({id: "layout:orbital:track", polyline: {positions: orbit, arcType: ArcType.NONE, width: 1.5,
+    material: new PolylineDashMaterialProperty({color: cyan.withAlpha(0.45), dashLength: 12})}});
+   for (const node of result.nodes) {
+    if (!satelliteAccess(node, satellite).visible) continue;
+    viewer.entities.add({id: `layout:orbital:link:${node.id}`, polyline: {
+     positions: [new Cartesian3(...surfacePosition(node.lat, node.lon, node.elevation + 10)), position],
+     arcType: ArcType.NONE, width: 2, material: cyan.withAlpha(0.8)}});
+   }
+  }
+  viewer.scene.requestRender();
+ }
+ showSatelliteOverview(result: AreaResult, seconds = 0) {
+  const viewer = this.viewer; if (!viewer) return;
+  this.setMode("3d");
+  cancelAnimationFrame(this.animation); this.animation = 0;
+  const points = result.nodes.map(n => new Cartesian3(...surfacePosition(n.lat, n.lon, n.elevation)));
+  points.push(new Cartesian3(...satellitePosition(result.site.lat, result.site.lon, seconds)));
+  const bounds = BoundingSphere.fromPoints(points);
+  viewer.camera.flyToBoundingSphere(bounds, {duration: 1.2,
+   offset: new HeadingPitchRange(0, rad(-35), Math.max(1_500_000, bounds.radius * 4)),
+   complete: () => { this.view = this.readView(); this.refreshReadouts(); }});
  }
 
  /** For tests and diagnostics: what the viewer is currently showing. */

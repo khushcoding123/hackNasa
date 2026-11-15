@@ -6,6 +6,7 @@ from spiceypy.utils.exceptions import SpiceyError
 
 from .data import LOCAL, SITES
 from .models import Mission
+from .excel import ExportRequest, export_workbook
 from .science import scenario
 from . import tiles
 from ora.api import router as ora_router
@@ -32,6 +33,16 @@ def config():
 @app.post("/api/mission")
 def mission(body: Mission):
     return compute(body)
+
+
+@app.post("/api/export/xlsx")
+def excel_export(body: ExportRequest):
+    try:
+        content = export_workbook(body)
+    except (KeyError, TypeError, ValueError, IndexError) as error:
+        raise HTTPException(422, "Cannot export this snapshot. Recalculate the network and try again.") from error
+    return Response(content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": 'attachment; filename="moonmesh-network-breakdown.xlsx"'})
 
 
 @app.post("/api/compare")

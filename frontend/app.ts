@@ -2,22 +2,24 @@ import {MoonView} from "./moon.js";
 import {icon} from "./icons.js";
 import {map, timeline, horizon, powerTimeline} from "./charts.js";
 import type {Result, Comparison, Candidate, Sensitivity, Metrics, AreaResult} from "./types.js";
+import {ORBIT_PERIOD, satelliteAccess, satellitePosition} from "./orbital-preview.js";
 
 const $=<T extends HTMLElement=HTMLElement>(q:string)=>document.querySelector<T>(q)!;
 const form=$<HTMLFormElement>("#mission"), outlet=$("#view");
 let result:Result, active="landing", cursor=0, zoom=0, mapZoom=1, layer="elevation";
 let selected="", compared:Comparison[]|undefined, sensitivity:Sensitivity[]|undefined;
 let disabled=new Set<string>(), busy=false, version=0, lastBody="";
-let candidateSort="recovered", pending="";
+let candidateSort="recovered", pending="", exporting=false;
 let moon:MoonView|undefined;
 let stale=false, configured=false, shownStale=false;
 let area:[number,number][]|undefined, areaKey="", areaDirty=false, layout:AreaResult|undefined, layoutKey="", layoutFormat="";
-const steps=["landing","configure","layout","overview","communication","resilience"];
+let satelliteSeconds=0;
+const steps=["landing","configure","layout","overview","communication","resilience","cost"];
 const MOON_R=1737400, DEG=Math.PI/180;
 const toXY=(lat:number,lon:number)=>{const rho=2*MOON_R*Math.tan((90+lat)*DEG/2);return [rho*Math.sin(lon*DEG),rho*Math.cos(lon*DEG)];};
 const toLatLon=(x:number,y:number):[number,number]=>[2*Math.atan(Math.hypot(x,y)/(2*MOON_R))/DEG-90,((Math.atan2(x,y)/DEG)%360+360)%360];
 let sites:Record<string,[string,number,number]>={};
-const views:Record<string,[string,string]>={landing:["Start with the Moon.","01 · Explore the surface. Then draw the area you want to analyse: a square or any shape."],configure:["Define your mission.","Select an area, choose your dates, and set your communication goals."],layout:["Plan the network.","03 · The best layout of towers and links inside the area you drew, compared with simpler formats."],overview:["Your mission, in three dimensions.","04 · Inspect the lander and calculated relay network. Explore the local terrain, or switch to Whole Moon for context."],sites:["Choose your horizon.","Compare landing regions over the same mission period and assumptions."],communication:["Understand the silence.","Trace each communication blackout to terrain, geometry, and RF conditions."],relays:["Bridge the distance.","Explore the smallest screened relay configuration and its physical constraints."],resilience:["Plan for the unexpected.","Disable a relay and inspect how the remaining paths perform."],sensitivity:["Question the assumptions.","Change one assumption at a time and compare the modeled outcome."],data:["The science behind the signal.","Inspect sources, model assumptions, and the limits of these planning estimates."]};
+const views:Record<string,[string,string]>={landing:["Start with the Moon.","01 · Explore the surface. Then draw the area you want to analyse: a square or any shape."],configure:["Define your mission.","Select an area, choose your dates, and set your communication goals."],layout:["Plan the network.","03 · The best layout of towers and links inside the area you drew, compared with simpler formats."],overview:["Your mission, in three dimensions.","04 · Inspect the lander and calculated relay network. Explore the local terrain, or switch to Whole Moon for context."],sites:["Choose your horizon.","Compare landing regions over the same mission period and assumptions."],communication:["Understand the silence.","Trace each communication blackout to terrain, geometry, and RF conditions."],relays:["Bridge the distance.","Explore the smallest screened relay configuration and its physical constraints."],resilience:["Plan for the unexpected.","Disable a relay and inspect how the remaining paths perform."],cost:["Review the network cost.","See the total installed network estimate and download the itemized Excel breakdown."],sensitivity:["Question the assumptions.","Change one assumption at a time and compare the modeled outcome."],data:["The science behind the signal.","Inspect sources, model assumptions, and the limits of these planning estimates."]};
 function dirty(){
  // Compare only editable fields; API configuration may include additional model defaults.
  const same=(a:unknown,b:unknown):boolean=>a!==null&&typeof a==="object"?Object.entries(a).every(([k,v])=>same(v,(b as Record<string,unknown>)?.[k])):a===b;
@@ -52,7 +54,8 @@ function updateNavigation(){
   b.disabled=!available;b.title=available?"":"Complete mission setup and calculate a network first.";
   b.classList.toggle("completed",!!result&&!stale&&steps.indexOf(b.dataset.view!)<steps.indexOf(active));
  });
- for(const id of ["json","csv","report"])$<HTMLButtonElement>("#"+id).disabled=!result||stale;
+ for(const id of ["json","csv","report","xlsx"])$<HTMLButtonElement>("#"+id).disabled=!result||stale||(id==="xlsx"&&exporting);
+ document.querySelectorAll<HTMLButtonElement>("[data-excel]").forEach(b=>b.disabled=!result||stale||exporting);
  $(".export-menu").hidden=!result||stale||active==="landing";
  if(moon&&shownStale!==stale){shownStale=stale;moon.setMission(stale?undefined:result);}
  $("#start-mission").hidden=active!=="landing";
@@ -74,6 +77,7 @@ document.querySelectorAll<HTMLButtonElement>("[data-region]").forEach(button=>bu
 function navigate(view:string,focus=true){
  if(!["landing","configure"].includes(view)&&(!result||stale))view="configure";
  active=view;
+ moon?.setSatellitePreview(view==="layout"?layout:undefined,satelliteSeconds);
  if(view==="landing")document.body.classList.remove("exploring");
  document.querySelectorAll("[data-view][aria-current]").forEach(b=>b.removeAttribute("aria-current"));
  document.querySelectorAll<HTMLButtonElement>(`[data-view="${view}"]`).forEach(b=>b.setAttribute("aria-current","step"));
@@ -88,8 +92,9 @@ function navigate(view:string,focus=true){
 function flow(){
  const index=steps.indexOf(active);
  const previous=index>0?steps[index-1]:"overview";
- const next=({landing:"configure",layout:"overview",overview:"communication",communication:"resilience"} as Record<string,string>)[active]??"";
- $("#flow-actions").innerHTML=`<div><span class="eyebrow">${index<0?"OPTIONAL ANALYSIS":`STEP ${index+1} / ${steps.length}`}</span><p>${active==="landing"?"First, explore. Then set the mission parameters.":active==="configure"?"Your network is calculated only when you submit this form.":active==="resilience"?"Ready to share? Export your applied mission from the header.":"Your applied mission stays with you at every step."}</p></div><div class="flow-buttons">${index!==0?`<button data-go="${previous}">← ${index<0?"Back to the Earth link":"Back"}</button>`:""}${next?`<button class="primary" data-go="${next}">${next==="configure"?"Set up my mission":next==="overview"?"Next: the Earth link":next==="communication"?"Next: understand blackouts":"Next: test resilience"} →</button>`:active==="resilience"?'<button data-go="configure">Revise mission parameters</button>':""}</div>`;
+ const next=({landing:"configure",layout:"overview",overview:"communication",communication:"resilience",resilience:"cost"} as Record<string,string>)[active]??"";
+ const nextLabel=next==="configure"?"Set up my mission":next==="overview"?"Next: the Earth link":next==="communication"?"Next: understand blackouts":next==="resilience"?"Next: test resilience":"Next: review cost";
+ $("#flow-actions").innerHTML=`<div><span class="eyebrow">${index<0?"OPTIONAL ANALYSIS":`STEP ${index+1} / ${steps.length}`}</span><p>${active==="landing"?"First, explore. Then set the mission parameters.":active==="configure"?"Your network is calculated only when you submit this form.":active==="cost"?"Download the itemized workbook or revise the mission assumptions.":"Your applied mission stays with you at every step."}</p></div><div class="flow-buttons">${index!==0?`<button data-go="${previous}">← ${index<0?"Back to the Earth link":"Back"}</button>`:""}${next?`<button class="primary" data-go="${next}">${nextLabel} →</button>`:active==="cost"?'<button data-go="configure">Revise mission parameters</button>':""}</div>`;
  $("#flow-actions").querySelectorAll<HTMLButtonElement>('[data-go]').forEach(b=>b.onclick=()=>navigate(b.dataset.go!));
 }
 
@@ -109,6 +114,8 @@ const fields:[string,string,number,number,number,string][]=[
  ["availability","Minimum coverage (%)",0,100,.1,"Required percentage of mission intervals with a modeled communication path."],
  ["blackout_hours","Max blackout (h)",0,1440,.5,"Longest permissible continuous loss of communication."],
  ["darkness_hours","Max darkness (h)",0,1440,.5,"Longest permissible continuous darkness at the lander."],
+ ["budget_usd","Relay budget (USD, optional)",0,1e12,.01,"Hard limit on total relay deployment cost. Leave blank for no cost limit."],
+ ["relay_cost_usd","All-in installed network node cost (USD, optional)",0,1e12,.01,"Leave blank for the illustrative $100,000 equipment and installation estimate per installed node. Enter your own all-in estimate to override it. Launch and operations are excluded."],
  ["max_relays","Maximum relays",0,4,1,"Maximum masts in the restricted candidate search."],
  ["deployment_km","Deployment radius (km)",1,8,.1,"Straight-line radius around the lander."],
  ["slope_limit","Maximum relay slope (°)",.1,45,.1,"Maximum local DEM slope at a candidate mast."],
@@ -150,13 +157,13 @@ const rf:[string,string,number,number,number,string][]=[
  ["loss","Losses (dB)",0,100,.1,"Additional modeled losses."],["margin","Required margin (dB)",0,60,.1,"Minimum margin over receiver threshold."],
  ["rate_kbps","Data rate (kbps)",.001,1e7,.001,"Rate scales the reference receiver threshold."],
 ];
-const input=([key,label,min,max,step,help]:typeof fields[number],prefix="")=>`<label title="${help}">${label}<input type="number" min="${min}" max="${max}" step="${step}" name="${prefix+key}" ${key==="latitude"||key==="longitude"?"":"required"}></label>`;
-$("#expert").innerHTML=`<fieldset><legend>Mission and deployment constraints</legend><div class="fields">${fields.filter(f=>!["availability","blackout_hours","max_relays","deployment_km"].includes(f[0])).map(f=>input(f)).join("")}<label title="Require compliance after any selected relay fails"><span><input type="checkbox" name="resilient"> Require N−1</span></label></div></fieldset>`+
+const input=([key,label,min,max,step,help]:typeof fields[number],prefix="")=>`<label title="${help}">${label}<input type="number" min="${min}" max="${max}" step="${step}" name="${prefix+key}" ${["latitude","longitude","budget_usd","relay_cost_usd"].includes(key)?"":"required"}></label>`;
+$("#expert").innerHTML=`<fieldset><legend>Mission and deployment constraints</legend><div class="fields">${fields.filter(f=>!["availability","blackout_hours","max_relays","deployment_km","budget_usd","relay_cost_usd"].includes(f[0])).map(f=>input(f)).join("")}<label title="Require compliance after any selected relay fails"><span><input type="checkbox" name="resilient"> Require N−1</span></label></div></fieldset>`+
  [["earth_radio","Direct Earth and relay-to-Earth RF"],["surface_radio","Lander-to-relay RF"]].map(([key,label])=>`<fieldset><legend>${label}</legend><div class="fields">${rf.map(f=>input(f,key+".")).join("")}</div></fieldset>`).join("");
 
 $("#expert").insertAdjacentHTML("beforeend",`<fieldset><legend>Night temperatures and dust exposure</legend><p>Four cases are checked: nominal, cold, dust, and cold with dust. Temperatures and deposition are assumed bounds; hardware constants are illustrative. The Moon has no wind driven dust storms.</p><div class="fields">${environmentalFields.map(f=>input(f)).join("")}</div></fieldset>`);
 
-$("#basic-constraints").innerHTML=fields.filter(f=>["availability","blackout_hours","max_relays","deployment_km"].includes(f[0])).map(f=>input(f)).join("");
+$("#basic-constraints").innerHTML=fields.filter(f=>["availability","blackout_hours","max_relays","deployment_km","budget_usd","relay_cost_usd"].includes(f[0])).map(f=>input(f)).join("");
 
 async function api<T>(url:string,body?:unknown):Promise<T>{
  let response:Response;
@@ -193,10 +200,12 @@ async function run(){
  $<HTMLButtonElement>('button[type="submit"]').disabled=true;
  status("Computing terrain, ephemerides and candidate relay paths…");
  try{
-   const fresh=layoutKey!==JSON.stringify(area);
+   const limits=values();
+   const layoutRequest={polygon:area,max_relays:limits.max_relays,budget_usd:limits.budget_usd,relay_cost_usd:limits.relay_cost_usd};
+   const fresh=layoutKey!==JSON.stringify(layoutRequest);
    if(fresh){
     status("Choosing relay sites and comparing layouts inside your area… about 20 seconds, up to a minute or two for very large areas.");
-    layout=await api<AreaResult>("ora/area",{polygon:area});layoutKey=JSON.stringify(area);layoutFormat=layout.recommended;
+    layout=await api<AreaResult>("ora/area",layoutRequest);layoutKey=JSON.stringify(layoutRequest);layoutFormat=layout.recommended;
     const region=$<HTMLSelectElement>('[name="site"]');if(!region.querySelector(`option[value="${layout.site.key}"]`))region.add(new Option(layout.site.name,layout.site.key));
     region.value=layout.site.key;for(const name of ["latitude","longitude"])$<HTMLInputElement>(`[name="${name}"]`).value="";
     sites[layout.site.key]=[layout.site.name,layout.site.lat,layout.site.lon];
@@ -212,7 +221,7 @@ async function run(){
    $("#subtitle").textContent=`${result.site.name} · ${result.config.start} to ${result.config.end} UTC`;
    status(`${result.times.length.toLocaleString()} samples · ${result.config.minutes} min intervals · ${result.candidates.length} relay candidates evaluated`);
    areaDirty=false;shownStale=false;dirty();moon?.setMission(result);
-   if(fresh&&layout){moon?.setLayout(layout,layoutFormat);moon?.flyToSite(layout.site.lat,layout.site.lon,Math.max(30000,layout.site.radius_m*5+16000));}
+   if(fresh&&layout){satelliteSeconds=0;moon?.setLayout(layout,layoutFormat);moon?.setSatellitePreview(layout,0);moon?.showSatelliteOverview(layout,0);}
    navigate(fresh?"layout":"overview");
    if(!fresh)moon?.flyToSite(result.site.lat,result.site.lon);
  }catch(error){status((result?"Previous results shown. ":"")+(error as Error).message,true);if(!result)outlet.innerHTML=`<section class="panel initial-state"><h2>Mission could not be computed</h2><p class="muted">Review the settings and use Run mission to retry. The error is shown above.</p></section>`;}
@@ -255,6 +264,10 @@ function timelinePanel(){
 }
 
 const horizonPanel=()=>panel("360° terrain horizon",`<canvas id="horizon" class="horizon" aria-label="Horizon elevation versus azimuth"></canvas><p class="caption">Azimuth (°) horizontally · Elevation (°) vertically. Solid cyan: terrain; dashed: clearance allowance. Green Earth and amber Sun markers. The line beneath Earth shows its clearance (green clear, red blocked); gaps indicate unknown terrain.</p><div id="point"></div>`);
+const usd=(value:number)=>new Intl.NumberFormat("en-US",{style:"currency",currency:"USD",maximumFractionDigits:2}).format(value);
+function costPanel(cost:Result["cost"],scope:"mission"|"area"="mission",downloadable=true){
+ return panel("Total estimated network installation cost",`<div class="hero-value">${usd(cost.total_usd)}</div><p class="caption">${escape(cost.assumptions)}</p>${downloadable?`<button data-excel="${scope}" ${exporting||stale?"disabled":""}>${exporting?"Preparing Excel…":"Download Excel breakdown"}</button>`:""}`);
+}
 const planState=()=>!result.feasible?"Best evaluated configuration · requirements unmet":result.recommended.length?"Minimum among screened candidates · modeled limits met under assumptions":"Direct path meets modeled limits under assumptions · no relays needed";
 const bars=(label:string,value:number,after=false)=>`<div class="muted">${label} · ${pct(value)}</div><div class="chart-bar ${after?"after":""}"><span style="width:${value}%"></span></div>`;
 function outageTable(){
@@ -278,12 +291,12 @@ function relayDetail(c:Candidate,includeTimeline=true){
 }
 function planPanel(){
  const field=(key:string)=>form.elements.namedItem(key) as HTMLInputElement;
- const limit=(key:string,label:string,min:number,max:number,step:number)=>`<label>${label}<input type="number" data-sync="${key}" min="${min}" max="${max}" step="${step}" value="${escape(field(key).value)}" required></label>`;
+ const limit=(key:string,label:string,min:number,max:number,step:number)=>`<label>${label}<input type="number" data-sync="${key}" min="${min}" max="${max}" step="${step}" value="${escape(field(key).value)}" ${["budget_usd","relay_cost_usd"].includes(key)?"":"required"}></label>`;
  return panel("Restricted candidate search",`<p class="callout ${result.feasible?"":"amber"}">${planState()}</p>`+readout([
  ["Selected",result.recommended.join(", ")||"Direct path only"],["Usable candidates",`${result.eligible} of ${result.candidates.length} screened`],
  ["Required coverage",pct(Number(result.config.availability))],["Maximum blackout",hours(Number(result.config.blackout_hours))],
  ["Requirement",result.config.resilient?"Survive any single relay failure (N−1)":"Nominal coverage"],
- ])+`<h3 class="limits-title">Optimization limits</h3><div class="limits">${limit("max_relays","Maximum relays",0,4,1)}${limit("availability","Minimum coverage (%)",0,100,.1)}${limit("blackout_hours","Max blackout (h)",0,1440,.5)}<label class="check"><input type="checkbox" data-sync="resilient" ${field("resilient").checked?"checked":""}> Require N−1</label></div>
+ ])+`<h3 class="limits-title">Optimization limits</h3><div class="limits">${limit("max_relays","Maximum relays",0,4,1)}${limit("budget_usd","Relay budget (USD, optional)",0,1e12,.01)}${limit("availability","Minimum coverage (%)",0,100,.1)}${limit("blackout_hours","Max blackout (h)",0,1440,.5)}<label class="check"><input type="checkbox" data-sync="resilient" ${field("resilient").checked?"checked":""}> Require N−1</label></div>
  <p><button id="optimize" class="primary">Optimize relay network</button></p><p id="optimize-note" class="muted" role="status"></p>`);
 }
 function siteRows(){
@@ -335,13 +348,21 @@ function render(){
  case "communication":outlet.innerHTML=timelinePanel()+outageTable()+`<p class="callout">${r.outages.length?"Select a blackout above to see its cause in the charts below.":"No direct blackouts were found in this sampled period."} Continue to Resilience to test the network.</p>`+charts+panel("Applied landing terrain",context)+panel("Darkness intervals",r.darkness.length?table(["Start","End","Duration"],r.darkness.map(d=>row([utc(d.start),utc(d.end),hours(d.hours)]))):'<p class="muted">No darkness intervals in this sampled period.</p>');break;
  case "relays":outlet.innerHTML=`<div class="split">${mapPanel()}${planPanel()}</div>`+panel("Screened relay candidates",`<div class="controls"><label>Sort by <select id="candidate-sort"><option value="recovered" ${candidateSort==="recovered"?"selected":""}>Recovered coverage ↓</option><option value="distance" ${candidateSort==="distance"?"selected":""}>Deployment range ↑</option></select></label></div>`+(r.candidates.length?candidates:'<p class="muted">No screened candidates for these constraints. Review deployment and terrain settings.</p>'))+(choice?relayDetail(choice):"")+timelinePanel()+`<button class="primary" data-go="resilience">Test network resilience <span aria-hidden="true">↗</span></button>`;break;
  case "resilience":outlet.innerHTML=panel("Test the remaining paths",`<div class="controls">${switchers||'<p class="muted">This scenario uses the direct path only; there are no selected relays to disable.</p>'}</div>`+nodes+`<div class="metrics">${metric("NOMINAL COVERAGE",pct(r.network.availability),"All recommended relays")}${metric("SIMULATED COVERAGE",pct(net.metrics.availability),disabled.size+" disabled relays")}${metric("COVERAGE CHANGE",n(net.metrics.availability-r.network.availability)+" pp","Against nominal")}${metric("NOMINAL BLACKOUT",hours(r.network.longest),"Longest continuous outage")}${metric("BLACKOUT CHANGE",hours(net.metrics.longest-r.network.longest),"Against nominal")}</div>`+comparison)+timelinePanel()+panel("Single-relay criticality",`<p class="muted">Worst individual failure: ${pct(r.worst.availability)} availability · ${hours(r.worst.longest)} longest blackout. Nominal time with at least two independent paths: ${pct(r.redundant)}. The table below tests individual failures; toggles above may simulate multiple failures.</p>`+(r.failures.length?failures:'<p class="muted">No selected relays to evaluate.</p>'));break;
+ case "cost":{const networkCost=layout?.cost??r.cost;outlet.innerHTML=costPanel(networkCost,layout?"area":"mission")+panel("What this estimate covers",`<p>Every installed node shown in the network, including gateways, relay nodes and communications endpoints, plus equipment, integration, deployment and installation.</p><p class="caption">Launch, lander, satellite services, ongoing operations and broader mission costs are excluded. The itemized prices are available only in the Excel download.</p>`);break;}
  case "sensitivity":outlet.innerHTML=panel("Assumption sweep",`<p class="muted">Re-run the current mission with one changed assumption at a time.</p><button id="sweep" class="primary" ${pending==="sensitivity"?"disabled":""}>${pending==="sensitivity"?"Computing sweep…":"Run sensitivity analysis"}</button><div id="sensitivity-results">${sensitivity?table(["Variant","Direct","Direct blackout","Direct outages","Network","Network blackout","Eligible relays","Selected relays","Feasible"],sensitivity.map(s=>s.error?`<tr><td>${escape(s.label)}</td><td colspan="8">${escape(s.error)}</td></tr>`:row([escape(s.label),pct(s.direct.availability),hours(s.direct.longest),String(s.direct.intervals),pct(s.network.availability),hours(s.network.longest),String(s.eligible),String(s.count),s.feasible?"Yes":"No"]))):""}</div>`)+(sensitivity?panel("Network availability by assumption",sensitivity.filter(s=>!s.error).map(s=>bars(escape(s.label),s.network.availability,true)).join("")):"");break;
  case "data":outlet.innerHTML=panel("Scenario configuration",configuration())+panel("Planning model, with limits",`<p>MOONMESH estimates communication for approximate lunar research points. It is a planning prototype; terrain sampling, RF assumptions, and a restricted relay catalog limit its results.</p><p class="muted">Flat-horizon visibility excludes local terrain. Terrain visibility adds the sampled horizon. Direct RF also requires adequate link margin. A relay path requires surface line of sight, both radio links, and usable power. Missing terrain is uncertain and excluded from credited availability. N−1 tests individual relay failures while retaining shared Earth receiver assumptions.</p>`)+panel("Data provenance",provenance())+panel("Power assumptions",readout([["Battery endurance",hours(Number(r.config.battery_hours))],["Initial charge",pct(Number(r.config.initial_charge_pct))],["Nominal net charging rate",n(Number(r.config.charge_ratio))+" reserve hours / sunlight hour before heater and dust losses"]]))+[["earth_radio","Earth radio profile"],["surface_radio","Surface radio profile"]].map(([key,title])=>panel(title,readout(rf.map(([name,label])=>[label,n(Number((r.config[key] as Record<string,number>)[name]),3)])))).join("");break;
  }
- outlet.insertAdjacentHTML("beforeend",environmentPanel());
+ if(!["layout","cost"].includes(active))outlet.insertAdjacentHTML("beforeend",environmentPanel());
  connect();paint();
 }
 
+function satelliteReadout(L:AreaResult){
+ const satellite=satellitePosition(L.site.lat,L.site.lon,satelliteSeconds);
+ return `<p class="callout">Pass time: +${n(satelliteSeconds/60,1)} min · ${L.nodes.filter(v=>satelliteAccess(v,satellite).visible).length} of ${L.nodes.length} nodes above the 10° mask</p>`+table(["Node → S1","Elevation","Range","Geometric access"],L.nodes.map(v=>{const a=satelliteAccess(v,satellite);return row([`${v.role==="gateway"?"G":v.role==="mine"?"M":"R"}${v.id} → S1`,`${n(a.elevationDeg,1)}°`,`${n(a.rangeM/1000,0)} km`,a.visible?'<span class="green">Above mask</span>':'<span class="amber">Below mask · no link drawn</span>']);}));
+}
+function satellitePanel(L:AreaResult){
+ return panel("Surface nodes → relay satellite",`<p>Blue beams show each node’s geometric access to S1; green lines show the surface network. Move through the pass to see access open and close.</p><div class="controls"><button data-satellite-view>Show satellite and nodes</button><button data-surface-view>Zoom to surface network</button></div><label for="satellite-time">Satellite pass · minutes after overhead</label><input id="satellite-time" type="range" min="0" max="${Math.round(ORBIT_PERIOD)}" step="10" value="${satelliteSeconds}" style="width:100%"><div id="satellite-readout" aria-live="polite">${satelliteReadout(L)}</div><p class="caption">Assumed single satellite: circular polar orbit, 500 km altitude, ${n(ORBIT_PERIOD/60,1)} minute period; overhead at preview time zero. Approximate uniform lunar rotation, 10 m antennas and 10° elevation mask. Marker enlarged for visibility. <a href="https://ssd.jpl.nasa.gov/astro_par.html" target="_blank" rel="noopener noreferrer">Lunar gravity: JPL</a>.</p><p class="caption">Geometry preview only. Local terrain blockage, radio budgets, pointing, capacity, power and satellite-to-Earth access are not evaluated. A node below the mask needs a surface route to another node with satellite access. Existing coverage and failure results still use the direct-to-Earth baseline.</p>`);
+}
 function layoutView(){
  const L=layout;if(!L)return panel("Layout","<p class='muted'>Draw an area and calculate to see its layout.</p>");
  const best=L.layouts[L.recommended], nodes=L.nodes, outside=nodes.filter(v=>v.outside).length, worst=Math.min(best.worst_after_node_loss,best.worst_after_link_loss);
@@ -349,7 +370,7 @@ function layoutView(){
  const rows=Object.entries(L.layouts).map(([key,m])=>row([`<button data-format="${key}" aria-pressed="${key===layoutFormat}">${escape(m.name)}</button>${key===L.recommended?' <span class="pill ok">best</span>':""}<small class="coords">${escape(m.blurb)}</small>`,String(m.links),n(m.link_km,0)+" km",String(m.single_points_of_failure),String(m.single_path_links),pct(100*m.worst_after_node_loss),pct(100*m.worst_after_link_loss),n(m.schneider_r_random,2)]));
  const role:Record<string,string>={gateway:"Gateway",relay:"Relay",mine:"Mining site"};
  const sitesTable=table(["Node","Role","Position","Elevation","Sunlight","Earth view",""],nodes.map(v=>row([`${v.role==="gateway"?"G":v.role==="mine"?"M":"R"}${v.id}`,role[v.role],`${n(v.lat,4)}°, ${n(v.lon,3)}° E`,n(v.elevation,0)+" m",pct(100*v.sun),pct(100*v.earth),v.outside?"outside the area":""])));
- return kpis+panel("Best format for this area",`<p class="callout ${worst>=1?"":"amber"}">${escape(L.reason)}</p><p class="muted">Green links on the Moon show the layout selected below. Violet rings mark sites just outside your shape.</p>`)+
+ return kpis+satellitePanel(L)+panel("Best format for this area",`<p class="callout ${worst>=1?"":"amber"}">${escape(L.reason)}</p><p class="muted">Green links on the Moon show the layout selected below. Violet rings mark sites just outside your shape.</p>`)+
   panel("Compare layouts",table(["Layout","Links","Cable","Single points of failure","Single-path links","Mines linked after worst relay loss","after worst link loss","Robustness to random failure"],rows)+`<p class="caption">Select a layout to draw it on the Moon. Every format uses the same relay sites; they differ in which line-of-sight links are built. Robustness is the Schneider R score (0 to 1, higher is better).</p>`)+
   (L.site.resolution_m>20?`<p class="callout amber">Terrain for this area is ${n(L.site.resolution_m,0)} m per pixel${L.site.projection==="local"?" (global LOLA data; the polar caps have sharper 20 m data)":" (thinned to keep large areas fast)"}. Hills and ridges narrower than that are not seen, so treat the result as a first look.${L.site.projection==="local"?" Relay scores come from a model trained on polar terrain, so they are less reliable here.":""}</p>`:"")+panel("Sites",sitesTable+`<p class="caption">${escape(L.score_method)}. Mining sites sit on the lowest gentle ground inside the shape; gateways are the sites with the longest view of Earth. Sunlight and Earth view are shares of a 30 day period from the scenario start.</p>`);
 }
@@ -384,6 +405,7 @@ function paint(){
 }
 
 function connect(){
+ document.querySelectorAll<HTMLButtonElement>("[data-excel]").forEach(b=>b.onclick=()=>void downloadExcel(b.dataset.excel as "mission"|"area"));
  const mapDetails=document.querySelector<HTMLDetailsElement>("#map-details");if(mapDetails)mapDetails.ontoggle=()=>{if(mapDetails.open)paint();};
  const button=(id:string,action:()=>void)=>{const node=document.querySelector<HTMLButtonElement>("#"+id);if(node)node.onclick=action;};
  button("zoom",()=>{zoom=zoom<=Math.max(6,result.times.length/8)?result.times.length:Math.max(6,Math.floor(zoom/2));render();});
@@ -413,7 +435,11 @@ function connect(){
   $("#optimize-note").textContent="";dirty();
  });
  outlet.querySelectorAll<HTMLButtonElement>("[data-go]").forEach(b=>b.onclick=()=>navigate(b.dataset.go!));
- outlet.querySelectorAll<HTMLButtonElement>("[data-format]").forEach(b=>b.onclick=()=>{layoutFormat=b.dataset.format!;moon?.setLayout(layout,layoutFormat);render();outlet.querySelector<HTMLButtonElement>(`[data-format="${layoutFormat}"]`)?.focus();});
+ outlet.querySelectorAll<HTMLButtonElement>("[data-format]").forEach(b=>b.onclick=()=>{layoutFormat=b.dataset.format!;moon?.setLayout(layout,layoutFormat,satelliteSeconds);render();outlet.querySelector<HTMLButtonElement>(`[data-format="${layoutFormat}"]`)?.focus();});
+ const satelliteSlider=outlet.querySelector<HTMLInputElement>("#satellite-time");
+ if(satelliteSlider)satelliteSlider.oninput=()=>{satelliteSeconds=Number(satelliteSlider.value);moon?.setSatellitePreview(layout,satelliteSeconds);if(layout)$("#satellite-readout").innerHTML=satelliteReadout(layout);};
+ outlet.querySelector<HTMLButtonElement>("[data-satellite-view]")?.addEventListener("click",()=>{if(layout)moon?.showSatelliteOverview(layout,satelliteSeconds);});
+ outlet.querySelector<HTMLButtonElement>("[data-surface-view]")?.addEventListener("click",()=>{if(layout)moon?.flyToSite(layout.site.lat,layout.site.lon,Math.max(30000,layout.site.radius_m*5+16000));});
  $("#panel").querySelectorAll<HTMLButtonElement>("[data-draw-start]").forEach(b=>b.onclick=()=>startDrawing(b.dataset.drawStart as "rect"|"free"));
  $("#panel").querySelectorAll<HTMLButtonElement>("[data-pole-go]").forEach(b=>b.onclick=()=>moon?.flyToPlace(-89.6,0,160000));
  outlet.querySelectorAll<HTMLButtonElement>("[data-site]").forEach(b=>b.onclick=()=>{if(!b.dataset.site)return;$<HTMLSelectElement>('[name="site"]').value=b.dataset.site;for(const name of ["latitude","longitude"])$<HTMLInputElement>(`[name="${name}"]`).value="";dirty();navigate("configure");$<HTMLSelectElement>('[name="site"]').focus();});
@@ -438,10 +464,31 @@ async function auxiliary(key:"compare"|"sensitivity"){
  finally{pending="";trigger.disabled=false;if(previous===version&&token===auxiliaryRun)render();}
 }
 
-function download(contents:string,extension:string,mime:string){
+function download(contents:string|Blob,extension:string,mime:string,filename?:string){
  const href=URL.createObjectURL(new Blob([contents],{type:mime}));
- const anchor=document.createElement("a");anchor.href=href;anchor.download="moonmesh-"+result.config.site+"."+extension;anchor.click();setTimeout(()=>URL.revokeObjectURL(href),1000);
+ const anchor=document.createElement("a");anchor.href=href;anchor.download=filename??"moonmesh-"+result.config.site+"."+extension;anchor.click();setTimeout(()=>URL.revokeObjectURL(href),1000);
 }
+async function downloadExcel(scope:"mission"|"area"){
+ if(!result||stale||exporting)return;
+ exporting=true;updateNavigation();
+ document.querySelectorAll<HTMLButtonElement>("[data-excel]").forEach(b=>b.textContent="Preparing Excel…");
+ status("Preparing your Excel breakdown…");
+ try{
+  const snapshot=result;
+  const response=await fetch("/api/export/xlsx",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({result:snapshot,area:layout,scope,disabled:[...disabled],comparison:compared,sensitivity})});
+  if(!response.ok)throw new Error("Excel download failed. Try again, or recalculate the network.");
+  const blob=await response.blob();
+  if(result!==snapshot||stale)throw new Error("The scenario changed. Recalculate before downloading.");
+  const site=String(snapshot.config.site).replace(/[^a-zA-Z0-9_-]/g,"-");
+  download(blob,"xlsx",blob.type,`moonmesh-${site}-${snapshot.config.start}-${snapshot.config.end}-${scope}.xlsx`);
+  status("Excel breakdown downloaded.");
+ }catch(error){status((error as Error).message,true);}
+ finally{
+  exporting=false;updateNavigation();
+  document.querySelectorAll<HTMLButtonElement>("[data-excel]").forEach(b=>b.textContent="Download Excel breakdown");
+ }
+}
+$("#xlsx").onclick=()=>void downloadExcel(active==="layout"?"area":"mission");
 $("#json").onclick=()=>download(JSON.stringify({...result,comparison:compared,sensitivity,disabled:[...disabled],active:live()},null,2),"json","application/json");
 $("#csv").onclick=()=>{
  const samples=result.samples, columns=Object.keys(samples).filter(k=>k!=="network") as (keyof typeof samples)[];
@@ -449,6 +496,8 @@ $("#csv").onclick=()=>{
  const network=live();
  const rows=result.times.map((timestamp,i)=>[timestamp,...columns.map(c=>samples[c][i]),network.assisted[i],network.combined[i]].map(quote).join(","));
  const section=(head:string, records:unknown[][])=>rows.push("",head,...records.map(record=>record.map(quote).join(",")));
+ section("relay_cost_usd,budget_usd,estimated_spend_usd,remaining_usd",[[result.cost.relay_cost_usd,result.cost.budget_usd,result.cost.total_usd,result.cost.remaining_usd]]);
+ section("cost_category,item,quantity,unit_cost_usd,total_usd",result.cost.items.map(i=>[i.category,i.item,i.quantity,i.unit_cost_usd,i.total_usd]));
  section("configuration,value",Object.entries(result.config).map(([key,value])=>[key,JSON.stringify(value)]));
  section("interval,start,end,hours,causes",[...result.outages.map(o=>["blackout",o.start,o.end,o.hours,o.causes.join("; ")]),...result.darkness.map(o=>["darkness",o.start,o.end,o.hours,""])]);
  section("relay,latitude,longitude_east,distance_km,slope_deg,surface_los,surface_margin_db,powered_pct,coverage_pct,selected,disabled",result.candidates.map(c=>[c.id,c.lat,c.lon,c.distance,c.slope,c.los,c.surface_margin,c.power.availability,c.coverage.availability,result.recommended.includes(c.id),disabled.has(c.id)]));
@@ -472,7 +521,7 @@ $("#report").onclick=async()=>{
  readout([["Site",`${n(result.site.lat,5)}°, ${n(result.site.lon,5)}° E`],["Terrain",`${n(result.site.elevation)} m · ${n(result.site.mean_slope)}° average local slope`],["Sunlight",pct(result.solar.availability)],["Direct communication",pct(result.direct.availability)],["Active network",pct(net.metrics.availability)],["Worst single failure",pct(result.worst.availability)],["Selected relays",result.recommended.join(", ")||"Direct only"],["Selection",result.feasible?"Minimum among screened candidates":"Best evaluated configuration"],["Requirements",net.meets?"Met":"Unmet"],["Disabled",Array.from(disabled).join(", ")||"None"]])+
  environmentPanel()+chartImages+outageTable()+
  panel("Relay feasibility and single-relay failures",result.candidates.filter(c=>result.recommended.includes(c.id)).map(c=>relayDetail(c,false)).join("")+result.failures.map(f=>`<p>Disable ${f.id} · ${pct(f.metrics.availability)} availability · ${hours(f.metrics.longest)} longest blackout · ${f.meets?"modeled limits met under assumptions":"requirements unmet"}</p>`).join(""))+
- panel("Scenario configuration",configuration())+panel("Assumptions and provenance",provenance());
+ costPanel(result.cost,"mission",false)+panel("Scenario configuration",configuration())+panel("Assumptions and provenance",provenance());
  document.body.append(article);
  await Promise.all(Array.from(article.querySelectorAll("img")).map(img=>img.decode().catch(()=>{})));
  try{window.print();}finally{navigate(view,false);article.remove();}

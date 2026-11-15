@@ -81,15 +81,36 @@ def greedy_place(candidates, G_full, demand, gateways, k, score_prior, alpha=0.5
     return chosen, history
 
 
-def place(G_full, demand, gateways, candidates, score_prior, extra=4, alpha=0.5, shade_penalty=None):
+def place(G_full, demand, gateways, candidates, score_prior, extra=4, alpha=0.5, shade_penalty=None, max_relays=None):
     """Full placement: connect, then add ``extra`` redundancy relays. Returns a dict with the audit trail."""
     penalty = shade_penalty or {}
     cost = {c: 0.6 * (1.0 - score_prior.get(c, 0.0)) + penalty.get(c, 0.0) for c in candidates}
     usable = G_full.subgraph(list(candidates) + list(demand) + list(gateways))
     chain, unreachable = connect(usable, demand, gateways, cost)
+    if max_relays is not None and len(chain) > max_relays:
+        # Admit complete paths in order of incremental relay count; never truncate a chain.
+        chain = set()
+        pending = set(demand)
+        while pending:
+            options = []
+            for d in sorted(pending):
+                path, missing = connect(usable, [d], list(gateways) + sorted(chain), cost)
+                added = path - chain
+                if not missing and len(chain | added) <= max_relays:
+                    options.append((len(added), sum(cost.get(v, 0) for v in added), d, added))
+            if not options:
+                break
+            _, _, d, added = min(options, key=lambda item: item[:3])
+            chain.update(added)
+            pending.remove(d)
+    if max_relays is not None:
+        extra = min(extra, max(0, max_relays - len(chain)))
     tie_break = {c: score_prior.get(c, 0.0) - penalty.get(c, 0.0) for c in candidates}
     chosen, history = greedy_place(candidates, usable, demand, gateways, extra, tie_break, alpha, sorted(chain))
     served, mean, worst = survivability(usable, chosen, demand, gateways)
+    active = usable.subgraph(list(chosen) + list(demand) + list(gateways))
+    reachable = set().union(*(nx.node_connected_component(active, g) for g in gateways if g in active)) if gateways else set()
+    unreachable = [d for d in demand if d not in reachable]
     return dict(chosen=chosen, chain=sorted(chain), added=[step["added"] for step in history], history=history,
                 unreachable=unreachable, served=served, mean_after_failure=mean, worst_after_failure=worst,
                 feasible=served >= 1.0 - 1e-9)
