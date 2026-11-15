@@ -71,6 +71,15 @@ $("#explore-surface").onclick=()=>{
  moon?.flyToSite(-89.6,0,160_000);
  status("Explore the south pole. Draw an area to start planning your network.");
 };
+// Landing hero: touching the Moon leaves the hero and opens the full-screen explorer. Presentation only.
+$("#moon").addEventListener("pointerdown",()=>{
+ if(active!=="landing"||!moon||!document.body.classList.contains("panel-collapsed")||document.body.classList.contains("exploring"))return;
+ document.body.classList.add("exploring");status("Exploring the Moon. Draw an area to start planning your network.");
+},true);
+// Cards follow the pointer with a soft highlight.
+document.querySelectorAll<HTMLElement>(".explore-card").forEach(card=>card.addEventListener("pointermove",e=>{
+ const box=card.getBoundingClientRect();card.style.setProperty("--mx",`${e.clientX-box.left}px`);card.style.setProperty("--my",`${e.clientY-box.top}px`);
+}));
 const regionViews:Record<string,[number,number]>={haworth:[-86.8,337.2],nobile:[-85.4,37.3],malapert:[-85.964,357.681]};
 document.querySelectorAll<HTMLButtonElement>("[data-region]").forEach(button=>button.onclick=()=>{
  const region=button.dataset.region!, position=regionViews[region]; if(!position)return;
@@ -560,8 +569,18 @@ function usePin(lat:number,lon:number,_site:string){
  const polygon=[[-1,-1],[-1,1],[1,1],[1,-1]].map(([a,b])=>[Math.max(-90,Math.min(90,lat+a*dLat)),(lon+b*dLon+360)%360] as [number,number]);
  moon?.showArea(polygon);onArea(polygon);
 }
-moon=new MoonView($("#moon"),{onUsePin:usePin,onChooseRegion:chooseRegion,onSelectCandidate:selectTower,onArea});
-(window as unknown as {__moonview?:MoonView}).__moonview=moon;   // diagnostics hook for browser tests
+// The viewer can fail if it starts before the page has a real size (a hidden or just-resized window).
+// Wait for a size, and retry a failed start a few times before leaving the static fallback in place.
+function startMoon(attempt=0){
+ const host=$("#moon"), box=host.getBoundingClientRect();
+ if((box.width<2||box.height<2||document.hidden)&&attempt<50){setTimeout(()=>startMoon(attempt+1),200);return;}
+ moon=new MoonView(host,{onUsePin:usePin,onChooseRegion:chooseRegion,onSelectCandidate:selectTower,onArea});
+ (window as unknown as {__moonview?:MoonView}).__moonview=moon;   // diagnostics hook for browser tests
+ if(host.querySelector(".vw-fallback")&&attempt<53){
+  const failed=moon;setTimeout(()=>{if(moon!==failed)return;failed.dispose();host.replaceChildren();startMoon(Math.max(attempt,50)+1);},800);
+ }
+}
+startMoon();
 async function initialize(){
  try{
   const conf=await api<{defaults:Record<string,unknown>;sites:Record<string,[string,number,number]>}>("config");

@@ -5,7 +5,7 @@ import {assessmentBadge, assessmentHtml, modelsHtml} from "./evidence.js";
 
 const $=<T extends HTMLElement=HTMLElement>(q:string)=>document.querySelector<T>(q)!;
 const form=$<HTMLFormElement>("#scenario"), view=$("#view");
-const C={cyan:"#84deff",green:"#73d8ae",amber:"#f4ba72",red:"#f2848c",muted:"#a9bacd",text:"#edf5ff",violet:"#bba9ff",grid:"#29435a",bg:"#0c1520"};
+const C={cyan:"#33adff",green:"#3ddc97",amber:"#ffb84d",red:"#ff6b6b",muted:"#a1a1aa",text:"#ffffff",violet:"#bba9ff",grid:"#2c2c31",bg:"#0a0a0b"};
 const TABS:Record<string,[string,string,string]>={
  network:["01 / PLACE RELAYS","Relays for a lunar mine.","The model proposes sites. Line of sight on real terrain decides."],
  resilience:["02 / RESILIENCE LAB","What breaks first?","Fail nodes and links, and compare real terrain with idealized networks."],
@@ -72,7 +72,7 @@ function shadeImage(){
  rows.forEach((row,y)=>row.forEach((v,x)=>{const i=4*(y*image.width+x);data.data[i]=v*.62;data.data[i+1]=v*.68;data.data[i+2]=v*.8;data.data[i+3]=255;}));
  ctx.putImageData(data,0,0);shadeCache={key:k,image};return image;
 }
-const ROLE:Record<string,string>={gateway:C.cyan,relay:C.green,mine:C.amber,candidate:"#7d8da3"};
+const ROLE:Record<string,string>={gateway:C.cyan,relay:C.green,mine:C.amber,candidate:"#8a8a94"};
 interface MapState{nodes:J[];edges:{a:number;b:number;color:string;dash?:boolean}[];color:(node:J)=>string;label?:(node:J)=>string;pick?:(node:J)=>void}
 function drawMap(id:string,state:MapState,overlay?:string){
  const c=canvas(id);if(!c)return;
@@ -94,7 +94,7 @@ function drawMap(id:string,state:MapState,overlay?:string){
   ctx.fillStyle=state.color(v);ctx.beginPath();
   if(v.role==="mine")ctx.rect(x-5,y-5,10,10);else ctx.arc(x,y,big?5.5:2.4,0,2*Math.PI);
   ctx.fill();
-  if(big){ctx.strokeStyle="#07101a";ctx.lineWidth=1.2;ctx.stroke();ctx.font="11px monospace";ctx.fillStyle=C.text;ctx.fillText(state.label?state.label(v):String(v.id),x+8,y-6);}
+  if(big){ctx.strokeStyle="#050506";ctx.lineWidth=1.2;ctx.stroke();ctx.font="11px monospace";ctx.fillStyle=C.text;ctx.fillText(state.label?state.label(v):String(v.id),x+8,y-6);}
  }
  const km=5, bar=km*1000/net.pixel_m*scale;
  ctx.fillStyle=C.text;ctx.font="11px monospace";ctx.fillRect(x0+10,y0+side-14,bar,2);ctx.fillText(km+" km",x0+10,y0+side-19);ctx.fillText("GRID N ↑",x0+10,y0+16);
@@ -139,7 +139,7 @@ function drawMine(id:string,data:J,policy:string){
  const result=data.policies[policy], worst=result.worst_collapse as string|null;
  for(const [a,b] of data.segments as string[][]){
   const collapsed=worst===`${a}-${b}`||worst===`${b}-${a}`;
-  ctx.strokeStyle=collapsed?C.red:"#3d566f";ctx.lineWidth=collapsed?5:7;ctx.lineCap="round";ctx.beginPath();ctx.moveTo(...at(data.junctions[a]));ctx.lineTo(...at(data.junctions[b]));ctx.stroke();
+  ctx.strokeStyle=collapsed?C.red:"#3a3a40";ctx.lineWidth=collapsed?5:7;ctx.lineCap="round";ctx.beginPath();ctx.moveTo(...at(data.junctions[a]));ctx.lineTo(...at(data.junctions[b]));ctx.stroke();
  }
  ctx.font="11px monospace";
  for(const [name,radio] of Object.entries(result.radios) as [string,J][]){
@@ -165,7 +165,7 @@ function networkView(){
  const fragile=table(["Node","Role","Sunlight","Earth view","Mines linked if lost"],net.fragile.map((f:J)=>{const v=byId.get(f.id);return [String(f.id),f.role,pct(v.sun),pct(v.earth),`${pct(f.served_if_lost)} ${f.served_if_lost<1?'<span class="pill warn">critical</span>':""}`];}));
  const paths=Object.entries(net.structure.disjoint_paths as Record<string,number>).map(([id,k])=>`Mine ${id}: ${k} independent path${k===1?"":"s"}`).join(" · ");
  return kpis()+`<div class="split">${panel("Terrain, candidates and the chosen network",layers+`<canvas id="map" class="ora-map" aria-label="Terrain map with candidate sites, chosen relays, gateways and mining sites"></canvas>`+
-  key([[C.cyan,"gateway (sees Earth)"],[C.green,"chosen relay"],[C.amber,"mining site"],["#7d8da3","candidate"],["rgba(242,132,140,.8)","dead zone (coverage layer)"]])+
+  key([[C.cyan,"gateway (sees Earth)"],[C.green,"chosen relay"],[C.amber,"mining site"],["#8a8a94","candidate"],["rgba(242,132,140,.8)","dead zone (coverage layer)"]])+
   `<p class="caption">${esc(net.site)} · ${net.nodes.length} sites · ${net.all_edges.toLocaleString()} line-of-sight links within ${n(net.scenario.max_range_km,0)} km.</p>`)}
  ${panel("Placement",`<p>${assessmentBadge(net.assessment)}</p><p class="callout ${p.feasible?"":"amber"}">${p.feasible?"Best evaluated relay set · every mining site linked in static graph":"Best evaluated relay set · some mining sites unreachable"}</p>`+readout([
   ["Siting scores",esc(net.score_method)+(net.score_evidence?.fallback?' <span class="pill warn">fallback</span>':"")],["Chain relays",p.chain.join(", ")||"none needed"],["Spare relays",p.added.join(", ")||"none added"],["Gateways",p.gateways.join(", ")],
@@ -253,7 +253,7 @@ function twinView(){
  ${metric("LONGEST LOCAL OUTAGE",n(s.longest_gateway_outage_h,0)+" h","mines cut off from every gateway",s.longest_gateway_outage_h?"amber":"green")}${metric("RELAYS FROZEN",String(s.frozen.length),s.frozen.length?"nodes "+s.frozen.join(", "):"none below −60 °C",s.frozen.length?"red":"green")}
  ${metric("LASER FEEDS · OPTICAL TRUNKS",`${s.beams} · ${s.optical_trunks}`,"active in this run")}</div>`+
  `<div class="split">${panel("Network state",`<canvas id="twin-map" class="ora-map" aria-label="Network state at the selected hour"></canvas><input id="hour" class="time" type="range" min="0" max="${sim.times.length-1}" value="${hour}" aria-label="Hour of the simulation"><p id="clock" class="caption"></p>`+
-  key([[C.green,"relaying"],[C.violet,"hibernating"],["#5b6b80","off or dead"],[C.red,"frozen"],[C.cyan,"gateway seeing Earth"],[C.amber,"laser power feed",true]]))}
+  key([[C.green,"relaying"],[C.violet,"hibernating"],["#6b6b75","off or dead"],[C.red,"frozen"],[C.cyan,"gateway seeing Earth"],[C.amber,"laser power feed",true]]))}
  ${panel("Nodes at this hour",`<div id="twin-table"></div>`)}</div>`+
  panel("Scenario status",assessmentHtml(sim.assessment))+hazardPanel()+panel("Service over time",`<canvas id="service" class="ora-chart" aria-label="Share of mining sites linked over time"></canvas>${key([[C.green,"linked to a gateway",true],[C.cyan,"linked to Earth",true]])}`)+controls;
 }
@@ -268,7 +268,7 @@ function hazardPanel(){
 }
 function paintTwin(){
  if(!sim||!document.querySelector("#twin-map"))return;
- const t=hour, modeColor=(v:J)=>v.frozen_h!=null&&v.frozen_h<=t*sim.step_h?C.red:v.mode[t]===2?(v.role==="gateway"&&v.earth?.[t]?C.cyan:v.role==="mine"?C.amber:C.green):v.mode[t]===1?C.violet:"#5b6b80";
+ const t=hour, modeColor=(v:J)=>v.frozen_h!=null&&v.frozen_h<=t*sim.step_h?C.red:v.mode[t]===2?(v.role==="gateway"&&v.earth?.[t]?C.cyan:v.role==="mine"?C.amber:C.green):v.mode[t]===1?C.violet:"#6b6b75";
  const base=new Map<number,J>(net.nodes.map((v:J)=>[v.id,v]));
  const nodes=sim.nodes.map((v:J)=>({...v,x:base.get(v.id).x,y:base.get(v.id).y}));
  drawMap("twin-map",{nodes,color:modeColor,label:(v:J)=>`${v.id} ${v.role==="mine"?"":n(v.temp_c[t],0)+"°C"}`,
