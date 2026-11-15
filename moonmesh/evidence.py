@@ -46,6 +46,6 @@ NOT_MODELLED = (
     "Dust accumulation on solar panels, radiators and optics",
     "Space weather: solar particle events, surface charging and radiation upsets",
     "Earth ground-station scheduling, atmospheric attenuation and receiver outages",
-    "Hardware failure rates (relay loss is tested as a what-if, not as a probability)",
+    "Hardware failure rates (node loss is tested as a what-if, not as a probability)",
     "Lunar orbiting relay satellites",
 )

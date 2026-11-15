@@ -13,7 +13,7 @@ DEMO_ITEMS = (
 )
 DEMO_RELAY_COST = sum(price for _, _, price in DEMO_ITEMS)
 SCOPE = ("Includes installed network nodes, communications equipment, integration, deployment and installation. "
-         "Excludes the lander, launch, satellite services, "
+         "Excludes the lander, launch, any satellite or satellite services (no satellite cost is modelled), "
          "ongoing operations and broader mission costs.")
 
 

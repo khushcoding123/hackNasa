@@ -4,7 +4,8 @@
   "scripts": {
     "build": "node scripts/build_frontend.mjs",
     "test:orbital": "node --experimental-strip-types tests/test_orbital_preview.mjs frontend/orbital-preview.ts",
-    "test:terrain": "esbuild frontend/terrain-mesh.ts --bundle --platform=node --format=esm --outfile=tmp/terrain-mesh-test.mjs && node tests/test_terrain_mesh.mjs tmp/terrain-mesh-test.mjs"
+    "test:terrain": "node -e \"require('esbuild').buildSync({entryPoints:['frontend/terrain-mesh.ts'],bundle:true,platform:'node',format:'esm',outfile:'tmp/terrain-test.mjs'})\" && node tests/test_terrain_mesh.mjs tmp/terrain-test.mjs",
+    "test:evidence": "node -e \"require('esbuild').buildSync({entryPoints:['frontend/mission-evidence.ts'],bundle:true,platform:'node',format:'esm',outfile:'tmp/evidence-test.mjs'})\" && node tests/test_mission_evidence.mjs tmp/evidence-test.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.180.0",

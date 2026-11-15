@@ -37,6 +37,13 @@ def config():
     return dict(defaults=Mission(), sites={k: v for k, v in SITES.items() if k not in LOCAL})
 
 
+@app.get("/api/satellite/presets")
+def satellite_presets():
+    """Illustrative two-body orbit presets. Not mission designs; radios are intentionally unset (no verified values)."""
+    from lunar_core.orbit import PRESETS
+    return dict(status="simulated", presets=PRESETS)
+
+
 @app.get("/api/status")
 def status():
     """Preflight inventory: code revision, data present, models actually loaded, library versions."""
@@ -80,6 +87,8 @@ def sensitivity(body: Mission):
         ("Time step " + ("15 min" if body.minutes >= 30 else "5 min" if body.minutes == 15 else "30 min"),
          dict(minutes=15 if body.minutes >= 30 else 5 if body.minutes == 15 else 30)),
     ]
+    if body.satellite:
+        variants.append(("Satellite lost (re-optimized Earth baseline)", dict(satellite=None)))
     site = SITES.get(body.site)
     if site:
         lat = body.latitude if body.latitude is not None else site[1]

@@ -5,6 +5,7 @@ import {
 import {OrbitControls} from "three/examples/jsm/controls/OrbitControls.js";
 import {MOON_RADIUS_M} from "./terrain-mesh.js";
 import {loadBundledPatch, loadWacPatch, loadWmsPatch, nacLayerAt, withNac} from "./site-imagery.js";
+import {candidateAvailable, evidenceFocus} from "./mission-evidence.js";
 import type {Result} from "./types.js";
 
 /** Three.js close-up of any lunar location: a real-scale mesh of the best available LOLA terrain, aligned LROC imagery,
@@ -71,6 +72,10 @@ export class SiteView {
  private inspectionAz = 225; private inspectionEl = 26;
  private result: Result | undefined;
  private index = 0;
+ private evidenceCase="cold_dust";
+ private evidenceScope:string|undefined;
+ private previewRelays:string[]=[];
+ private evidence=new Group();
  private disabled = new Set<string>();
  private az = 225; private el = 26;
  private scale = 8;
@@ -425,7 +430,7 @@ export class SiteView {
   const r = this.result; if (!r) return;
   for (const c of r.candidates) {
    const t = this.towers.get(c.id); if (!t) continue;
-   const off = this.disabled.has(c.id), up = !!c.temporal_coverage[this.index] && !off;
+   const off = this.disabled.has(c.id), up = candidateAvailable(r,c.id,this.evidenceCase,this.disabled,this.index);
    const color = new Color(off ? 0xf2848c : up ? 0x73d8ae : 0xf4ba72);
    (t.head.material as MeshBasicMaterial).color.copy(color);
    if (t.link) {
@@ -434,6 +439,24 @@ export class SiteView {
     t.link.computeLineDistances();
    }
   }
+  this.paintEvidence();
+ }
+
+ private paintEvidence(){
+  this.evidence.traverse(object=>{if(object instanceof Mesh||object instanceof Line){object.geometry.dispose();const materials=Array.isArray(object.material)?object.material:[object.material];materials.forEach(m=>m.dispose());}});
+  this.evidence.clear();this.scene.add(this.evidence);
+  const r=this.result;if(!r)return;
+  const ex=this.terrain?.scale.y??1;
+  const point=(lat:number,lon:number,height:number)=>{const p=toLocal(this.basis,lat,lon,height);p.y=p.y*ex+20*this.scale;return p;};
+  const positions=new Map<string,Vector3>([['Lander',point(r.site.lat,r.site.lon,r.site.elevation)],...r.candidates.map(c=>[c.id,point(c.lat,c.lon,c.elevation)] as [string,Vector3])]);
+  const ring=(p:Vector3,color:number)=>{const marker=new Mesh(new SphereGeometry(5*this.scale,12,8),new MeshBasicMaterial({color,wireframe:true,depthTest:false}));marker.position.copy(p);this.evidence.add(marker);};
+  const line=(a:Vector3,b:Vector3,color:number)=>{const edge=new Line(new BufferGeometry().setFromPoints([a,b]),new LineDashedMaterial({color,dashSize:60,gapSize:40,depthTest:false}));edge.computeLineDistances();this.evidence.add(edge);};
+  for(const id of this.previewRelays){const p=positions.get(id);if(p){ring(p,0xbba9ff);line(positions.get('Lander')!,p,0xbba9ff);}}
+  if(!this.evidenceScope)return;
+  const focus=evidenceFocus(r,this.disabled,this.evidenceScope,this.evidenceCase,this.index);
+  for(const [id,state] of focus.nodes){const p=positions.get(id);if(p)ring(p,state==='failed'?0xff6b6b:0xf4ba72);}
+  for(const [id,state] of focus.links){const endpoints=r.diagnostics!.links[id].nodes.map(n=>positions.get(n));if(endpoints[0])ring(endpoints[0],state==='failed'?0xff6b6b:0xf4ba72);if(endpoints.every(p=>p))line(endpoints[0]!,endpoints[1]!,state==='failed'?0xff6b6b:0xf4ba72);}
+  for(const marker of focus.markers){const p=toLocal(this.basis,marker.lat,marker.lon,0);if(Math.abs(p.x)>this.half||Math.abs(p.z)>this.half)continue;p.y=this.groundAt(p.x,p.z)*ex+20*this.scale;ring(p,marker.status==='failed'?0xff6b6b:0xf4ba72);}
  }
 
  // ---------- lighting ----------
@@ -485,11 +508,14 @@ export class SiteView {
   this.paint();
  }
  setMission(result: Result | undefined, index: number, disabled: Set<string>) {
+  this.evidenceCase="cold_dust";
   this.result = result; this.index = index; this.disabled = new Set(disabled);
   this.syncResultUi();
   if (this.terrain) this.buildMarkers();
  }
- update(index: number, disabled: Set<string>) {
+ update(index: number, disabled: Set<string>, caseName="cold_dust", scope?:string, preview:string[]=[]) {
+  this.evidenceScope=scope;this.previewRelays=[...preview];
+  this.evidenceCase=caseName;
   this.disabled = new Set(disabled);
   if (this.result) this.setIndex(index); else this.paint();
  }

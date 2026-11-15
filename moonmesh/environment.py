@@ -2,7 +2,6 @@
 
 These inputs describe an effective thermal sink, not regolith measurements or a forecast.
 """
-from dataclasses import replace
 from itertools import combinations
 
 from .costs import relay_limit
@@ -58,19 +57,28 @@ def public_state(state, mission):
                 frozen_hour=None if state['frozen_step'] < 0 else state['frozen_step'] * mission.minutes / 60)
 
 
-def optimize_environment(direct, relays, eligible, mission):
+def optimize_environment(direct, relays, eligible, mission, without_satellite=None, evidence=None):
     """Search increasing relay count; all cases must pass, including N−1 if requested."""
     best, best_key = (), None
+    first_winner = None
     for count in range(relay_limit(min(mission.max_relays, len(eligible)), mission.budget_usd, mission.relay_cost_usd) + 1):
         winners = []
         for selection in combinations(eligible, count):
-            reports = {case: evaluate(direct[case], relays[case], selection, mission) for case in CASES}
+            reports = {case: evaluate(direct[case], relays[case], selection, mission,
+                None if without_satellite is None else (without_satellite[0][case], without_satellite[1][case])) for case in CASES}
             targets = [r[2] if mission.resilient else r[1] for r in reports.values()]
             key = (min(r['availability'] for r in targets), -max(r['longest'] for r in targets), -count)
+            feasible = all(passes(r, mission) for r in targets)
+            if evidence is not None:
+                evidence.append(dict(selection=selection, key=key, feasible=feasible,
+                    cases={case: dict(network=r[1], worst=r[2]) for case, r in reports.items()}))
             if best_key is None or key > best_key:
                 best, best_key = selection, key
-            if all(passes(r, mission) for r in targets):
+            if feasible:
                 winners.append((key, selection))
         if winners:
-            return max(winners)[1], True
-    return best, False
+            if evidence is None:
+                return max(winners)[1], True
+            if first_winner is None:
+                first_winner = max(winners)[1]
+    return (first_winner, True) if first_winner is not None else (best, False)

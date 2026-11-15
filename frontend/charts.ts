@@ -1,3 +1,5 @@
+import {candidateAvailable, earthHorizonNote, evidenceFocus} from "./mission-evidence.js";
+import {MOON_RADIUS_M} from "./terrain-mesh.js";
 import type {Result, Candidate} from "./types.js";
 
 export function powerTimeline(candidate:Candidate, capacity:number, index:number, target:string|HTMLCanvasElement="power-timeline") {
@@ -34,7 +36,7 @@ function canvas(target:string|HTMLCanvasElement, fallback:[number,number]=[640,1
   return {element,ctx,w,h};
 }
 
-export function map(result:Result, layer:string, disabled:Set<string>, index:number, select:(c:Candidate)=>void, selected:string, zoom=1) {
+export function map(result:Result, layer:string, disabled:Set<string>, index:number, select:(c:Candidate)=>void, selected:string, zoom=1, preview=new Set<string>(), caseName="cold_dust", scope?:string) {
   const {element,ctx,w,h}=canvas("map");
   const side=Math.min(w,h);
   const x0=(w-side)/2, y0=(h-side)/2;
@@ -68,17 +70,40 @@ export function map(result:Result, layer:string, disabled:Set<string>, index:num
     ctx.strokeStyle=color;ctx.setLineDash([5,5]);ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx+Math.sin(theta)*length,cy-Math.cos(theta)*length);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle=color;ctx.font="12px monospace";ctx.fillText(label,cx+Math.sin(theta)*length+5,cy-Math.cos(theta)*length-5);
   };
   const blocked=result.samples.obstruction_m[index];
-  ray(result.samples.earth_az[index],Math.min(side*.47,(blocked??5000)*scale),result.samples.direct[index]?"#3ddc97":"#ff6b6b","Earth");
+  const directEarth=result.diagnostics?.paths['Lander->Earth'].available[caseName]??result.samples.direct;
+  ray(result.samples.earth_az[index],Math.min(side*.47,(blocked??5000)*scale),directEarth[index]?"#3ddc97":"#ff6b6b","Earth");
   ray(result.samples.sun_az[index],side*.31,result.samples.solar[index]?"#ffd07f":"#a77d54","Sun");
   points.forEach(({c,x,y})=>{
     const active=result.recommended.includes(c.id);
-    const color=disabled.has(c.id)?"#ff6b6b":active?"#3ddc97":"#c4c4cc";
+    const color=disabled.has(c.id)?"#ff6b6b":active?(candidateAvailable(result,c.id,caseName,disabled,index)?"#3ddc97":"#f4ba72"):"#c4c4cc";
+    if(preview.has(c.id)){ctx.strokeStyle="#bba9ff";ctx.lineWidth=2;ctx.setLineDash([5,4]);ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(x,y);ctx.stroke();ctx.setLineDash([]);ctx.beginPath();ctx.arc(x,y,12,0,2*Math.PI);ctx.stroke();}
     if(active){ctx.strokeStyle=color;ctx.lineWidth=1.7;ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(x,y);ctx.stroke();}
     ctx.fillStyle=color;ctx.beginPath();ctx.arc(x,y,c.id===selected?6:active?5:2.7,0,2*Math.PI);ctx.fill();
     if(c.id===selected){ctx.strokeStyle="#33adff";ctx.beginPath();ctx.arc(x,y,10,0,Math.PI*2);ctx.stroke();}
     if(disabled.has(c.id)){ctx.strokeStyle="#ff6b6b";ctx.beginPath();ctx.moveTo(x-5,y-5);ctx.lineTo(x+5,y+5);ctx.moveTo(x-5,y+5);ctx.lineTo(x+5,y-5);ctx.stroke();}
     if(active||c.id===selected){ctx.font="12px monospace";ctx.fillStyle="#ffffff";ctx.fillText(c.id,x+7,y-4);}
   });
+  if(scope){
+    const focus=evidenceFocus(result,disabled,scope,caseName,index);
+    const positions=new Map<string,{x:number;y:number}>([['Lander',{x:cx,y:cy}],...points.map(p=>[p.c.id,{x:p.x,y:p.y}] as [string,{x:number;y:number}])]);
+    for(const [id,state] of focus.links){
+      const ends=result.diagnostics!.links[id].nodes.map(node=>positions.get(node));
+      if(ends.length!==2||!ends[0]||!ends[1])continue;
+      ctx.strokeStyle=state==='failed'?'#ff6b6b':'#f4ba72';ctx.lineWidth=3;ctx.setLineDash([5,4]);
+      ctx.beginPath();ctx.moveTo(ends[0].x,ends[0].y);ctx.lineTo(ends[1].x,ends[1].y);ctx.stroke();ctx.setLineDash([]);
+    }
+    for(const [id,state] of focus.nodes){const p=positions.get(id);if(!p)continue;
+      ctx.strokeStyle=state==='failed'?'#ff6b6b':'#f4ba72';ctx.lineWidth=3;ctx.beginPath();ctx.arc(p.x,p.y,14,0,2*Math.PI);ctx.stroke();
+    }
+    // The mission map uses south-polar stereographic coordinates at research sites.
+    // Do not place geodetic markers on an unspecified local projection elsewhere.
+    if(result.site.lat<=-85)for(const marker of focus.markers){
+      const rho=2*MOON_RADIUS_M*Math.tan((90+marker.lat)*Math.PI/360),lon=marker.lon*Math.PI/180;
+      const x=cx+(rho*Math.sin(lon)-result.map.x)*scale,y=cy-(rho*Math.cos(lon)-result.map.y)*scale;
+      ctx.strokeStyle=marker.status==='failed'?'#ff6b6b':'#f4ba72';ctx.lineWidth=2;
+      ctx.beginPath();ctx.moveTo(x-5,y-5);ctx.lineTo(x+5,y+5);ctx.moveTo(x-5,y+5);ctx.lineTo(x+5,y-5);ctx.stroke();
+    }
+  }
   ctx.fillStyle="#33adff";ctx.fillRect(cx-4,cy-4,8,8);
   ctx.restore();
   ctx.fillStyle="#ffffff";ctx.font="12px monospace";ctx.fillText("GRID N ↑",x0+9,17);
@@ -95,13 +120,14 @@ export function map(result:Result, layer:string, disabled:Set<string>, index:num
   };
 }
 
-export function timeline(result:Result, network:boolean[], assisted:boolean[], index:number, zoom:number, move:(i:number)=>void) {
+export function timeline(result:Result, network:boolean[], assisted:boolean[], index:number, zoom:number, move:(i:number)=>void, preview?:boolean[], caseName="cold_dust") {
   const {element,ctx,w,h}=canvas("timeline");
   const tracks:[string,boolean[],string][]=[
     ["Flat horizon",result.samples.flat,"#7aa7d6"],["Terrain visible",result.samples.terrain,"#33adff"],
-    ["Direct RF",result.samples.direct,"#3ddc97"],["Sunlight",result.samples.solar,"#ffb84d"],
-    ["Relay path",assisted,"#bba9ff"],["Combined",network,"#3ddc97"],["Direct blackout",result.samples.direct.map(v=>!v),"#ff6b6b"],
+    ["Direct Earth",result.diagnostics?.paths["Lander->Earth"].available[caseName]??result.samples.direct,"#3ddc97"],["Sunlight",result.samples.solar,"#ffb84d"],
+    ["Relay path",assisted,"#bba9ff"],["Combined",network,"#3ddc97"],["Network outage",network.map(v=>!v),"#ff6b6b"],
   ];
+  if(preview)tracks.push(["Preview",preview,"#bba9ff"]);
   const start=Math.max(0,Math.min(result.times.length-zoom,index-Math.floor(zoom/2)));
   const left=Math.min(120,w*.4), span=(w-left-10)/zoom;
   ctx.font="12px monospace";
@@ -112,9 +138,9 @@ export function timeline(result:Result, network:boolean[], assisted:boolean[], i
     let first=start;
     while(first<start+zoom){
       const flag=flags[first];
-      const uncertain=row===3?!result.samples.solar_known[first]:[1,2,6].includes(row)&&result.samples.status[first]==="uncertain";
+      const uncertain=row===3?!result.samples.solar_known[first]:[1,2].includes(row)&&result.samples.status[first]==="uncertain";
       let next=first+1;
-      while(next<start+zoom&&flags[next]===flag&&(row===3?!result.samples.solar_known[next]:[1,2,6].includes(row)&&result.samples.status[next]==="uncertain")===uncertain) next++;
+      while(next<start+zoom&&flags[next]===flag&&(row===3?!result.samples.solar_known[next]:[1,2].includes(row)&&result.samples.status[next]==="uncertain")===uncertain) next++;
       if(flag||uncertain){ctx.fillStyle=uncertain?"#bd864d":color;ctx.fillRect(left+(first-start)*span,y+2,(next-first)*span,12);
         if(uncertain){const x=left+(first-start)*span,width=(next-first)*span;ctx.save();ctx.beginPath();ctx.rect(x,y+2,width,12);ctx.clip();ctx.strokeStyle="#302219";ctx.lineWidth=2;for(let t=x-12;t<x+width;t+=6){ctx.beginPath();ctx.moveTo(t,y+14);ctx.lineTo(t+12,y+2);ctx.stroke();}ctx.restore();}}
       first=next;
@@ -173,12 +199,7 @@ export function horizon(result:Result, index:number) {
     const [az,el,color]=row as [number,number,string];
     ctx.fillStyle=color;ctx.beginPath();ctx.arc(px(az),py(el),5,0,Math.PI*2);ctx.fill();
   });
-  const distance=s.obstruction_m[index];
-  const note=limit===null?"terrain data incomplete"
-    :!blocked?`clear by ${(s.earth_clearance[index]??0).toFixed(1)}°${s.direct[index]?"":" · RF margin too low"}`
-    :s.reason[index]==="Earth below geometric horizon"?"below the horizon"
-    :earth>limit?`inside the ${clearance}° clearance allowance`
-    :`blocked by terrain${distance===null?"":` ${(distance/1000).toFixed(1)} km away`}`;
+  const note=earthHorizonNote(result,index);
   // Keep the label inside the plot: prefer the side away from the nearest edge, then clamp.
   const label="Earth: "+note;
   ctx.font="12px monospace";

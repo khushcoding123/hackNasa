@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -13,6 +13,40 @@ class Radio(BaseModel):
     loss: float = Field(ge=0, le=100)
     margin: float = Field(ge=0, le=60)
     rate_kbps: float = Field(default=128, gt=0, le=1e7)
+
+
+class Satellite(BaseModel):
+    """Simulated orbiting relay. Two-body orbit in selenocentric J2000 axes; epoch defaults to mission start (00:00 UTC)."""
+    model_config = {"allow_inf_nan": False}
+
+    preset: Literal["polar_500km", "frozen_elliptical_south", "custom"] = "polar_500km"
+    semi_major_axis_km: float | None = Field(default=None, gt=1737.4, le=60000)
+    eccentricity: float | None = Field(default=None, ge=0, lt=1)
+    inclination_deg: float | None = Field(default=None, ge=0, le=180)
+    raan_deg: float | None = Field(default=None, ge=0, lt=360)
+    arg_periapsis_deg: float | None = Field(default=None, ge=0, lt=360)
+    mean_anomaly_deg: float | None = Field(default=None, ge=0, lt=360)
+    epoch: datetime | None = None
+    min_elevation_deg: float = Field(default=5, ge=0, le=60)
+    # TODO: no verified satellite radio values exist in the repository. When a radio is None its hop is geometry-only
+    # (access and occultation, no link margin) and results are labelled that way.
+    surface_to_sat_radio: Radio | None = None
+    sat_to_earth_radio: Radio | None = None
+
+    @model_validator(mode="after")
+    def validate_custom(self):
+        if self.preset == "custom" and any(getattr(self, k) is None for k in (
+                "semi_major_axis_km", "eccentricity", "inclination_deg", "raan_deg", "arg_periapsis_deg", "mean_anomaly_deg")):
+            raise ValueError("A custom satellite orbit needs all six orbital elements.")
+        from lunar_core.orbit import PRESETS, Orbit
+        elements = dict(PRESETS.get(self.preset, {}))
+        for key in ("semi_major_axis_km", "eccentricity", "inclination_deg", "raan_deg", "arg_periapsis_deg", "mean_anomaly_deg"):
+            if getattr(self, key) is not None:
+                elements[key] = getattr(self, key)
+        Orbit(**elements, epoch=self.epoch)
+        if self.epoch is not None and self.epoch.utcoffset() is None:
+            raise ValueError("Satellite epoch must include a UTC offset.")
+        return self
 
 
 class Mission(BaseModel):
@@ -59,6 +93,7 @@ class Mission(BaseModel):
     longitude: float | None = Field(default=None, ge=-180, le=360)
     dem_bias_m: float = Field(default=0, ge=-30, le=30)
     earth_radio: Radio = Radio(ghz=8.4, watts=20, tx_gain=30, rx_gain=68, sensitivity=-115, loss=3, margin=3)
+    satellite: Satellite | None = None
     surface_radio: Radio = Radio(ghz=2.4, watts=2, tx_gain=4, rx_gain=4, sensitivity=-105, loss=3, margin=3, rate_kbps=128)
 
     @model_validator(mode="after")

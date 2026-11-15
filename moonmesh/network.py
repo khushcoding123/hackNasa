@@ -38,7 +38,7 @@ def passes(values, mission):
     return values["availability"] >= mission.availability and values["longest"] <= mission.blackout_hours
 
 
-def evaluate(direct, relays, selection, mission):
+def evaluate(direct, relays, selection, mission, without_satellite=None):
     paths = direct.astype(np.uint8).copy()
     for idx in selection:
         paths += relays[idx]
@@ -46,16 +46,22 @@ def evaluate(direct, relays, selection, mission):
     hours = mission.minutes / 60
     combined = metrics(online, hours)
     failed = [metrics(paths - relays[idx] > 0, hours) for idx in selection]
+    independent = paths >= 2
+    if without_satellite is not None:
+        base_direct, base_relays = without_satellite
+        surviving, satellite_lost, _, _ = evaluate(base_direct, base_relays, selection, mission)
+        failed.append(satellite_lost)
+        independent &= surviving
     worst = dict(availability=min(v["availability"] for v in failed), longest=max(v["longest"] for v in failed)) if failed else combined
-    return online, combined, worst, float((paths >= 2).mean() * 100)
+    return online, combined, worst, float(independent.mean() * 100)
 
 
-def optimize(direct, relays, eligible, mission, candidates=None):
+def optimize(direct, relays, eligible, mission, candidates=None, without_satellite=None):
     best, best_key = (), None
     for count in range(relay_limit(min(mission.max_relays, len(eligible)), mission.budget_usd, mission.relay_cost_usd) + 1):
         winners = []
         for selection in combinations(eligible, count):
-            _, combined, worst, _ = evaluate(direct, relays, selection, mission)
+            _, combined, worst, _ = evaluate(direct, relays, selection, mission, without_satellite)
             target = worst if mission.resilient else combined
             key = (target["availability"], -target["longest"], -count)
             if best_key is None or key > best_key:

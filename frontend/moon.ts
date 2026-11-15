@@ -9,6 +9,7 @@ import {addImagery, type ImageryHandle, type ImageryState} from "./imagery.js";
 import {MoonTerrainProvider, loadTerrainInfo} from "./terrain.js";
 import {SiteView} from "./site3d.js";
 import {icon} from "./icons.js";
+import {candidateAvailable, evidenceFocus} from "./mission-evidence.js";
 import type {AreaResult, Candidate, Result} from "./types.js";
 import {ORBIT_PERIOD, satelliteAccess, satellitePosition, surfacePosition} from "./orbital-preview.js";
 
@@ -83,6 +84,9 @@ export class MoonView {
  private missionVisible = true;
  private showAll = false;
  private index = 0;
+ private evidenceCase = "cold_dust";
+ private evidenceScope:string|undefined;
+ private previewRelays: string[] = [];
  private disabled = new Set<string>();
  private selected = "";
  private towers = new Map<string, {entity: Entity; link?: Entity}>();
@@ -663,6 +667,9 @@ export class MoonView {
  // ---------- mission overlay ----------
  /** Exploration-only until a mission run succeeds. */
  setMission(result: Result | undefined) {
+  this.previewRelays=[];this.evidenceCase="cold_dust";this.evidenceScope=undefined;
+  if(this.viewer){for(const entity of [...this.viewer.entities.values])if(/^(lander|tower:|link:|mission-orbit:|evidence:)/.test(String(entity.id)))this.viewer.entities.remove(entity);}
+  this.lander=undefined;this.towers.clear();
   this.result = result; this.index = 0; this.disabled = new Set(); this.selected = result?.recommended[0] ?? "";
   this.site?.setMission(result, 0, this.disabled);
   this.root.querySelectorAll<HTMLElement>(".vw-mission-only").forEach(node => { node.hidden = !result; });
@@ -673,11 +680,12 @@ export class MoonView {
   const box = this.root.querySelector<HTMLInputElement>("[data-mission]"); if (box) box.checked = visible;
   this.refreshMission();
  }
- update(index: number, disabled: Set<string>, selected: string) {
-  if (this.index === index && this.selected === selected && [...this.disabled].join() === [...disabled].join()) return;
-  this.index = index; this.disabled = new Set(disabled); this.selected = selected; this.refreshMission();
-  this.site?.update(index, this.disabled);
+ update(index: number, disabled: Set<string>, selected: string, caseName="cold_dust", scope?:string) {
+  if (this.index === index && this.selected === selected && this.evidenceCase===caseName && this.evidenceScope===scope && [...this.disabled].join() === [...disabled].join()) return;
+  this.index = index; this.evidenceScope=scope; this.evidenceCase=caseName; this.disabled = new Set(disabled); this.selected = selected; this.refreshMission();
+  this.site?.update(index, this.disabled, caseName,scope,this.previewRelays);
  }
+ setAlternativePreview(relays:string[]) {this.previewRelays=[...relays];this.refreshMission();this.site?.update(this.index,this.disabled,this.evidenceCase,this.evidenceScope,this.previewRelays);}
  private refreshMission() {
   const viewer = this.viewer; if (!viewer) return;
   const r = this.result;
@@ -691,7 +699,7 @@ export class MoonView {
   for (const [id, parts] of this.towers) if (!wanted.has(id)) { viewer.entities.remove(parts.entity); if (parts.link) viewer.entities.remove(parts.link); this.towers.delete(id); }
   for (const c of r.candidates) {
    if (!wanted.has(c.id)) continue;
-   const recommended = r.recommended.includes(c.id), off = this.disabled.has(c.id), available = !!c.temporal_coverage[this.index] && !off;
+   const recommended = r.recommended.includes(c.id), off = this.disabled.has(c.id), available = candidateAvailable(r,c.id,this.evidenceCase,this.disabled,this.index);
    const color = Color.fromCssColorString(off ? "#f2848c" : recommended ? (available ? "#73d8ae" : "#f4ba72") : "#8a9aaf");
    let parts = this.towers.get(c.id);
    const top = Cartesian3.fromDegrees(c.lon, c.lat, c.elevation + 30, MOON);
@@ -712,6 +720,48 @@ export class MoonView {
     parts.link.polyline!.depthFailMaterial = material();
    }
   }
+  for(const entity of [...viewer.entities.values])if(String(entity.id).startsWith("evidence:"))viewer.entities.remove(entity);
+  for(const id of this.previewRelays){const c=r.candidates.find(v=>v.id===id);if(!c)continue;
+   const top=Cartesian3.fromDegrees(c.lon,c.lat,c.elevation+Number(r.config.mast_m),MOON),color=Color.fromCssColorString("#bba9ff");
+   viewer.entities.add({id:`evidence:${id}`,position:top,point:{pixelSize:16,color:Color.TRANSPARENT,outlineColor:color,outlineWidth:3,disableDepthTestDistance:2e5},label:{text:`${id} · alternative preview`,font:"12px monospace",fillColor:color,pixelOffset:new Cartesian2(0,-28)}});
+   viewer.entities.add({id:`evidence:link:${id}`,polyline:{positions:[this.lander.position!.getValue(viewer.clock.currentTime)!,top],width:3,material:new PolylineDashMaterialProperty({color})}});
+  }
+  for (const entity of [...viewer.entities.values]) if (String(entity.id).startsWith("mission-orbit:")) viewer.entities.remove(entity);
+  for (const entity of viewer.entities.values) if (String(entity.id).startsWith("satellite:")) entity.show = !r.satellite;
+  if (r.satellite) {
+   const s=r.satellite, i=this.index, off=this.disabled.has("S1");
+   const pos=Cartesian3.fromDegrees(s.track.lon[i], s.track.lat[i], s.track.altitude_km[i]*1000, MOON);
+   const cyan=Color.fromCssColorString(off?"#f2848c":"#84deff");
+   viewer.entities.add({id:"mission-orbit:S1",position:pos,point:{pixelSize:14,color:cyan},label:{text:"S1 · simulated",font:"13px monospace",fillColor:cyan}});
+   viewer.entities.add({id:"mission-orbit:track",polyline:{positions:s.track.lat.slice(Math.max(0,i-1),Math.min(r.times.length,Math.max(0,i-1)+Math.ceil(s.period_min/Number(r.config.minutes))+1)).map((lat,j)=>{const k=Math.max(0,i-1)+j;return Cartesian3.fromDegrees(s.track.lon[k],lat,s.track.altitude_km[k]*1000,MOON);}),width:1,material:cyan,arcType:ArcType.NONE}});
+   const nodes=[{id:"Lander",lat:r.site.lat,lon:r.site.lon,elevation:r.site.elevation,hop:s.lander,mast:Number(r.config.observer_m),powered:r.environment.lander[this.evidenceCase].available[i]},...r.candidates.filter(c=>r.recommended.includes(c.id)&&c.satellite).map(c=>({...c,hop:c.satellite!,mast:Number(r.config.mast_m),powered:r.environment.lander[this.evidenceCase].available[i]&&c.environment[this.evidenceCase].available[i]&&!!c.los&&c.surface_margin>=Number((r.config.surface_radio as Record<string,number>).margin)}))];
+   for(const node of nodes) {
+    const ok=!off&&!this.disabled.has(node.id)&&node.powered&&node.hop.available[i]&&s.earth.available[i];
+    const color=Color.fromCssColorString(ok?"#73d8ae":"#f2848c");
+    viewer.entities.add({id:`mission-orbit:hop:${node.id}`,polyline:{positions:[Cartesian3.fromDegrees(node.lon,node.lat,node.elevation+node.mast,MOON),pos],width:2,arcType:ArcType.NONE,material:ok?color:new PolylineDashMaterialProperty({color})}});
+   }
+   const lat=rad(r.site.lat),lon=rad(r.site.lon),az=rad(r.samples.earth_az[i]),el=rad(r.samples.earth_el[i]);
+   const up=new Cartesian3(Math.cos(lat)*Math.cos(lon),Math.cos(lat)*Math.sin(lon),Math.sin(lat)),east=new Cartesian3(-Math.sin(lon),Math.cos(lon),0),north=Cartesian3.cross(up,east,new Cartesian3());
+   const direction=Cartesian3.add(Cartesian3.multiplyByScalar(up,Math.sin(el),new Cartesian3()),Cartesian3.add(Cartesian3.multiplyByScalar(north,Math.cos(el)*Math.cos(az),new Cartesian3()),Cartesian3.multiplyByScalar(east,Math.cos(el)*Math.sin(az),new Cartesian3()),new Cartesian3()),new Cartesian3());
+   const origin=Cartesian3.fromDegrees(r.site.lon,r.site.lat,r.site.elevation+Number(r.config.observer_m),MOON);
+   const earth=Cartesian3.add(origin,Cartesian3.multiplyByScalar(direction,r.samples.earth_range_km[i]*1000,new Cartesian3()),new Cartesian3());
+   const ok=!off&&s.earth.available[i],color=Color.fromCssColorString(ok?"#73d8ae":"#f2848c");
+   viewer.entities.add({id:"mission-orbit:earth",polyline:{positions:[pos,earth],width:2,arcType:ArcType.NONE,material:ok?color:new PolylineDashMaterialProperty({color})}});
+  }
+  if(this.evidenceScope){
+   const focus=evidenceFocus(r,this.disabled,this.evidenceScope,this.evidenceCase,this.index);
+   const positions=new Map<string,Cartesian3>();
+   for(const [id,node] of Object.entries(r.diagnostics?.nodes??{}))if(node.lat!=null&&node.lon!=null)positions.set(id,Cartesian3.fromDegrees(node.lon,node.lat,(node.elevation_m??0)+(node.mast_m??0)+10,MOON));
+   if(r.satellite)positions.set('S1',Cartesian3.fromDegrees(r.satellite.track.lon[this.index],r.satellite.track.lat[this.index],r.satellite.track.altitude_km[this.index]*1000,MOON));
+   for(const [id,state] of focus.nodes){const position=positions.get(id);if(!position)continue;const color=Color.fromCssColorString(state==='failed'?'#ff6b6b':'#f4ba72');viewer.entities.add({id:`evidence:node:${id}`,position,point:{pixelSize:22,color:Color.TRANSPARENT,outlineColor:color,outlineWidth:3,disableDepthTestDistance:2e5}});}
+   for(const [id,state] of focus.links){
+    const link=r.diagnostics!.links[id],ends=link.nodes.map(n=>positions.get(n));
+    const color=Color.fromCssColorString(state==='failed'?'#ff6b6b':'#f4ba72');
+    if(ends[0])viewer.entities.add({id:`evidence:condition:${id}`,position:ends[0],label:{text:`${id.replaceAll('->',' → ')}: ${state}`,font:'12px monospace',fillColor:color,pixelOffset:new Cartesian2(0,35+18*link.nodes.indexOf('S1')),disableDepthTestDistance:2e5}});
+    if(ends.every(p=>p))viewer.entities.add({id:`evidence:failed-link:${id}`,polyline:{positions:ends as Cartesian3[],width:5,arcType:ArcType.NONE,material:new PolylineDashMaterialProperty({color})}});
+   }
+   for(const marker of focus.markers){const h=viewer.scene.globe.getHeight(Cartographic.fromDegrees(marker.lon,marker.lat));if(h==null)continue;viewer.entities.add({id:`evidence:terrain:${marker.id}`,position:Cartesian3.fromDegrees(marker.lon,marker.lat,h+10,MOON),point:{pixelSize:12,color:Color.fromCssColorString(marker.status==='failed'?'#ff6b6b':'#f4ba72'),disableDepthTestDistance:2e5},label:{text:'Approx. terrain sample',font:'12px monospace',pixelOffset:new Cartesian2(0,-18)}});}
+  }
   this.updatePlanHighlight();
   viewer.scene.requestRender();
  }
@@ -730,6 +780,7 @@ export class MoonView {
   const mission = r && angular(r.site, place.lat, place.lon) < 500 ? r : undefined;
   this.root.dataset.site = "open";
   this.site = new SiteView(this.root, {...place, detail, result: mission, index: this.index, disabled: this.disabled, onClose: () => this.closeSite()});
+  this.site.update(this.index,this.disabled,this.evidenceCase,this.evidenceScope,this.previewRelays);
  }
  closeSite() { this.site?.dispose(); this.site = undefined; delete this.root.dataset.site; this.viewer?.scene.requestRender(); }
  // ---------- drawn area ----------
@@ -827,7 +878,7 @@ export class MoonView {
   const viewer = this.viewer; if (!viewer) return;
   for (const e of [...viewer.entities.values]) {
    if (String(e.id).startsWith("layout:orbital:")) viewer.entities.remove(e);
-   if (String(e.id).startsWith("satellite:")) e.show = !result;
+   if (String(e.id).startsWith("satellite:")) e.show = !result && !this.result?.satellite;
   }
   if (result) {
    const satellite = satellitePosition(result.site.lat, result.site.lon, seconds);
@@ -858,6 +909,17 @@ export class MoonView {
   viewer.camera.flyToBoundingSphere(bounds, {duration: 1.2,
    offset: new HeadingPitchRange(0, rad(-35), Math.max(1_500_000, bounds.radius * 4)),
    complete: () => { this.view = this.readView(); this.refreshReadouts(); }});
+ }
+
+ showMissionSatellite() {
+  const viewer=this.viewer, r=this.result;
+  if(!viewer || !r?.satellite)return;
+  this.closeSite();
+  const s=r.satellite, i=this.index;
+  const positions=[Cartesian3.fromDegrees(r.site.lon,r.site.lat,r.site.elevation,MOON),
+   Cartesian3.fromDegrees(s.track.lon[i],s.track.lat[i],s.track.altitude_km[i]*1000,MOON)];
+  const bounds=BoundingSphere.fromPoints(positions);
+  viewer.camera.flyToBoundingSphere(bounds,{duration:1.2,offset:new HeadingPitchRange(0,rad(-35),Math.max(1500000,bounds.radius*4))});
  }
 
  /** For tests and diagnostics: what the viewer is currently showing. */

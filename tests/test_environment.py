@@ -91,13 +91,17 @@ class EnvironmentTests(TestCase):
             azimuth_deg = np.array([0., 180.])
             elevation_deg = np.zeros(2)
             distance_m = np.ones(2)
+            def at(self, azimuth):
+                return np.zeros_like(azimuth, dtype=float)
         def visible(site, point, times, mission):
             count = len(times)
             # Direct link blocked; relay has an Earth link and full sunlight.
             earth = np.full(count, point.mast > 2)
             return earth, np.ones(count, bool), Horizon(), dict(solar_known=[True]*count,
                 reason=['Available' if earth[0] else 'Terrain obstruction']*count,
-                status=['reliable']*count, rf_margin=[100.]*count)
+                status=['reliable']*count, rf_margin=[100.]*count,
+                earth_az=[0.]*count, earth_el=np.where(earth, 10., -10.).tolist(),
+                earth_range_km=[384400.]*count)
         candidates = [dict(id='R01',lat=-90.,lon=0.,elevation=0.,distance=1.,slope=0.,x=0.,y=0.)]
         m = Mission(start='2026-11-01',end='2026-11-03',minutes=60, availability=100,blackout_hours=0,
                     battery_hours=0, dust_start_h=0, dust_duration_h=24,

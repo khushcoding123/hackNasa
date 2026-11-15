@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 import xlsxwriter
 
 from .costs import cost_report
+from .network import metrics as timeline_metrics
 
 
 class ExportRequest(BaseModel):
@@ -17,6 +18,9 @@ class ExportRequest(BaseModel):
     scope: Literal["mission", "area"] = "mission"
     comparison: list[dict] | None = None
     sensitivity: list[dict] | None = None
+    environment_case: Literal['nominal', 'cold', 'dust', 'cold_dust'] = 'cold_dust'
+    preview_config_id: str | None = None
+    outage_scope: str = 'network'
 
 
 def export_workbook(request: ExportRequest) -> bytes:
@@ -37,6 +41,18 @@ def export_workbook(request: ExportRequest) -> bytes:
     state = result["failure_states"].get(state_key)
     if state is None:
         raise ValueError("The selected failure state is not part of this applied result.")
+    case_state = state.get('cases', {}).get(request.environment_case)
+    if case_state is not None:
+        state = {**state, **case_state}
+    optimization = result.get('optimization_evidence')
+    if request.preview_config_id and (not optimization or request.preview_config_id not in optimization['configurations']):
+        raise ValueError('The alternative preview is not part of this applied result.')
+
+    diagnostic = result.get('diagnostics')
+    if request.outage_scope != 'network':
+        path = (diagnostic or {}).get('paths', {}).get(request.outage_scope)
+        if path is None or (path['relay'] is not None and path['relay'] not in result['recommended']):
+            raise ValueError('The outage scope is not a selected path in this applied result.')
 
     output = BytesIO()
     with xlsxwriter.Workbook(output, {"constant_memory": True, "strings_to_formulas": False,
@@ -123,13 +139,16 @@ def export_workbook(request: ExportRequest) -> bytes:
             ))
 
         results = sheet("Mission Results", [24, 28, 28, 28, 28, 28, 30])
-        metrics = [("Direct", result["direct"]), ("Recommended network", result["network"]),
-                   ("Active failure simulation", state["metrics"]), ("Worst single failure", result["worst"])]
+        selected_case = result.get('environment', {}).get('cases', {}).get(request.environment_case, {})
+        metrics = [("Lander paths (selected case)", timeline_metrics(case_state['direct'], result['config']['minutes']/60) if case_state else result['direct']),
+                   ("Recommended network (selected case)", selected_case.get('network', result['network'])),
+                   ("Active failure simulation", state["metrics"]),
+                   ("Worst single failure (selected case)", selected_case.get('worst', result['worst']))]
         row = table(results, 0, ["Network", "Availability (%)", "Longest blackout (h)"], (
             [name, m["availability"], m["longest"]] for name, m in metrics
         ))
-        row = table(results, row, ["Direct blackout start (UTC)", "End (UTC)", "Duration (h)", "Causes"], (
-            [o["start"], o["end"], o["hours"], o["causes"]] for o in result["outages"]
+        row = table(results, row, ["Active network blackout start (UTC)", "End (UTC)", "Duration (h)", "Causes"], (
+            [o["start"], o["end"], o["hours"], o["causes"]] for o in state.get('outages', result["outages"])
         ))
         row = table(results, row, ["Failed relay", "Availability (%)", "Longest blackout (h)", "Meets limits"], (
             [f["id"], f["metrics"]["availability"], f["metrics"]["longest"], f["meets"]] for f in result["failures"]
@@ -145,7 +164,7 @@ def export_workbook(request: ExportRequest) -> bytes:
         row = table(results, row, ["Timestamp (UTC)", "Direct online", "Active relay online", "Active network online"], []) - 2
         for i, timestamp in enumerate(result["times"]):
             results.write_datetime(row, 0, datetime.fromisoformat(timestamp).replace(tzinfo=None), date_format)
-            results.write_row(row, 1, [result["samples"]["direct"][i], state["assisted"][i], state["combined"][i]])
+            results.write_row(row, 1, [state.get('direct', result["samples"]["direct"])[i], state["assisted"][i], state["combined"][i]])
             row += 1
 
         assumptions = sheet("Assumptions", [36, 110])
@@ -154,6 +173,111 @@ def export_workbook(request: ExportRequest) -> bytes:
         row = table(assumptions, 0, ["Cost assumptions", "Value"], [["Pricing and exclusions", cost["assumptions"]]])
         row = table(assumptions, row, ["Applied configuration", "Value"], result["config"].items())
         table(assumptions, row, ["Provenance", "Source"], result["provenance"].items())
+
+        diagnostic = result.get('diagnostics')
+        if diagnostic:
+            report = sheet('Network Outages', [32, 32, 20, 90])
+            row = table(report, 0, ['Simulated evidence', 'Value'], [
+                ['Environmental case', request.environment_case], ['Disabled nodes', sorted(set(request.disabled))],
+                ['Interval convention', diagnostic['interval_convention']], ['Timing', diagnostic['timing']],
+                ['Sample minutes', diagnostic['sample_minutes']],
+                ['Alternative preview (nominal only)', request.preview_config_id]])
+            table(report, row, ['Start UTC', 'End UTC (exclusive)', 'Hours', 'Conditions across interval'], (
+                [o['start'], o['end'], o['hours'], o['causes']] for o in state.get('outages', [])))
+            scoped_outages = state.get('outages', []) if request.outage_scope == 'network' else state.get('path_outages', {}).get(request.outage_scope, [])
+            causes = sheet('Outage Causes', [30, 30, 20, 40, 32, 26, 20])
+            cause_row = table(causes, 0, ['Simulated evidence', 'Value'], [['Outage scope', request.outage_scope], ['Environmental case', request.environment_case]])
+            table(causes, cause_row, ['Segment start UTC', 'Segment end UTC', 'Hours', 'Path', 'Component', 'Condition', 'State'], (
+                [segment['start'], segment['end'], segment['hours'], path['id'], issue['component'], issue['code'], issue['status']]
+                for outage in scoped_outages for segment in outage['segments']
+                for path in segment['paths'] for issue in path['issues']))
+            paths = [p for p in diagnostic['paths'].values() if p['relay'] is None or p['relay'] in result['recommended']]
+            links = sorted({link for path in paths for link in path['links']})
+            nodes_in_paths = sorted({node for path in paths for node in path['nodes']})
+            link_sheet = sheet('Link Evidence', [28, 28, 35, 55, 55, 55, 75])
+            def link_rows():
+                for link_id in links:
+                    link = diagnostic['links'][link_id]
+                    for i, timestamp in enumerate(result['times']):
+                        horizon = link.get('horizon')
+                        location = link.get('location')
+                        if horizon:
+                            ray_indices = {horizon['left'][i]}
+                            if horizon['weight'][i] != 0:
+                                ray_indices.add(horizon['right'][i])
+                            location = [horizon['rays'][j] for j in sorted(ray_indices)]
+                        yield [link_id, timestamp, link['nodes'],
+                            {g['code']: g['ok'][i] for g in link['gates']},
+                            {g['code']: dict(value=None if g['values'] is None else g['values'][i], unit=g['unit']) for g in link['gates']},
+                            {g['code']: g['threshold'] for g in link['gates']}, location or link.get('todo')]
+            table(link_sheet, 0, ['Link', 'Timestamp UTC', 'Endpoints', 'Gate states (null = unknown)', 'Modeled values / units', 'Thresholds', 'Sampled location (approximate) / TODO'], link_rows())
+            node_sheet = sheet('Node Evidence', [24, 28, 24, 55, 55, 45])
+            table(node_sheet, 0, ['Node', 'Timestamp UTC', 'Case', 'Gate states (null = unknown)', 'Modeled values / units', 'Location'], (
+                [node_id, timestamp, request.environment_case,
+                 {g['code']: g['ok'][i] for g in node['cases'][request.environment_case]['gates']},
+                 {g['code']: dict(value=None if g['values'] is None else g['values'][i], unit=g['unit']) for g in node['cases'][request.environment_case]['gates']},
+                 dict(lat=node['lat'], lon=node['lon'])]
+                for node_id in nodes_in_paths for node in [diagnostic['nodes'][node_id]] if 'cases' in node
+                for i, timestamp in enumerate(result['times'])))
+        if optimization:
+            tab = sheet('Relay Alternatives', [30, 24, 24, 24, 24, 24, 24, 24, 65])
+            row = table(tab, 0, ['Search evidence (simulated)', 'Value'], [
+                ['Objective', optimization['objective']], ['Scope', optimization['scope']],
+                ['Tie policy', optimization['tie_policy']], ['Tie count', optimization['tie_count']],
+                ['Evaluated', optimization['evaluated']], ['Selected', optimization['selected']],
+                ['Preview', request.preview_config_id], ['Screening', optimization['screening']]])
+            table(tab, row, ['Configuration', 'Case', 'Relay count', 'Network %', 'Total blackout h', 'Longest blackout h', 'Worst loss %', 'Worst loss blackout h', 'Installed USD', 'Constraint violations', 'Comparison explanation'], (
+                [c['id'], case, len(c['relay_ids']), report['network']['availability'], report['network']['total'], report['network']['longest'],
+                 report['worst']['availability'], report['worst']['longest'], c['total_usd'], c['violations'], c.get('comparison_reason')]
+                for c in optimization['configurations'].values() for case, report in c['cases'].items()))
+            tab = sheet('Marginal Gains', [24, 28, 28, 28, 28, 30])
+            table(tab, 0, ['Relay', 'Case', 'Without relay configuration', 'Coverage gain pp', 'Longest blackout reduction h', 'Recovered h', 'Best replacement configuration'], (
+                [m['relay_id'], case, m['without'], values['availability_gain_pp'], values['blackout_reduction_hours'], values['recovered_hours'], m['replacement']]
+                for m in optimization['marginal']
+                for case, values in m.get('cases', {'cold_dust': m}).items()))
+
+        satellite = result.get("satellite")
+        if satellite:
+            tab = sheet("Satellite (simulated)", [38, 24, 24, 24, 24, 24])
+            elements = satellite["elements"]
+            row = table(tab, 0, ["Simulated satellite", "Value"], [
+                ["Status", "simulated: two-body orbit, not a flight orbit"], ["Preset", satellite["preset"]],
+                ["Period (min)", satellite["period_min"]], ["Minimum elevation (deg)", satellite["min_elevation_deg"]],
+                *[[k, v] for k, v in elements.items()],
+                ["Surface-to-satellite RF evaluated", satellite["rf_evaluated"]["surface_to_sat"]],
+                ["Satellite-to-Earth RF evaluated", satellite["rf_evaluated"]["sat_to_earth"]],
+            ])
+            row = table(tab, row, ["Hop", "Availability (%)", "Longest outage (h)", "Outage total (h)", "Intervals"], (
+                [name, m["availability"], m["longest"], m["total"], m["intervals"]] for name, m in (
+                    ("Satellite to Earth (shared)", satellite["earth_hop"]), ("Lander to satellite", satellite["lander_access"]),
+                    ("Lander to satellite to Earth", satellite["lander_path"]),
+                    ("Network with satellite", result["network"]), ("Network if satellite lost", satellite["network_without_satellite"]))
+            ))
+            row = table(tab, row, ["Mission relay", "Relay-to-satellite availability (%)", "Longest outage (h)"], (
+                [c["id"], c["satellite"]["access"]["availability"], c["satellite"]["access"]["longest"]]
+                for c in result["candidates"] if "satellite" in c
+            ))
+            row = table(tab, row, ["Assumption / gap", "Value"], [
+                ["Validation", satellite.get("validation")], ["Operations", satellite.get("assumptions")],
+                ["Satellite cost USD", satellite.get("cost_usd")], ["Cost TODO", satellite.get("cost_todo")]])
+            row = table(tab, row, ["Satellite path blackout start", "End", "Hours"], (
+                [o["start"], o["end"], o["hours"]] for o in satellite.get("outages", [])))
+            row = table(tab, row, ["Timestamp (UTC)", "Node", "Latitude (deg)", "Longitude (deg)", "Altitude (km)",
+                "Surface margin (dB)", "Sat elevation (deg)", "Sat range (km)", "Surface-sat margin (dB)",
+                "Earth occulted", "Sat-Earth range (km)", "Sat-Earth margin (dB)", "Surface-sat state", "Sat-Earth state"], []) - 2
+            nodes = [("Lander", satellite["lander"], None)] + [
+                (c["id"], c["satellite"], c["surface_margin"]) for c in result["candidates"]
+                if c["id"] in result["recommended"] and "satellite" in c]
+            for i, timestamp in enumerate(result["times"]):
+                for name, hop, surface_margin in nodes:
+                    tab.write_datetime(row, 0, datetime.fromisoformat(timestamp).replace(tzinfo=None), date_format)
+                    earth = satellite["earth"]
+                    tab.write_row(row, 1, [name, satellite["track"]["lat"][i], satellite["track"]["lon"][i],
+                        satellite["track"]["altitude_km"][i], surface_margin, hop["el"][i], hop["range_km"][i],
+                        None if hop["margin"] is None else hop["margin"][i], earth["occulted"][i], earth["range_km"][i],
+                        None if earth["margin"] is None else earth["margin"][i], hop.get("reason", [""]*len(result["times"]))[i],
+                        earth.get("reason", [""]*len(result["times"]))[i]])
+                    row += 1
 
         environment = result.get("environment")
         if environment:

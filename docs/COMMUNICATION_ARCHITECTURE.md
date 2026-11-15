@@ -12,9 +12,13 @@ The satellite orbit or constellation remains to be selected. A hypothetical cons
 
 ## Current implementation
 
-The current MOONMESH planner calculates direct lander-to-Earth service and independent **lander → surface relay → Earth** paths. It does not yet calculate satellite orbits, satellite access, satellite radio links, or satellite failures. Existing coverage, blackout, and N−1 figures describe that baseline and must not be relabeled as satellite-assisted results.
+The mission planner supports an optional **simulated** single-satellite backhaul: lander → satellite → Earth and lander → surface relay → satellite → Earth, alongside the existing Earth paths. Configure a 500 km polar, south elliptical or custom two-body orbit in advanced mission settings. Elements are Moon-centred J2000; epoch defaults to mission start UTC. SPICE transforms the trajectory into MOON_ME at mission samples. Surface access uses terrain horizons, elevation mask and optional RF; the Earth hop uses lunar occultation and optional RF. Surface power and thermal states gate complete paths.
 
-The ORA lab also retains its current surface-network and Earth-visible gateway model. Its published measurements do not validate the proposed orbital architecture.
+Satellite radio profiles are null until supplied. Such results are geometry-only upper bounds with blocking evidence gaps, not verified RF coverage. Satellite power and pointing are assumed available; capacity, scheduling, handover, light-time, station scheduling and satellite hardware survival are not modeled. Satellite service cost is null with a TODO and excluded from the surface budget. The illustrative south elliptical preset is not a validated frozen orbit, Pathfinder orbit, ELFO or NRHO.
+
+Resilient optimization includes loss of the one shared satellite across all environmental cases. Resilience controls include S1 and combinations with surface-relay losses. Multiple paths behind S1 are not credited as satellite-independent redundancy. The mission scene, sample slider, per-hop diagnostics, API and Excel sheet use the computed track. ORA and the area-layout satellite preview remain separate, surface-only/illustrative tools; their metrics do not validate satellite service.
+
+Validation covers Kepler residuals, period, energy and angular momentum, synthetic overhead/antipodal and occultation geometry, SPICE frame radius preservation, scenario/API/export contracts, backward compatibility and shared failures. There is no independent spacecraft state-vector or SPK cross-check; this remains an explicit validation gap. No operational constellation or flight performance is claimed.
 
 ### Satellite access preview
 
@@ -24,7 +28,7 @@ The hypothetical scenario is one circular polar satellite at 500 km altitude, wi
 
 Geometry checks: `node --experimental-strip-types tests/test_orbital_preview.mjs frontend/orbital-preview.ts` (Node 22.6+).
 
-## Required satellite model
+## Requirements and future extensions
 
 - Define each satellite's trajectory or orbital inputs, epoch, coordinate frame, mission-time coverage, and source. Earth/Sun ephemerides alone do not supply a communications satellite trajectory.
 - At each mission sample, evaluate lander-to-relay surface line of sight and RF margin, relay-to-satellite terrain clearance and RF margin, and satellite-to-Earth occultation and RF margin.
@@ -51,4 +55,4 @@ Test both individual surface-relay failures and individual satellite failures. R
 6. Disable a surface relay or satellite and inspect the remaining complete paths.
 7. Export the architecture, orbital inputs and sources, link and power assumptions, sampling, uncertainty, and results.
 
-Satellite features are planned until the orbit, geometry, RF, power, optimization, API, visualization, and failure analysis are implemented and verified together. The local prototype continues to display its existing baseline in the meantime.
+The single-satellite simulation implements this flow under the limits above. Operational service validation, satellite power/hardware calibration, SPK ingestion and constellations remain future work.
