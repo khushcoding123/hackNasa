@@ -19,7 +19,7 @@ from numba import set_num_threads
 from scipy.ndimage import binary_erosion, distance_transform_edt
 
 from . import paths, rf
-from .config import configs_dir
+from .config import configs_dir, cpu_threads, numba_threads
 from .dataset import FEATURES, TERRAIN, coarse_profiles, config_hash
 from .downloads import atomic_json, sha256_file
 from .los import R, sample, unit, trace_pairs
@@ -112,8 +112,15 @@ def score(truth, pred, valid, area, selection, margin, predicted_margin, require
         unknown_fraction=ratio(int((selection & ~valid).sum()),int(selection.sum())))
 
 
+HEADS = ('los', 'margin', 'clearance')
+
+
 class Context:
-    def __init__(self, cfg, learned=True):
+    def __init__(self, cfg, learned=True, heads=HEADS):
+        """``heads`` limits which boosters are loaded and run. The app's comparison only uses LOS and margin,
+        so it skips the clearance booster, the largest of the three (2000 trees)."""
+        if not {'los', 'margin'} <= set(heads) <= set(HEADS):
+            raise ValueError('heads must include los and margin and come from '+', '.join(HEADS))
         self.cfg = cfg
         self.root = paths.data_root()
         self.dc = yaml.safe_load((configs_dir()/cfg['dataset_config']).read_text())
@@ -131,7 +138,7 @@ class Context:
             meta = json.loads((self.root/cfg['models']/'metadata.json').read_text())
             safe_features(meta['feature_columns'])
             self.threshold = meta['los_threshold']
-            self.models = {n:lgb.Booster(model_file=str(self.root/cfg['models']/(n+'.txt'))) for n in ('los','margin','clearance')}
+            self.models = {n:lgb.Booster(model_file=str(self.root/cfg['models']/(n+'.txt'))) for n in HEADS if n in heads}
 
     def geometry(self, row, tr, shape):
         rr, cc = np.indices(shape)
@@ -197,7 +204,8 @@ class Context:
             for j in range(16):
                 f[f'profile_{j:02d}_relative_m']=profile[:,j]
             for name,model in self.models.items():
-                output[name].ravel()[ii]=model.predict(f[FEATURES].astype('float32'),num_threads=self.cfg['num_threads'])
+                output[name].ravel()[ii]=model.predict(f[FEATURES].astype('float32'),num_threads=cpu_threads(self.cfg['num_threads']))
+        output.setdefault('clearance',np.full(shape,np.nan,dtype='float32'))  # not loaded: unknown
         output['los']=output['los']>=self.threshold
         output['covered']=output['margin']>=row.required_margin_db
         output['valid']=valid & np.isfinite(output['margin'])
@@ -487,7 +495,7 @@ def report(cfg,selected,out):
 
 def run(args):
     cfg=yaml.safe_load(args.config.read_text())
-    set_num_threads(cfg['numba_threads'])
+    set_num_threads(numba_threads(cfg['numba_threads']))
     root=paths.data_root()
     if shutil.disk_usage(root.anchor).free < 12*1024**3:
         raise OSError('Evaluation writes could leave less than 10 GB free')

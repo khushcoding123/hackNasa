@@ -25,6 +25,12 @@ python -m moonmesh.data
 python -m uvicorn moonmesh.server:app --host 127.0.0.1 --port 8765
 ```
 
+On macOS or Linux, `bash scripts/start.sh` does the same.
+
+**Surface coverage and the trained ML model** need the Haworth terrain and the trained LightGBM files, which ship
+in this repository as a split zip. Follow [shared-data/README.md](shared-data/README.md) once to unpack them and
+create the training environment, then start the app as above.
+
 ## One command to get a working demo
 
 ```shell

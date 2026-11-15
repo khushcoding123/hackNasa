@@ -15,6 +15,20 @@ jobs:
       - run: python -m pip install -r requirements-dev.txt
       # Tests that need downloaded NASA data or trained models skip themselves on a clean clone.
       - run: python -m pytest tests -q
+  model:
+    # Unpacks the trained LightGBM model and Haworth terrain committed in shared-data/ into hackNasa/data
+    # (the app's default data root) and runs the training tests, including test_real_model.py, which
+    # drives the real model through the app's surface coverage routes.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install -r requirements-dev.txt -r requirements-training.txt -e .
+      - run: python shared-data/unpack.py
+      - run: python -m pytest training/tests -q -rs
   frontend:
     runs-on: ubuntu-latest
     steps:
