@@ -6,9 +6,17 @@ from spiceypy.utils.exceptions import SpiceyError
 
 from .data import LOCAL, SITES
 from .models import Mission
+from .excel import ExportRequest, export_workbook
 from .science import scenario
 from . import tiles
 from ora.api import router as ora_router
+try:  # Surface coverage needs the optional training environment (rasterio, numba, prepared terrain).
+    from moonmesh_train.coverage import router as coverage_router
+    from moonmesh_train.ml_compare import router as ml_compare_router  # experimental, not approved
+except ImportError as error:
+    import logging
+    coverage_router = ml_compare_router = None
+    logging.getLogger("moonmesh").warning("Surface coverage disabled (%s); start with the training venv to enable it.", error)
 
 app = FastAPI(title="MOONMESH", description="Lunar landing-site and communications planning prototype")
 
@@ -39,6 +47,16 @@ def status():
 @app.post("/api/mission")
 def mission(body: Mission):
     return compute(body)
+
+
+@app.post("/api/export/xlsx")
+def excel_export(body: ExportRequest):
+    try:
+        content = export_workbook(body)
+    except (KeyError, TypeError, ValueError, IndexError) as error:
+        raise HTTPException(422, "Cannot export this snapshot. Recalculate the network and try again.") from error
+    return Response(content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": 'attachment; filename="moonmesh-network-breakdown.xlsx"'})
 
 
 @app.post("/api/compare")
@@ -128,4 +146,7 @@ def terrain_site(lat: float, lon: float, half_width_m: float, size: int):
 
 
 app.include_router(ora_router)
+if coverage_router is not None:
+    app.include_router(coverage_router)
+    app.include_router(ml_compare_router)
 app.mount("/", StaticFiles(directory=Path(__file__).resolve().parents[1] / "web", html=True), name="web")

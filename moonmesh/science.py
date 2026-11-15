@@ -14,6 +14,7 @@ from lunar_core.terrain import (
     MOON_RADIUS_M, TerrainGrid, polar_stereographic_south, polar_stereographic_south_inverse, radial_points,
 )
 
+from .costs import cost_report
 from .environment import CASES, node_states, public_state, optimize_environment
 from .data import DATA, LOLA, PRODUCTS, SITES, activate
 from .evidence import NOT_MODELLED, assess, check, gap
@@ -271,6 +272,7 @@ def scenario(mission, include_map=True):
                   outages=intervals(direct, times, end, hours, sample["reason"]),
                   darkness=intervals(solar, times, end, hours),
                   recommended=[options[idx]["id"] for idx in selection], feasible=feasible, eligible=len(eligible),
+                  cost=cost_report(len(selection), mission.budget_usd, mission.relay_cost_usd),
                   darkness_meets=sun_metrics["longest"] <= mission.darkness_hours,
                   failures=failures, failure_states=failure_states, candidates=options,
                   horizon=dict(azimuth=horizon.azimuth_deg.tolist(), elevation=nullable(horizon.elevation_deg),

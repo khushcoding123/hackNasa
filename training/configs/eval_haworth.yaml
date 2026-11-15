@@ -1,0 +1,10 @@
+seed: 42
+dataset: derived/datasets/haworth_pilot
+models: models/tabular
+dataset_config: dataset_haworth.yaml
+acceptance: acceptance.yaml
+run_id: haworth_val_step11_full
+num_threads: 16
+numba_threads: 8
+feature_chunk_pixels: 100000
+distance_boundary_bins_m: [0, 20, 60, 200, 1000, 1000000000]

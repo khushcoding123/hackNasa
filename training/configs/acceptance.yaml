@@ -1,0 +1,4 @@
+false_covered_frac: 0.01
+boundary_p95_m: 60
+near_threshold_margin_mae_db: 2
+min_speedup: 10

@@ -1,0 +1,12 @@
+experiment_config: exp_b_haworth_pilot.yaml
+dem: derived/terrain/haworth/pgda90_dem_20m.tif
+features_dir: derived/terrain/haworth/features_pgda90
+output: derived/datasets/haworth_pilot
+uniform_receivers: 15000
+boundary_receivers: 5000
+clearance_boundary_m: 5
+margin_boundary_db: 3
+horizon_bins: 360
+horizon_spacing_m: 20
+numba_threads: 8
+seed: 42
