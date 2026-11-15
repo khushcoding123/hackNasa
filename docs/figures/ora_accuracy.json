@@ -1,0 +1,294 @@
+{
+ "protocol": {
+  "dev_windows": 57,
+  "hold_windows": 8,
+  "legacy_windows": 16,
+  "buffer_windows_dropped": 24,
+  "truth_cells_per_window": 150,
+  "truth_rays": 6000,
+  "note": "Methods chosen and models trained on DEV only; HOLD and LEGACY scored once."
+ },
+ "fast_view_estimator": {
+  "dev_cross_validation": {
+   "r2_pct": 99.07883845474102,
+   "spearman_pct": 99.59529112975032,
+   "mae_points": 0.9744644386212933,
+   "bias_points": 0.03629943799609594,
+   "within_5_points_pct": 99.48538011695906,
+   "within_10_points_pct": 99.9766081871345,
+   "cells": 8550
+  },
+  "inputs": [
+   "sweep24_1km",
+   "sweep24_2km",
+   "sweep24_4km",
+   "sweep24_8km",
+   "slope",
+   "tpi_300",
+   "tpi_1000",
+   "tpi_3000",
+   "relief_500",
+   "rel_elev_3000",
+   "ridge_dist"
+  ],
+  "training_cells": 8550,
+  "path": "C:\\Users\\jeswa\\Documents\\hackNasa\\.moonmesh-data\\models\\ora_view_estimator.joblib"
+ },
+ "learned_selector": {
+  "training_rows": 159372,
+  "windows": 57,
+  "path": "C:\\Users\\jeswa\\Documents\\hackNasa\\.moonmesh-data\\models\\ora_gain_selector.joblib"
+ },
+ "coverage": {
+  "hold": {
+   "label used for training until now (120 rays, 40 m steps)": {
+    "r2_pct": 95.89980847893825,
+    "spearman_pct": 99.1881989993569,
+    "mae_points": 1.8538678081503182,
+    "bias_points": 1.8366813810795328,
+    "within_5_points_pct": 95.75,
+    "within_10_points_pct": 100.0,
+    "cells": 1200
+   },
+   "computed sweep used by the app (120 rays, 20 m steps)": {
+    "r2_pct": 98.79408356612855,
+    "spearman_pct": 99.53706106051851,
+    "mae_points": 0.9037327222200853,
+    "bias_points": 0.7150980247951908,
+    "within_5_points_pct": 99.75,
+    "within_10_points_pct": 100.0,
+    "cells": 1200
+   },
+   "fast view estimator (24-ray sweep + learned correction)": {
+    "r2_pct": 98.86171569490202,
+    "spearman_pct": 99.37939472114331,
+    "mae_points": 0.9329345061551407,
+    "bias_points": 0.05208156773331494,
+    "within_5_points_pct": 100.0,
+    "within_10_points_pct": 100.0,
+    "cells": 1200
+   },
+   "raw 24-ray sweep (no correction)": {
+    "r2_pct": 98.27720956548433,
+    "spearman_pct": 99.2353803075144,
+    "mae_points": 1.1352584903929366,
+    "bias_points": 0.6936190412646246,
+    "within_5_points_pct": 99.5,
+    "within_10_points_pct": 100.0,
+    "cells": 1200
+   },
+   "old coverage surrogate (its training included these windows)": {
+    "r2_pct": 53.865664689339646,
+    "spearman_pct": 72.22106020305343,
+    "mae_points": 6.160002929216459,
+    "bias_points": 2.12474312203574,
+    "within_5_points_pct": 48.583333333333336,
+    "within_10_points_pct": 80.25,
+    "cells": 1200
+   }
+  },
+  "legacy": {
+   "label used for training until now (120 rays, 40 m steps)": {
+    "r2_pct": 92.14787861756992,
+    "spearman_pct": 99.24296939375515,
+    "mae_points": 2.3650957107809454,
+    "bias_points": 2.3526804267677766,
+    "within_5_points_pct": 89.54166666666666,
+    "within_10_points_pct": 97.125,
+    "cells": 2400
+   },
+   "computed sweep used by the app (120 rays, 20 m steps)": {
+    "r2_pct": 98.01028406682603,
+    "spearman_pct": 99.64152217444153,
+    "mae_points": 1.10153993718303,
+    "bias_points": 0.9401424293024225,
+    "within_5_points_pct": 97.33333333333334,
+    "within_10_points_pct": 99.83333333333333,
+    "cells": 2400
+   },
+   "fast view estimator (24-ray sweep + learned correction)": {
+    "r2_pct": 98.94800568417656,
+    "spearman_pct": 99.54809747527581,
+    "mae_points": 0.9049452344321092,
+    "bias_points": 0.10468327224290697,
+    "within_5_points_pct": 99.75,
+    "within_10_points_pct": 99.875,
+    "cells": 2400
+   },
+   "raw 24-ray sweep (no correction)": {
+    "r2_pct": 97.54046786940636,
+    "spearman_pct": 99.44663524981736,
+    "mae_points": 1.3149222927472326,
+    "bias_points": 0.9982144651896816,
+    "within_5_points_pct": 96.5,
+    "within_10_points_pct": 99.79166666666667,
+    "cells": 2400
+   },
+   "old coverage surrogate": {
+    "r2_pct": 59.775513533625734,
+    "spearman_pct": 82.0077031757041,
+    "mae_points": 6.29460925111119,
+    "bias_points": 3.3599337550331905,
+    "within_5_points_pct": 47.083333333333336,
+    "within_10_points_pct": 80.875,
+    "cells": 2400
+   }
+  }
+ },
+ "ranking": {
+  "hold": {
+   "app now: computed viewshed share": 99.53706106051851,
+   "app before: surrogate 80% + Earth prior 20%": 73.96940094682417,
+   "Earth prior alone": 32.830356440201065
+  },
+  "legacy": {
+   "app now: computed viewshed share": 99.64152217444153,
+   "app before: surrogate 80% + Earth prior 20%": 82.10522538672463,
+   "Earth prior alone": 23.43491062629144
+  }
+ },
+ "selection": {
+  "hold": {
+   "budget_4": {
+    "new_learned_selector": {
+     "mean_pct_of_exact": 94.28220808681283,
+     "worst_pct_of_exact": 92.04545454545455
+    },
+    "old_surrogate_shortlist": {
+     "mean_pct_of_exact": 98.04060214441859,
+     "worst_pct_of_exact": 89.99999999999999
+    },
+    "old_learned_gain": {
+     "mean_pct_of_exact": 79.64192619876474,
+     "worst_pct_of_exact": 55.49999999999999
+    },
+    "view_shortlist_60": {
+     "mean_pct_of_exact": 99.82765151515152,
+     "worst_pct_of_exact": 99.0
+    }
+   },
+   "budget_8": {
+    "new_learned_selector": {
+     "mean_pct_of_exact": 95.71321484744044,
+     "worst_pct_of_exact": 92.13197969543147
+    },
+    "old_surrogate_shortlist": {
+     "mean_pct_of_exact": 94.6150386578478,
+     "worst_pct_of_exact": 89.04109589041097
+    },
+    "old_learned_gain": {
+     "mean_pct_of_exact": 85.42674095430058,
+     "worst_pct_of_exact": 77.73972602739727
+    },
+    "view_shortlist_60": {
+     "mean_pct_of_exact": 97.4328679200313,
+     "worst_pct_of_exact": 92.98245614035086
+    }
+   },
+   "budget_12": {
+    "new_learned_selector": {
+     "mean_pct_of_exact": 95.29797011524197,
+     "worst_pct_of_exact": 93.42723004694837
+    },
+    "old_surrogate_shortlist": {
+     "mean_pct_of_exact": 92.37933667858675,
+     "worst_pct_of_exact": 86.21553884711778
+    },
+    "old_learned_gain": {
+     "mean_pct_of_exact": 90.3064993199347,
+     "worst_pct_of_exact": 79.53216374269006
+    },
+    "view_shortlist_60": {
+     "mean_pct_of_exact": 95.84950668258423,
+     "worst_pct_of_exact": 92.48120300751879
+    }
+   }
+  },
+  "legacy": {
+   "budget_4": {
+    "new_learned_selector": {
+     "mean_pct_of_exact": 94.65187773546185,
+     "worst_pct_of_exact": 88.04347826086956
+    },
+    "old_surrogate_shortlist": {
+     "mean_pct_of_exact": 96.7347834775401,
+     "worst_pct_of_exact": 87.27810650887574
+    },
+    "old_learned_gain": {
+     "mean_pct_of_exact": 74.5099362471296,
+     "worst_pct_of_exact": 60.53639846743295
+    },
+    "view_shortlist_60": {
+     "mean_pct_of_exact": 98.62824020035818,
+     "worst_pct_of_exact": 87.8698224852071
+    }
+   },
+   "budget_8": {
+    "new_learned_selector": {
+     "mean_pct_of_exact": 94.66559303994292,
+     "worst_pct_of_exact": 89.69696969696969
+    },
+    "old_surrogate_shortlist": {
+     "mean_pct_of_exact": 94.33783083616272,
+     "worst_pct_of_exact": 81.34328358208955
+    },
+    "old_learned_gain": {
+     "mean_pct_of_exact": 82.8983905564184,
+     "worst_pct_of_exact": 70.0
+    },
+    "view_shortlist_60": {
+     "mean_pct_of_exact": 96.34983952902164,
+     "worst_pct_of_exact": 79.60199004975124
+    }
+   },
+   "budget_12": {
+    "new_learned_selector": {
+     "mean_pct_of_exact": 95.32827435046174,
+     "worst_pct_of_exact": 90.88541666666666
+    },
+    "old_surrogate_shortlist": {
+     "mean_pct_of_exact": 91.63717840230285,
+     "worst_pct_of_exact": 78.6046511627907
+    },
+    "old_learned_gain": {
+     "mean_pct_of_exact": 87.11555516567222,
+     "worst_pct_of_exact": 81.81818181818183
+    },
+    "view_shortlist_60": {
+     "mean_pct_of_exact": 94.47068937735887,
+     "worst_pct_of_exact": 76.97674418604652
+    }
+   }
+  }
+ },
+ "earth_siting_prior": {
+  "towers": 330,
+  "background": 3160,
+  "auc_pct": 88.2,
+  "view_only_auc_pct": 82.1,
+  "towers_in_top10_pct": 48.5,
+  "towers_in_top20_pct": 74.2,
+  "chance_top10_pct": 10.0,
+  "chance_top20_pct": 20.0,
+  "tiles_beating_view_only": "4 of 6",
+  "mean_tile_auc_pct": 88.5
+ },
+ "seconds": 62,
+ "provenance": {
+  "generated": "2026-11-15T02:38:14+00:00",
+  "code": {
+   "commit": "18ca6c749c04af259d789864e090a8bafa034b25",
+   "branch": "repair/phase0-baseline",
+   "uncommitted_changes": true,
+   "diff_sha256": "36c9f8b5414dc62fffb919b6e467c5b06c443483d7892041db8b0206525ab1a9",
+   "untracked_files": 9
+  },
+  "models": {
+   "ora_siting_prior": "9898338e3155af9b22cafa1d75d7eeeee0c2d24bd8917689d6994cae9ca0cad6",
+   "ora_coverage_surrogate": "b40ffa53ded4fc1aaa552fbf54a1b631e87eef8b23ef59bf16d41d9d1b10129e",
+   "ora_gain_model": "112fb8da59547396c0590036519aaa6df191a9a776c0c90daeabb5e00ed72d80",
+   "ora_view_estimator": "bf7cf974863c94f3c9b172ed825c6d675f3f2b9e992156c6a5d6f8504e19b3dd",
+   "ora_gain_selector": "5f8566feba794b6bb18bde14f4dd97717f17de817b5b0c957dba6607f3ce2437"
+  }
+ }
+}

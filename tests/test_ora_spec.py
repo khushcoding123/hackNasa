@@ -245,6 +245,10 @@ def test_loop_layout_removes_single_path_links():
 
 
 def test_analyse_compares_three_layouts():
+    from moonmesh.data import DATA
+    for product in ("LDEM_85S_20M", "LDEM_75S_240M"):
+        if not (DATA / "terrain" / f"{product}.IMG").is_file():
+            pytest.skip("Drawn-area LOLA terrain is missing; run python -m moonmesh.data")
     from ora.api import NetworkBody, analyse_area
     out = analyse_area(NetworkBody(polygon=square()))
     assert set(out["layouts"]) == {"tree", "loop", "mesh"}

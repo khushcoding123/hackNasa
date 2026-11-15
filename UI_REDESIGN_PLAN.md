@@ -2,6 +2,10 @@
 
 > The visual system below remains the design reference. The navigation and startup behavior have been superseded by the guided Moon-first journey in [PRODUCT_FLOW.md](PRODUCT_FLOW.md); missions no longer run automatically.
 
+## Satellite product direction
+
+The product target is **lander → surface relay → lunar communications satellite → Earth**, as defined in [Communication architecture](docs/COMMUNICATION_ARCHITECTURE.md). The UI must eventually support satellite scenario selection, time-dependent satellite positions and complete paths, per-link blackout attribution, and satellite failure simulation. Those changes require orbital modeling and API work beyond this original redesign plan. The specifications below describe the implemented direct-to-Earth baseline and must not be used to imply satellite support already exists.
+
 ## Product outcome
 
 MOONMESH should feel like a quiet lunar mission console: spacious, precise, minimal, and unmistakably space-oriented. A new visitor should understand the current mission, locate a direct-to-Earth blackout, see what terrain caused it, evaluate the screened relay recommendation, and test a relay failure without instruction. The interface is a planning prototype, so every claim must remain appropriately qualified.

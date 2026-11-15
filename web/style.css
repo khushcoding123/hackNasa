@@ -645,6 +645,13 @@ h1{font-size:clamp(22px,2.2vw,30px);font-weight:500;letter-spacing:-.04em;line-h
 .vw-menu label{display:flex;gap:8px;align-items:center;justify-content:space-between}
 .vw-menu input[type=checkbox]{width:auto;min-height:0}
 .vw-menu select{min-height:34px;padding:5px 8px;font-size:12px;max-width:160px}
+.vw-menu{max-height:calc(100vh - 480px);overflow:auto}
+.vw-pins ul{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:4px;max-height:140px;overflow:auto}
+.vw-pins li{display:flex;gap:4px}
+.vw-pins li button:first-child{flex:1;text-align:left;min-height:30px;padding:4px 8px;font-size:12px}
+.vw-pins li button:last-child{min-height:30px;padding:4px 9px}
+.vw-pins li.on button:first-child{border-color:#ffd54a;color:#ffd54a}
+.vw-rename{display:grid;gap:4px;margin:6px 0 8px;font-size:12px}
 .vw-note{margin:0;font-size:12px;color:var(--muted)}
 .vw-right{position:absolute;top:calc(var(--top) + 30px);right:14px;display:grid;gap:8px;justify-items:end;z-index:5}
 .vw-modes{display:flex;background:#0a1019e6;border:1px solid var(--border);border-radius:10px;padding:2px;backdrop-filter:blur(8px)}
@@ -709,6 +716,37 @@ h1{font-size:clamp(22px,2.2vw,30px);font-weight:500;letter-spacing:-.04em;line-h
 
 @media(max-width:480px){#journey button[aria-current] .nav-text{display:none}.topbar-tools summary,.topbar-tools .primary{padding:6px 8px}#start-mission{font-size:11px}.more-menu>summary{font-size:11px}}
 
+/* Site 3D (three.js prototype) */
+.vw-site-btn{min-height:32px;padding:4px 12px;font-size:12px;border-radius:10px;background:#0a1019e6;border:1px solid var(--border);backdrop-filter:blur(8px)}
+.site3d{position:absolute;inset:0;z-index:20;background:#000}
+.site3d-canvas{position:absolute;inset:0;width:100%;height:100%;display:block;outline:none;touch-action:none}
+.site3d-labels{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.site3d-label{position:absolute;left:0;top:0;font:600 12px "IBM Plex Mono",monospace;color:#73d8ae;text-shadow:0 0 3px #000,0 0 3px #000;white-space:nowrap}
+.site3d-label.lander{color:#84deff}
+.site3d-label.site{color:#ffccc4;font-size:13px;letter-spacing:.12em;text-shadow:0 1px 8px #000,0 1px 3px #000}
+.site3d-label.site::before{content:"";display:block;width:21px;height:25px;margin:0 auto 4px;background:#ec4335;border:2px solid #fff;border-radius:60% 60% 60% 0;transform:rotate(-45deg);box-shadow:0 2px 12px #000c}
+.site3d-bar{position:absolute;top:calc(var(--top) + 30px);left:14px;display:flex;gap:22px;align-items:center;justify-content:space-between;max-width:calc(100% - 28px);min-width:min(390px,calc(100% - 28px));background:#07101bcc;border:1px solid #64748770;border-radius:14px;padding:12px 14px;backdrop-filter:blur(14px);box-shadow:0 12px 32px #0007;font-size:13px}
+.site3d-bar>div{display:grid;gap:3px}.site3d-bar strong{font-size:20px;line-height:1.1;letter-spacing:-.03em}.site3d-bar button{min-height:34px;padding:6px 10px;white-space:nowrap}
+.site3d-kicker{color:#f3a99c;font:600 10px var(--mono);letter-spacing:.15em}
+.site3d-sub{color:#b2c1cb;font:11px var(--mono)}
+.site3d-hud{position:absolute;right:14px;bottom:16px;display:grid;gap:6px;justify-items:end;pointer-events:none;color:#dfebf2;text-shadow:0 1px 6px #000;font:11px var(--mono);letter-spacing:.02em}.site3d-hud span:first-child{padding:7px 10px;background:#07101bc9;border:1px solid #64748770;border-radius:8px;color:#b7e0e9}
+.site3d-panel{position:absolute;left:14px;bottom:14px;width:min(300px,calc(100% - 28px));display:grid;gap:8px;background:#0a1019e6;border:1px solid var(--border);border-radius:12px;padding:12px;backdrop-filter:blur(8px);font-size:12px}
+.site3d-panel label{display:grid;grid-template-columns:1fr auto;gap:2px 8px}
+.site3d-panel [hidden]{display:none}
+.site3d-panel label input{grid-column:1/-1}
+.site3d-buttons{display:flex;gap:6px;flex-wrap:wrap}
+.site3d-buttons button,.site3d-buttons select{min-height:30px;font-size:12px}
+.site3d-note{margin:0;color:#a9bacd}
+.site3d-panel{max-height:70vh;overflow:auto}
+.site3d-panel summary{cursor:pointer;font-weight:600;margin-bottom:6px}
+.site3d-panel:not([open]) summary{margin:0}
+.nav-link{display:block;padding:10px 12px;color:var(--muted);text-decoration:none;font-size:14px;border-radius:8px}
+.nav-link:hover,.nav-link:focus-visible{color:var(--cyan)}
+@media(max-width:700px){.site3d-bar{right:14px;min-width:0}.site3d-bar strong{font-size:17px}.site3d-hud{top:116px;bottom:auto;left:14px;right:14px;max-width:none;justify-items:start;text-align:left;gap:4px}.site3d-hud span:nth-child(n+3){display:none}.site3d-panel{max-height:50vh}}
+body:has(.moon-workspace[data-site="open"]) #panel-tab{display:none}
+body:has(.moon-workspace[data-site="open"]) .topbar{display:none}
+body:has(.moon-workspace[data-site="open"]) .scenario-strip{display:none}
+.moon-workspace[data-site="open"] .site3d-bar{top:16px}
 /* Drawn areas: toolbar on the Moon, and buttons in the side panel */
 .vw-draw{display:flex;flex-wrap:wrap;gap:8px}
 .vw-draw .vw-chip[aria-pressed="true"]{background:#84deff;color:#06111c;border-color:#84deff}

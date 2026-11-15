@@ -25,7 +25,6 @@ export class MoonTerrainProvider {
  readonly availability = undefined;
  readonly tileMeta = new Map<string, TileMeta>();
  failures = 0;
- private inFlight = 0;
  successes = 0;
  private levelZeroError: number;
  constructor(private info: TerrainInfo, private size = info.default_size) {
@@ -55,6 +54,14 @@ export class MoonTerrainProvider {
   const [x, y] = polarStereographicSouth(latDeg, lonDeg);
   return this.info.regions.find(r => r.near && x >= r.near.x_min && x <= r.near.x_max && y >= r.near.y_min && y <= r.near.y_max);
  }
+ /** Best DEM available at a clicked point; visual exploration can use the global grid everywhere. */
+ detailAt(latDeg: number, lonDeg: number): "near" | "far" | "global" {
+  if (latDeg > -70) return "global";
+  const [x, y] = polarStereographicSouth(latDeg, lonDeg);
+  if (this.info.regions.some(r => r.near && x >= r.near.x_min && x <= r.near.x_max && y >= r.near.y_min && y <= r.near.y_max)) return "near";
+  if (this.info.regions.some(r => r.far && x >= r.far.x_min && x <= r.far.x_max && y >= r.far.y_min && y <= r.far.y_max)) return "far";
+  return "global";
+ }
  /** Resolution (m) of the most detailed loaded tile under a point. */
  resolutionAt(latDeg: number, lonDeg: number): TileMeta | undefined {
   const position = Cartographic.fromDegrees(lonDeg, latDeg);
@@ -66,13 +73,6 @@ export class MoonTerrainProvider {
   return undefined;
  }
  async requestTileGeometry(x: number, y: number, level: number, request?: Request) {
-  // Near the pole the geographic grid asks for thousands of tiles at once. Returning undefined makes Cesium
-  // retry later, so only a bounded number are ever in flight and the browser never runs out of sockets.
-  if (this.inFlight >= 12) return undefined;
-  this.inFlight++;
-  try { return await this.fetchTile(x, y, level, request); } finally { this.inFlight--; }
- }
- private async fetchTile(x: number, y: number, level: number, request?: Request) {
   const rect = this.tilingScheme.tileXYToRectangle(x, y, level);
   const d = this.rectangleDegrees(x, y, level);
   const url = `/api/terrain/tile?west=${d.west}&south=${d.south}&east=${d.east}&north=${d.north}&size=${this.size}`;

@@ -4,6 +4,7 @@ Illustrative planning numbers. The default node is a small insulated electronics
 heat capacity, emissivity, area and conductance against a real design before quoting results.
 """
 from dataclasses import dataclass
+from math import expm1
 
 import numpy as np
 
@@ -32,10 +33,16 @@ class NodeDesign:
 
 
 def step_temp(T, P_in, P_heater, dt, C, eps, A, k_loss, T_env):
-    """One explicit step of the lumped model. T in K; C in J/K; A in m^2; k_loss in W/K."""
-    rad = eps * SIGMA * A * (T ** 4 - T_env ** 4)
-    cond = k_loss * (T - T_env)
-    return T + (P_in + P_heater - rad - cond) * dt / C
+    """Frozen-conductance exponential step; stable even for a small uninsulated box.
+
+    Radiation is factored as G(T, sink) * (T - sink). Holding G over one
+    internal step avoids explicit Euler cooling below absolute zero at large G/C.
+    """
+    conductance = k_loss + eps * SIGMA * A * (T + T_env) * (T*T + T_env*T_env)
+    if conductance <= 0:
+        return T + (P_in + P_heater) * dt / C
+    equilibrium = T_env + (P_in + P_heater) / conductance
+    return T + (equilibrium - T) * (-expm1(-conductance * dt / C))
 
 
 def survival_energy_wh(power_w, hours=LUNAR_NIGHT_H):
@@ -63,42 +70,55 @@ def night_budget(design, hours=LUNAR_NIGHT_H, T_env=100.0):
                 endurance_h=design.battery_wh / draw if draw > 0 else float("inf"))
 
 
-def simulate(design, lit, dt_h, T_env_lit=250.0, T_env_dark=100.0, beam_w=None, soc0=1.0, T0=273.15):
-    """Time-step one node. lit: illumination fraction per step (0..1). beam_w: delivered beam power per step.
+def simulate(design, lit, dt_h, T_env_lit=250.0, T_env_dark=100.0, beam_w=None, soc0=1.0, T0=273.15,
+             solar_factor=None, known=None):
+    """Conserve electrical energy and test thermal survival at every internal step.
 
-    Returns per-step arrays: soc (0..1), temp_k, mode (0 off, 1 hibernate, 2 active), heater_w,
-    plus the step at which the node froze for good (or -1).
+    Environment temperatures may be arrays. Unknown samples receive no solar credit or
+    service credit. Output states describe complete intervals; a partial powered interval
+    cannot count as continuous communication. Freezing is irreversible in this model.
     """
     lit = np.asarray(lit, float)
-    beam = np.zeros(len(lit)) if beam_w is None else np.broadcast_to(np.asarray(beam_w, float), lit.shape)
-    soc, temp, mode, heat = (np.zeros(len(lit)) for _ in range(4))
-    energy, T, frozen = design.battery_wh * soc0, T0, -1
-    sub = max(1, int(np.ceil(dt_h * 3600 / 300)))
+    if lit.ndim != 1 or dt_h <= 0 or not 0 <= soc0 <= 1:
+        raise ValueError("Expected a one-dimensional illumination series, positive step and charge in 0..1.")
+    valid = np.isfinite(lit) if known is None else np.asarray(known, bool) & np.isfinite(lit)
+    sun = np.clip(np.nan_to_num(lit), 0, 1)
+    sun = np.where(valid, sun, 0)
+    beam = np.zeros(len(sun)) if beam_w is None else np.broadcast_to(np.asarray(beam_w, float), sun.shape)
+    factor = np.ones(len(sun)) if solar_factor is None else np.broadcast_to(np.asarray(solar_factor, float), sun.shape)
+    dark = np.broadcast_to(np.asarray(T_env_dark, float), sun.shape)
+    light = np.broadcast_to(np.asarray(T_env_lit, float), sun.shape)
+    sink = dark + (light - dark) * sun
+    if not np.all(np.isfinite(sink)) or np.any(sink <= 0) or np.any(~np.isfinite(factor)) or np.any((factor < 0) | (factor > 1)):
+        raise ValueError("Thermal sinks must be finite positive kelvin; solar factors must be in 0..1.")
+    soc, temp, mode, heat = (np.zeros(len(sun)) for _ in range(4))
+    reasons, energy, T, frozen = [], design.battery_wh * soc0, T0, -1
+    sub = max(1, int(np.ceil(dt_h * 3600 / 60)))
     dt = dt_h * 3600 / sub
-    for i, sun in enumerate(lit):
-        supply = design.solar_w * sun + beam[i]
-        if frozen >= 0:
-            state, electronics = 0, 0.0
-        elif energy <= 0 and supply <= 0:
-            state, electronics = 0, 0.0
-        elif design.hibernate and sun <= 0 and beam[i] <= 0:
-            state = 1
-            electronics = design.survival_w + design.duty * (design.active_w - design.survival_w)
-        else:
-            state, electronics = 2, design.active_w
-        T_env = T_env_dark + (T_env_lit - T_env_dark) * sun
-        used = 0.0
+    for i, illumination in enumerate(sun):
+        supply = design.solar_w * illumination * factor[i] + beam[i]
+        full_service, used, lowest = True, 0.0, T
+        asleep = design.hibernate and illumination <= 0 and beam[i] <= 0
+        desired = design.survival_w + design.duty * (design.active_w - design.survival_w) if asleep else design.active_w
         for _ in range(sub):
-            heater = design.heater_w if (state and T < design.heater_on_k and (energy > 0 or supply > electronics)) else 0.0
+            available = supply + energy * 3600 / dt
+            electronics = min(desired, available) if frozen < 0 else 0.0
+            heater = min(design.heater_w, max(0, available - electronics)) if frozen < 0 and T < design.heater_on_k else 0.0
+            if electronics < desired - 1e-9 or frozen >= 0:
+                full_service = False
             emissivity = design.radiator_emissivity if T > design.radiator_on_k else design.emissivity
             T = step_temp(T, electronics + design.rhu_w, heater, dt, design.heat_capacity, emissivity,
-                          design.area, design.k_loss, T_env)
+                          design.area, design.k_loss, sink[i])
+            lowest = min(lowest, T)
             used += heater * dt / 3600
-            energy = float(np.clip(energy + (supply - electronics - heater) * dt / 3600, 0, design.battery_wh))
-        if frozen < 0 and T < design.kill_k:
-            frozen, state = i, 0
-        soc[i], temp[i], mode[i], heat[i] = energy / max(design.battery_wh, 1e-9), T, state, used / dt_h
-    return dict(soc=soc, temp_k=temp, mode=mode, heater_w=heat, frozen_step=frozen)
+            energy = float(min(design.battery_wh, max(0, energy + (supply - electronics - heater) * dt / 3600)))
+            if frozen < 0 and T < design.kill_k:
+                frozen, full_service = i, False
+        reason = "Unknown environment" if not valid[i] else "Frozen" if frozen >= 0 else "Insufficient power" if not full_service else "Available"
+        state = (1 if asleep else 2) if valid[i] and full_service and frozen < 0 else 0
+        soc[i], temp[i], mode[i], heat[i] = energy / max(design.battery_wh, 1e-9), lowest, state, used / dt_h
+        reasons.append(reason)
+    return dict(soc=soc, temp_k=temp, mode=mode, heater_w=heat, frozen_step=frozen, reason=reasons, sink_k=sink)
 
 
 def minimum_battery(design, hours=LUNAR_NIGHT_H, T_env=100.0):

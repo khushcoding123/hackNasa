@@ -1,15 +1,14 @@
-import hashlib
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.staticfiles import StaticFiles
 from spiceypy.utils.exceptions import SpiceyError
 
 from .data import LOCAL, SITES
 from .models import Mission
 from .science import scenario
-from ora.api import router as ora_router
 from . import tiles
+from ora.api import router as ora_router
 try:  # Surface coverage needs the optional training environment (rasterio, numba, prepared terrain).
     from moonmesh_train.coverage import router as coverage_router
     from moonmesh_train.ml_compare import router as ml_compare_router  # experimental, not approved
@@ -37,6 +36,13 @@ def config():
     return dict(defaults=Mission(), sites={k: v for k, v in SITES.items() if k not in LOCAL})
 
 
+@app.get("/api/status")
+def status():
+    """Preflight inventory: code revision, data present, models actually loaded, library versions."""
+    from ora.status import inventory
+    return inventory(hash_large=False)
+
+
 @app.post("/api/mission")
 def mission(body: Mission):
     return compute(body)
@@ -47,7 +53,7 @@ def compare(body: Mission):
     output = []
     for site in [s for s in SITES if s not in LOCAL]:
         result = compute(body.model_copy(update=dict(site=site, latitude=None, longitude=None)), include_map=False)
-        output.append({key: result[key] for key in ("site", "direct", "solar", "network", "worst", "recommended", "feasible")})
+        output.append({key: result[key] for key in ("site", "direct", "solar", "network", "worst", "recommended", "feasible", "assessment")})
     return output
 
 
@@ -73,7 +79,7 @@ def sensitivity(body: Mission):
     for label, changes in variants:
         try:
             result = compute(body.model_copy(update=changes), include_map=False)
-            rows.append(dict(label=label, direct=result["direct"], network=result["network"],
+            rows.append(dict(label=label, direct=result["direct"], network=result["network"], status=result["assessment"]["status"],
                              feasible=result["feasible"], count=len(result["recommended"]), eligible=result["eligible"]))
         except HTTPException as error:
             if not changes:
@@ -92,7 +98,7 @@ def terrain_info():
 
 
 @app.get("/api/terrain/tile")
-def terrain_tile(request: Request, west: float, south: float, east: float, north: float,
+def terrain_tile(west: float, south: float, east: float, north: float,
                  size: int = Query(tiles.DEFAULT_SIZE, ge=tiles.MIN_SIZE, le=tiles.MAX_SIZE)):
     """Read-only elevation samples for one rectangle (degrees).
 
@@ -108,14 +114,24 @@ def terrain_tile(request: Request, west: float, south: float, east: float, north
         "X-Terrain-Size": str(size), "X-Terrain-Padding": str(tiles.PADDING), "X-Terrain-Unit": "m",
         "X-Terrain-Min": f"{data['minimum']:.2f}", "X-Terrain-Max": f"{data['maximum']:.2f}",
         "X-Terrain-Resolution-M": f"{data['resolution_m']:.1f}", "X-Terrain-Sources": ",".join(data["sources"]),
-        "Cache-Control": "public, max-age=604800, immutable",
+        "Cache-Control": "public, max-age=3600",
     }
-    body = data["heights"].tobytes()
-    headers["ETag"] = '"' + hashlib.md5(body).hexdigest() + '"'
-    if request.headers.get("if-none-match") == headers["ETag"]:
-        return Response(status_code=304, headers={"ETag": headers["ETag"], "Cache-Control": headers["Cache-Control"]})
-    return Response(body, media_type="application/octet-stream", headers=headers)
+    return Response(data["heights"].tobytes(), media_type="application/octet-stream", headers=headers)
 
+
+@app.get("/api/terrain/site")
+def terrain_site(lat: float, lon: float, half_width_m: float, size: int):
+    """A local elevation patch centered on an arbitrary clicked lunar point."""
+    try:
+        data = tiles.site_patch(lat, lon, half_width_m, size)
+    except tiles.TileError as error:
+        raise HTTPException(422, str(error)) from error
+    except (FileNotFoundError, ValueError) as error:
+        raise HTTPException(503, str(error)) from error
+    headers = {"X-Terrain-Unit": "m", "X-Terrain-Resolution-M": f"{data['resolution_m']:.1f}",
+               "X-Terrain-Source": data["source"], "X-Terrain-Sources": ",".join(data["sources"]),
+               "Cache-Control": "public, max-age=3600"}
+    return Response(data["heights"].tobytes(), media_type="application/octet-stream", headers=headers)
 
 
 app.include_router(ora_router)

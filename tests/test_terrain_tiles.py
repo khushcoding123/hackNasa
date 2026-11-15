@@ -8,6 +8,12 @@ from moonmesh import tiles
 
 
 class TileTests(unittest.TestCase):
+    def require_regional_terrain(self):
+        grid = tiles.region_grid("haworth", "near20km")
+        if grid is None:
+            self.skipTest("Regional LOLA terrain is missing; run python -m moonmesh.data")
+        return grid
+
     def test_shape_padding_and_units(self):
         data = tiles.tile(-180, -90, 0, 90, 33)
         self.assertEqual(data["heights"].shape, (35, 35))
@@ -33,6 +39,7 @@ class TileTests(unittest.TestCase):
         self.assertEqual(float(np.ptp(south[-2, 1:-1])), 0.0)
 
     def test_regional_dem_is_used_only_where_it_exists(self):
+        self.require_regional_terrain()
         regional = tiles.tile(-23.0, -86.85, -22.6, -86.75, 33)
         self.assertEqual(regional["resolution_m"], 20.0)
         self.assertEqual(regional["sources"], ["near20km"])
@@ -47,7 +54,7 @@ class TileTests(unittest.TestCase):
         self.assertTrue(np.isfinite(data["heights"]).all())
 
     def test_nodata_inside_a_region_is_not_returned(self):
-        grid = tiles.region_grid("haworth", "near20km")
+        grid = self.require_regional_terrain()
         broken = type(grid)(np.full_like(grid.heights, np.nan), grid.x_left, grid.y_top, grid.pixel_size_m)
         with patch.object(tiles, "region_grid", side_effect=lambda site, suffix: broken if suffix == "near20km" else None):
             data = tiles.tile(-23.0, -86.85, -22.6, -86.75, 9)
@@ -56,12 +63,12 @@ class TileTests(unittest.TestCase):
 
     def test_levels_stop_at_source_resolution(self):
         sources = tiles.info()["sources"]
-        self.assertEqual(sources["global"]["max_level"], 6)
-        self.assertEqual(sources["far"]["max_level"], 9)
-        self.assertEqual(sources["near"]["max_level"], 12)
+        self.assertEqual(sources["global"]["max_level"], 7)
+        self.assertEqual(sources["far"]["max_level"], 10)
+        self.assertEqual(sources["near"]["max_level"], 13)
         # At the deepest level the sample spacing is not much finer than the source.
         for key in sources.values():
-            spacing = np.pi * tiles.MOON_RADIUS_M / (tiles.DEFAULT_SIZE - 1) / 2 ** key["max_level"]
+            spacing = np.pi * tiles.MOON_RADIUS_M / 32 / 2 ** key["max_level"]
             self.assertGreaterEqual(spacing, key["resolution_m"] * 0.6)
 
     def test_invalid_requests_are_rejected(self):
@@ -71,12 +78,28 @@ class TileTests(unittest.TestCase):
         with self.assertRaises(tiles.TileError):
             tiles.tile(0, 0, 1, 1, size=2)
 
+    def test_site_patch_supports_any_location_and_seams(self):
+        east = tiles.site_patch(12, 180, 175_000, 129)
+        west = tiles.site_patch(12, -180, 175_000, 129)
+        np.testing.assert_allclose(east["heights"], west["heights"], atol=1e-3)
+        self.assertEqual(east["source"], "global")
+        self.assertGreater(east["resolution_m"], 1000)
+        pole = tiles.site_patch(-90, 0, 175_000, 129)
+        self.assertTrue(np.isfinite(pole["heights"]).all())
+        self.assertEqual(pole["heights"].shape, (129, 129))
+
+    def test_site_patch_rejects_invalid_centres(self):
+        for lat, lon in [(91, 0), (float("nan"), 0), (0, float("inf"))]:
+            with self.assertRaises(tiles.TileError):
+                tiles.site_patch(lat, lon, 7000, 129)
+
     def test_endpoint_headers(self):
+        self.require_regional_terrain()
         try:
             from fastapi.testclient import TestClient
             from moonmesh.server import app
-        except ImportError:
-            self.skipTest("httpx is not installed")
+        except (ImportError, RuntimeError):
+            self.skipTest("Starlette's optional test client dependency is not installed")
         client = TestClient(app)
         response = client.get("/api/terrain/tile", params=dict(west=-23, south=-86.85, east=-22.6, north=-86.75, size=33))
         self.assertEqual(response.status_code, 200)

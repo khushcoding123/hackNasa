@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 GLOBAL_META = ROOT / "web" / "assets" / "moon-elevation.json"
 GLOBAL_GRID = ROOT / "web" / "assets" / "moon-elevation.i16"
 PADDING = 1
-MIN_SIZE, MAX_SIZE, DEFAULT_SIZE = 5, 129, 65   # 65 samples per tile: about 4x fewer requests than 33 for the same detail
+MIN_SIZE, MAX_SIZE, DEFAULT_SIZE = 5, 129, 33
 # Region edges blend into the next source over this many source pixels.
 FEATHER_PIXELS = {"near20km": 40, "far": 60}
 SOURCE_LABELS = {
@@ -164,7 +164,7 @@ def sample_points(lat, lon):
     lon = np.where(over, lon + 180, lon)
     lon = (lon + 180) % 360 - 180
     result = sample_global(global_grid(), lat, lon)
-    best = np.full(lat.shape, 20_000.0)          # finest source resolution that dominates each sample
+    best = np.full(lat.shape, global_grid().resolution_m)  # finest source resolution that dominates each sample
     chosen = np.full(lat.shape, "global", dtype=object)
     if np.any(lat < -70):
         x, y = polar_stereographic_south(lat, lon)
@@ -216,3 +216,31 @@ def tile(west, south, east, north, size=DEFAULT_SIZE):
         sources=[key for key, count in used.items() if count],
         samples=used,
     )
+
+
+def site_patch(lat, lon, half_width_m, size):
+    """Sample a square in the local east/north tangent frame at any lunar location.
+
+    Normalizing each tangent ray onto the reference sphere handles the poles and
+    longitude seam without special rectangle cases. The browser uses the same
+    construction to place every elevation sample at true scale.
+    """
+    if not all(np.isfinite([lat, lon, half_width_m])) or not (-90 <= lat <= 90):
+        raise TileError("Site coordinates must be finite and latitude must be within ±90°.")
+    if not (1000 <= half_width_m <= 200_000 and 129 <= size <= 513):
+        raise TileError("Site patch must use a 1–200 km half-width and 129–513 samples.")
+    p, l = np.deg2rad([lat, lon])
+    up = np.array([np.cos(p) * np.cos(l), np.cos(p) * np.sin(l), np.sin(p)])
+    east = np.array([-np.sin(l), np.cos(l), 0.0])
+    north = np.array([-np.sin(p) * np.cos(l), -np.sin(p) * np.sin(l), np.cos(p)])
+    axis = np.linspace(-half_width_m, half_width_m, size)
+    x, z = np.meshgrid(axis, axis)
+    rays = up + (x[..., None] * east - z[..., None] * north) / MOON_RADIUS_M
+    rays /= np.linalg.norm(rays, axis=-1, keepdims=True)
+    lats = np.rad2deg(np.arcsin(rays[..., 2]))
+    lons = np.rad2deg(np.arctan2(rays[..., 1], rays[..., 0]))
+    heights, resolution, chosen = sample_points(lats, lons)
+    sources = [key for key in ("near20km", "far", "global") if np.any(chosen == key)]
+    mid = size // 2
+    return dict(heights=np.ascontiguousarray(heights, dtype="<f4"),
+                resolution_m=float(resolution[mid, mid]), source=str(chosen[mid, mid]), sources=sources)

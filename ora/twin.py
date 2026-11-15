@@ -62,7 +62,7 @@ def _longest_false(flags, step_h):
 
 
 def run(network, design=NodeDesign(), kill=(), disk=None, night=None, beam=False, beam_design=PowerBeam(),
-        optical=False, optical_design=Optical(), dust_db=0.0, rf_backup=True, blast=None, dust=None):
+        optical=False, optical_design=Optical(), dust_db=0.0, rf_backup=True, blast=None, dust=None, dark_sink_k=100.0, lit_sink_k=250.0, dust_solar_loss=0.8):
     """Simulate the chosen network.
 
     kill: [(node, hour)] hardware deaths. disk: (col, row, radius_m, hour) regional failure such as
@@ -145,7 +145,8 @@ def run(network, design=NodeDesign(), kill=(), disk=None, night=None, beam=False
 
     state = {}
     for v in relays:
-        state[v] = simulate(design, lit[v], step_h, beam_w=beam_w[v])
+        state[v] = simulate(design, lit[v], step_h, beam_w=beam_w[v], T_env_dark=dark_sink_k,
+                            T_env_lit=lit_sink_k, solar_factor=1 - dust_load[v] * dust_solar_loss)
         state[v]["mode"][dead_at[v]:] = 0
     for v in demand:  # mining equipment brings its own power; it is a load on the network, not a relay
         state[v] = dict(soc=np.ones(steps), temp_k=np.full(steps, 273.15), mode=np.full(steps, 2.0), heater_w=np.zeros(steps),
@@ -192,7 +193,10 @@ def run(network, design=NodeDesign(), kill=(), disk=None, night=None, beam=False
                                                (changed.dust_risk >= 0.4 > baseline[v].dust_risk, "dust load rose")) if flag]
             module_swaps.append(dict(node=int(v), reason=", ".join(reasons) or "conditions changed", **delta))
     roles = {**{v: "relay" for v in relays}, **{g: "gateway" for g in gateways}, **{d: "mine" for d in demand}}
-    return dict(
+    assessment = scenario_assessment(design, served_gateway, served_earth, step_h, dust=bool(dust_load), blast=blast_report is not None,
+                                     injected=bool(kill) or disk is not None,
+                                     dark_sink_k=dark_sink_k, lit_sink_k=lit_sink_k, dust_solar_loss=dust_solar_loss)
+    return dict(assessment=assessment,
         times=[stamp.isoformat() for stamp in times], step_h=step_h,
         nodes=[dict(id=int(v), role=roles[v], x=float(network["sites"][v][0]), y=float(network["sites"][v][1]),
                     lat=float(network["lat"][v]), lon=float(network["lon"][v]), elevation=float(network["ground"][v]),
@@ -203,10 +207,14 @@ def run(network, design=NodeDesign(), kill=(), disk=None, night=None, beam=False
                     frozen_h=None if state[v]["frozen_step"] < 0 else state[v]["frozen_step"] * step_h,
                     killed_h=None if dead_at[v] >= steps else dead_at[v] * step_h,
                     dust=float(dust_load[v][-1]) if v in dust_load else 0.0,
+                    dust_load=dust_load[v].tolist() if v in dust_load else [0.0] * steps,
+                    heater_energy_wh=float(state[v]['heater_w'].sum() * step_h),
                     earth=network["earth"][v].astype(int).tolist() if v in gateways else None) for v in members],
         edges=[dict(a=int(e["a"]), b=int(e["b"]), distance_m=e["dist"], kind=e["kind"],
                     up="".join("1" if flag else "0" for flag in e["up"])) for e in edges],
         beams=[{**b, "source": int(b["source"]), "target": int(b["target"])} for b in beams],
+        environment=dict(status='assumed', validated=False, dark_sink_k=dark_sink_k, lit_sink_k=lit_sink_k,
+                         dust_solar_loss=dust_solar_loss, assumptions='Effective thermal sinks and dust parameters are assumptions; no Diviner ingestion or hardware calibration.'),
         blast=blast_report, dust_failures=dust_failures, module_swaps=module_swaps,
         served_gateway=served_gateway.tolist(), served_earth=served_earth.tolist(),
         summary=dict(gateway_availability=float(served_gateway.mean() * 100), earth_availability=float(served_earth.mean() * 100),
@@ -218,6 +226,34 @@ def run(network, design=NodeDesign(), kill=(), disk=None, night=None, beam=False
                      optical_trunks=sum(e["kind"] != "rf" for e in edges), beams=len(beams),
                      dust_failures=len(dust_failures), module_swaps=len(module_swaps),
                      blast_destroyed=len(blast_report["destroyed"]) if blast_report else 0))
+
+
+def scenario_assessment(design, served_gateway, served_earth, step_h, dust=False, blast=False, injected=False,
+                        dark_sink_k=100.0, lit_sink_k=250.0, dust_solar_loss=0.8):
+    """Twin runs are scenario outcomes, decided under the listed thermal, battery and dust assumptions (not calibrated)."""
+    from moonmesh.evidence import NOT_MODELLED, assess, check, gap
+    outcome = dict(gateway_availability_pct=float(served_gateway.mean() * 100), earth_availability_pct=float(served_earth.mean() * 100),
+                   longest_gateway_outage_h=_longest_false(served_gateway >= 1.0, step_h))
+    gaps = [gap("Assumed thermal and power values", "Heat capacity, emissivity, insulation, heater, battery and thermal sinks are planning "
+                "assumptions (ora/thermal.py, version 1), not hardware data. The status holds under these values only.", False),
+            gap("Placeholder module catalogue", "Module masses and powers in ora/modules.yaml are marked assumed with no source.", False)]
+    if dust:
+        gaps.append(gap("Dust rates are inputs", "Dust accumulation and failure hazard are user-set scenario rates.", False))
+    if blast:
+        gaps.append(gap("Blast effects are scenario radii", "Kill and damage radii are inputs, not modelled ejecta.", False))
+    linked = bool(served_gateway.min() >= 1.0)
+    return assess([check("Every mining site linked to a gateway at every step", "100% of steps", outcome["gateway_availability_pct"], linked,
+                         "Simulated hour by hour under the assumed equipment values listed below.")],
+                  gaps, kind="scenario outcome", subject="network over time under the assumed equipment values",
+                  architecture="Surface mesh to gateways with an Earth view (direct to Earth)",
+                  evaluated=["Sunlight per node over time (SPICE and terrain horizon)",
+                             "Battery charge, heater power and node temperature (lumped model, assumed values)", "Link state per step"]
+                            + (["Dust on solar panels and failure hazard (scenario rates)"] if dust else [])
+                            + (["Injected node and area failures"] if injected else []),
+                  not_evaluated=["Calibrated thermal and dust behaviour (current values are assumptions)"]
+                                + [h for h in NOT_MODELLED if not h.startswith(("Equipment temperature", "Dust accumulation"))],
+                  assumptions=[f"thermal sinks: dark {dark_sink_k:g} K, lit {lit_sink_k:g} K; dust solar loss {dust_solar_loss:g}"]
+                              + [f"{k} = {v}" for k, v in vars(design).items()], metrics=outcome)
 
 
 def night_design(network, design=NodeDesign(), target=1.0, night=(48.0, LUNAR_NIGHT_H),

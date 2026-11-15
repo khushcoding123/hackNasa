@@ -12,9 +12,9 @@ const run = (...args) => execFileSync(process.execPath, args, {cwd: root, stdio:
 run(path.join(root, "node_modules/typescript/bin/tsc"), "-p", "tsconfig.json", "--noEmit");
 
 await build({
-  entryPoints: [path.join(root, "frontend/app.ts")],
+  entryPoints: [path.join(root, "frontend/app.ts"), path.join(root, "frontend/ora.ts")],
   bundle: true, format: "esm", target: "es2022", minify: true, legalComments: "inline",
-  outfile: path.join(root, "web/app.js"),
+  outdir: path.join(root, "web"),
   logLevel: "warning",
 });
 

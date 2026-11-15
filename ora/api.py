@@ -18,7 +18,8 @@ from .data import ALL_SITES
 from .graph import degree_matched_disk, unit_disk_graph
 from .links import Optical, PowerBeam, beam_budget, optical_margin_db, rf_margin_db
 from .los import visible_cells
-from .scenario import Scenario, available, build, load
+from . import status as artifacts
+from .scenario import Scenario, _artifacts, available, build, load, plan_assessment
 from .thermal import LUNAR_NIGHT_H, NodeDesign, night_budget
 from .topologies import table as topology_table
 from .tunnel import TunnelRadio, drift_mine, room_and_pillar
@@ -112,6 +113,9 @@ class TwinBody(NetworkBody):
     dust_rate_per_day: float = Field(default=0, ge=0, le=1)
     dust_hazard_per_h: float = Field(default=0, ge=0, le=0.1)
     dust_seed: int = Field(default=0, ge=0, le=9999)
+    dark_sink_k: float = Field(default=100, ge=20, le=350)
+    lit_sink_k: float = Field(default=250, ge=20, le=400)
+    dust_solar_loss: float = Field(default=0.8, ge=0, le=1)
 
     def options(self, network):
         disk = None
@@ -127,7 +131,8 @@ class TwinBody(NetworkBody):
         return dict(kill=[(k.node, k.hour) for k in self.kill], disk=disk, blast=blast, dust=dust,
                     night=None if self.night_start_h is None else (self.night_start_h, self.night_hours),
                     beam=self.beam, beam_design=PowerBeam(electrical_in_w=self.beam_electrical_w), optical=self.optical,
-                    dust_db=self.dust_db, rf_backup=self.rf_backup)
+                    dust_db=self.dust_db, rf_backup=self.rf_backup, dark_sink_k=self.dark_sink_k,
+                    lit_sink_k=self.lit_sink_k, dust_solar_loss=self.dust_solar_loss)
 
 
 class ResilienceBody(NetworkBody):
@@ -176,8 +181,12 @@ def shade(dem, size=180):
     return np.round(255 * light * tone).astype(int).tolist(), step
 
 
-@lru_cache(maxsize=4)
 def coverage_map(scenario, stride=10):
+    return _coverage_map(scenario, _artifacts(), stride)
+
+
+@lru_cache(maxsize=4)
+def _coverage_map(scenario, artifacts, stride):
     """How many chosen relays each coarse cell can hear (2 m receiver). -1 marks cells outside the study radius."""
     network = build(scenario)
     dem, px = network["grid"].heights, network["grid"].pixel_size_m
@@ -201,9 +210,16 @@ def plan_graph(network):
 @router.get("/config")
 def config():
     card = json.loads(CARD.read_text()) if CARD.is_file() else None
+    # ``model_card`` is the training record; ``models`` is what is loaded in this process right now.
     return dict(scenarios={name: {k: (str(v) if isinstance(v, date) else v) for k, v in asdict(load(name)).items()} for name in available()},
                 sites={key: value[0] for key, value in ALL_SITES.items()}, design=Design().model_dump(),
-                modes=list(resilience.MODES), lunar_night_h=LUNAR_NIGHT_H, model_card=card)
+                modes=list(resilience.MODES), lunar_night_h=LUNAR_NIGHT_H, model_card=card, models=artifacts.model_status())
+
+
+@router.get("/status")
+def status():
+    """Preflight inventory of this checkout: code revision, data, loaded models and libraries. Large files are not hashed here."""
+    return artifacts.inventory(hash_large=False)
 
 
 @router.post("/network")
@@ -232,12 +248,13 @@ def network(body: NetworkBody):
                     earth=float(net["earth_frac"][v]), degree=int(G.degree(v)),
                     score=float(net["score"][v]) if v < net["n_relays"] else None) for v in G.nodes],
         edges=[dict(a=int(a), b=int(b), distance_m=d["dist"], margin_db=d.get("margin")) for a, b, d in H.edges(data=True)],
-        all_edges=G.number_of_edges(), score_method=net["score_method"],
+        all_edges=G.number_of_edges(), score_method=net["score_method"], score_evidence=net["score_evidence"],
+        assessment=plan_assessment(net),
         plan=dict(chosen=[int(v) for v in plan["chosen"]], chain=[int(v) for v in plan["chain"]], added=[int(v) for v in plan["added"]],
                   gateways=[int(v) for v in net["gateways"]], mines=[int(v) for v in net["demand"]],
                   unreachable=[int(v) for v in plan["unreachable"]], served=plan["served"],
                   mean_after_failure=plan["mean_after_failure"], worst_after_failure=plan["worst_after_failure"],
-                  feasible=plan["feasible"]),
+                  feasible=plan["feasible"], feasibility_scope="Static graph connectivity only; run the twin for thermal and dust service checks."),
         configs=twin.node_configs(net), structure=structure, full_structure=resilience.structural_report(G, connectivity=False), fragile=sorted(fragile, key=lambda f: f["served_if_lost"]))
 
 
@@ -268,7 +285,7 @@ def night(body: TwinBody):
     options = body.options(net)
     options.pop("night")
     rows = twin.night_design(net, design, batteries=(100, 200, 400, 700, 1000, 1500, 2200, 3200, 5000), **options)
-    return dict(budget=night_budget(design), hibernating=night_budget(replace(design, hibernate=True, duty=min(design.duty, 0.1))),
+    return dict(budget=night_budget(design, T_env=body.dark_sink_k), hibernating=night_budget(replace(design, hibernate=True, duty=min(design.duty, 0.1)), T_env=body.dark_sink_k),
                 design=rows, night_hours=LUNAR_NIGHT_H)
 
 
@@ -306,16 +323,11 @@ def tunnel(body: TunnelBody):
 
 @router.post("/coverage")
 def coverage_sites(body: CoverageBody):
-    """Coverage-first relay sites: surrogate shortlist, then exact greedy, compared with random sets."""
-    import joblib
-    from moonmesh.data import DATA
+    """Coverage-first relay sites: exact greedy coverage over every candidate, compared with random sets."""
     from .selector import select_sites
-    path = DATA / "models" / "ora_coverage_surrogate.joblib"
-    if not path.is_file():
-        raise HTTPException(503, "The coverage surrogate is not trained. Run python -m ora.train.")
     net = network_for(body)
     cells = net["sites"][:net["n_relays"]]
-    result = select_sites(net["grid"].heights, net["grid"].pixel_size_m, cells, body.budget, joblib.load(path), seed=net["scenario"].seed,
+    result = select_sites(net["grid"].heights, net["grid"].pixel_size_m, cells, body.budget, seed=net["scenario"].seed,
                           range_m=net["scenario"].max_range_km * 1000, h_tx=net["scenario"].relay_mast_m)
     result["sites"] = [dict(id=int(i), x=float(cells[i][0]), y=float(cells[i][1]), lat=float(net["lat"][i]), lon=float(net["lon"][i]),
                             elevation=float(net["ground"][i])) for i in result["chosen"]]
@@ -344,6 +356,13 @@ def dte():
 @router.get("/topologies")
 def topologies():
     return topology_table()
+
+
+@router.get("/accuracy")
+def accuracy_report():
+    """Saved result of python -m ora accuracy: methods scored against dense line-of-sight truth on untouched windows."""
+    path = Path(__file__).resolve().parents[1] / "docs" / "figures" / "ora_accuracy.json"
+    return json.loads(path.read_text()) if path.is_file() else None
 
 
 @router.get("/stress")

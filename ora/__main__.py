@@ -13,6 +13,8 @@
     python -m ora earth      [tile]
     python -m ora dem        <file>                 describe an elevation file
     python -m ora run        scenarios/<file>.yaml  run any scenario file by its kind
+    python -m ora preflight  [--json] [--no-hash]  inventory data, models, libraries and code revision
+    python -m ora accuracy                          accuracy against dense line-of-sight truth on untouched windows
 """
 import argparse
 import json
@@ -24,6 +26,12 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 FIGURES = ROOT / "docs" / "figures"
+
+
+def stamped(report):
+    """Attach the code revision and model hashes, so a saved report can be tied to what produced it."""
+    from .status import stamp
+    return {**report, "provenance": stamp()}
 DEFAULT = "shackleton_rim_to_floor"
 
 
@@ -38,7 +46,9 @@ def surface(name, seeds):
     graphs = (("terrain", G), ("same_degree_no_terrain", matched))
     table = {label: {mode: round(resilience.monte_carlo(H, mode, seeds, net["demand"], net["gateways"], pos)["schneider_r"], 3)
                      for mode in ("random", "betweenness", "articulation", "disk", "edge")} for label, H in graphs}
+    from .scenario import plan_assessment
     return dict(site=net["site_name"], sites=G.number_of_nodes(), links=G.number_of_edges(), siting=net["score_method"],
+                siting_evidence=net["score_evidence"], assessment=plan_assessment(net),
                 plan={k: plan[k] for k in ("chosen", "chain", "added", "served", "mean_after_failure", "worst_after_failure", "feasible")},
                 gateways=net["gateways"], mines=net["demand"],
                 articulation_points={label: resilience.structural_report(H, connectivity=False)["articulation_points"] for label, H in graphs},
@@ -70,7 +80,7 @@ def demo(name, seeds):
             entry[f"schneider_r_{mode}"] = round(result["schneider_r"], 4)
         svg = line_chart_svg(series, f"{net['site_name']}: {title}", "share of nodes removed", "largest connected share of the network")
         (FIGURES / f"ora_headline_{mode}.svg").write_text(svg, encoding="utf-8")
-    (FIGURES / "ora_headline.json").write_text(json.dumps(summary, indent=1) + "\n")
+    (FIGURES / "ora_headline.json").write_text(json.dumps(stamped(summary), indent=1) + "\n")
     summary["figures"] = [str(FIGURES / f"ora_headline_{mode}.svg") for mode in ("random", "betweenness")]
     return summary
 
@@ -89,9 +99,13 @@ def dte():
 
 
 def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["preflight"]:
+        from .status import main as preflight
+        return preflight(argv[1:])
     parser = argparse.ArgumentParser(prog="python -m ora", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("command", choices=("demo", "network", "resilience", "twin", "parts", "export", "dte", "topologies", "tunnel",
-                                            "earth", "dem", "run", "benchmark", "tall-towers", "evaluate", "stress"))
+                                            "earth", "dem", "run", "benchmark", "tall-towers", "evaluate", "stress", "preflight", "accuracy"))
     parser.add_argument("target", nargs="?")
     parser.add_argument("--seeds", type=int, default=None)
     parser.add_argument("--budget", type=int, default=8)
@@ -140,22 +154,27 @@ def main(argv=None):
         surrogate, gain = (joblib.load(MODELS / f"{n}.joblib") for n in ("ora_coverage_surrogate", "ora_gain_model"))
         out = [dict(window=list(w), budget=args.budget, **compare(b, surrogate, gain, budget=args.budget)) for w, b in zip(test, built)]
         FIGURES.mkdir(parents=True, exist_ok=True)
-        (FIGURES / "ora_benchmark.json").write_text(json.dumps(out, indent=1) + "\n")
+        (FIGURES / "ora_benchmark.json").write_text(json.dumps(stamped(out), indent=1) + "\n")
     elif command == "tall-towers":
         from .tall_towers import reproduce
         out = reproduce()
         FIGURES.mkdir(parents=True, exist_ok=True)
-        (FIGURES / "ora_tall_towers.json").write_text(json.dumps(out, indent=1) + "\n")
+        (FIGURES / "ora_tall_towers.json").write_text(json.dumps(stamped(out), indent=1) + "\n")
     elif command == "evaluate":
         from .evaluate import evaluate
         out = evaluate()
         FIGURES.mkdir(parents=True, exist_ok=True)
-        (FIGURES / "ora_evaluation.json").write_text(json.dumps(out, indent=1) + "\n")
+        (FIGURES / "ora_evaluation.json").write_text(json.dumps(stamped(out), indent=1) + "\n")
+    elif command == "accuracy":
+        from .accuracy import run
+        out = run()
+        FIGURES.mkdir(parents=True, exist_ok=True)
+        (FIGURES / "ora_accuracy.json").write_text(json.dumps(stamped(out), indent=1, default=float) + "\n")
     elif command == "stress":
         from .stress import run
         out = run()
         FIGURES.mkdir(parents=True, exist_ok=True)
-        (FIGURES / "ora_stress.json").write_text(json.dumps(out, indent=1, default=float) + "\n")
+        (FIGURES / "ora_stress.json").write_text(json.dumps(stamped(out), indent=1, default=float) + "\n")
     elif command == "dte":
         out = dte()
     elif command == "topologies":
@@ -179,4 +198,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -6,10 +6,12 @@
     "test:terrain": "esbuild frontend/terrain-mesh.ts --bundle --platform=node --format=esm --outfile=tmp/terrain-mesh-test.mjs && node tests/test_terrain_mesh.mjs tmp/terrain-mesh-test.mjs"
   },
   "devDependencies": {
+    "@types/three": "^0.180.0",
     "esbuild": "^0.28.2",
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "cesium": "^1.147.0"
+    "cesium": "^1.147.0",
+    "three": "^0.180.0"
   }
 }
