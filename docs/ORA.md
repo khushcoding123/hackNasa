@@ -14,7 +14,7 @@ This page maps every idea in `ORA_Implementation_Plan.md` to what was built, wha
 | --- | --- | --- | --- | --- |
 | I1 | Open repeater network | Built | `ora/`, `scenarios/`, this repo | Python package, YAML scenarios, tests, a command line and a web lab. No licence file yet (team decision). |
 | I2 | Designed for space mining | Built | `scenarios/shackleton_rim_to_floor.yaml`, `ora/scenario.py` | Mining sites on the permanently shadowed floor of Shackleton crater, relayed to gateways on the sunlit rim. |
-| I3 | Model trained on Earth networks that predicts where relays go | Built and trained | `ora/train.py`, `ora/features.py`, `ora/model_card.json` | Siting prior trained on 276 registered tower sites in six mountain regions. Scores every lunar candidate. The line-of-sight optimizer makes the final choice. |
+| I3 | Model trained on Earth networks that predicts where relays go | Built and trained | `ora/train.py`, `ora/features.py`, `ora/model_card.json` | Siting prior trained on 491 registered tower cells in the 14 of 20 one-degree mountain tiles with at least 15 usable towers (model card). Scores every lunar candidate together with the lunar coverage surrogate. The line-of-sight optimizer makes the final choice. `python -m ora preflight` shows whether each model is actually loaded. |
 | I4 | Digital twin | Built | `ora/twin.py`, Digital twin view | Hour-by-hour sunlight, battery, temperature, mode and link state per node. What-ifs: kill a node, regional failure, forced lunar night, laser power, optical trunks with dust. 2D map, not a 3D globe. |
 | I5 | Electronics survive the lunar night | Built | `ora/thermal.py`, Lunar night view | Lumped thermal model, survival energy budget, hibernation and duty cycling, radioisotope heat, smallest-battery search. |
 | I6 | Underground mining | Built | `ora/tunnel.py`, Underground view | Mines as tunnel graphs. Radio follows tunnels with distance and bend loss. |
@@ -32,11 +32,12 @@ Module A (terrain to graph) is `ora/los.py` and `ora/graph.py`. Module B is `ora
 ```bash
 python -m pip install -r requirements-dev.txt   # or: make setup
 python -m moonmesh.data          # NASA terrain and SPICE kernels (about 540 MB)
-python -m ora.data --earth       # Shackleton terrain window, FCC towers, six Earth elevation tiles (about 120 MB)
+python -m ora.data --earth       # Shackleton and Connecting Ridge terrain, FCC tower registry, 20 SRTM-derived Earth tiles (about 280 MB)
 python -m ora.lunar_windows      # 102 lunar windows with exact viewshed labels (a few minutes)
 python -m ora.train              # trains the prior, surrogate and gain model, writes ora/model_card.json
 python -m ora stress             # nine stress evals on sealed data
 python -m pytest tests -q
+python -m ora preflight          # what is present and loaded now
 ```
 
 | Command | Result |
@@ -55,6 +56,8 @@ python -m pytest tests -q
 ## Measured results
 
 These recorded measurements predate the energy-conserving thermal solver and dust-to-solar coupling. Thermal/twin/night numbers require a new data-backed run before use as current benchmarks. All numbers come from the commands above with seed 0. They describe these scenarios, not lunar networks in general.
+
+Rechecked on 14 November 2026 after merging the energy-conserving thermal solver (`44bf663`): the placement (7 relays, 4 chain and 3 spare, 2 of 3 mines after the worst failure, 47% ground covered) reproduces, and the twin rows below are re-run with the new solver (the default node moved from 43% to 42%). The lunar-night battery sizes have not been re-run. The model metrics are copied from `ora/model_card.json` and `docs/figures/ora_evaluation.json`, which were written before reports recorded model hashes; they have not been re-run against the loaded files. The stress result is from the saved `docs/figures/ora_stress.json`, which has the same limitation. Reports written from now on carry a `provenance` block (date, commit, model hashes).
 
 ### Terrain changes how networks break (Shackleton, 223 sites, 12 km range, 200 repeats)
 
@@ -81,9 +84,11 @@ Seven relays link all three floor mining sites to two rim gateways: four to conn
 
 ### Twin: shadowed relays are the problem, laser power fixes the local link
 
+These are scenario outcomes under illustrative thermal and battery values (`ora/thermal.py`). The app decides a twin run's status under those listed values and flags them as uncalibrated: they show behaviour under the assumptions, not expected hardware behaviour.
+
 | Run (30 days from 2026-11-01) | Mines linked to a gateway | Linked to Earth | Relays frozen |
 | --- | ---: | ---: | --- |
-| Default node (600 Wh, 40 W solar) | 43% | 24% | 2 |
+| Default node (600 Wh, 40 W solar) | 42% | 24% | 2 |
 | Laser power to shadowed relays | 100% | 53% | 1 |
 
 Two chain relays sit in shadow and freeze once their batteries drain. One 500 W laser feed from a sunlit relay 5.6 km away delivers about 82 W and keeps the chain alive. Earth contact is then limited by the gateways' own Earth view (about 54% of the month), which no surface relay can raise.
@@ -109,8 +114,10 @@ The plan's hypothesis was that the resilience-aware policy would win on collapse
 | Siting prior (Earth towers) | Leave one tile out, 14 tiles with 15 or more towers | AUC 0.85; 43% of real towers fall in the top 10% of cells (chance 10%). On eight sealed tiles: AUC 0.88, 48.5% in the top 10% |
 | Coverage surrogate (lunar) | 5 folds of 60 km blocks over 86 lunar windows; 16 more windows sealed as a test | CV R² 0.69, rank correlation 0.83. Sealed test: R² 0.71, rank 0.82, error 5.7 points |
 | Marginal-gain model | 16 sealed lunar windows, 8 relays | 83% of exact greedy coverage, beats random in 100% of windows |
+| View estimator (new) | Dense line of sight on 8 buffered holdout windows and the 16 legacy windows | R² 98.9% on both; replaces the coverage surrogate for fast screening |
+| Gain selector (new) | Same windows, 4 / 8 / 12 relays | 94.3–95.7% of exact greedy without a line-of-sight matrix |
 
-The surrogate screens candidates; the app still computes exact line of sight for the final set. Siting scores in the app are 80% surrogate and 20% Earth prior, because the prior alone does not rank lunar cells by visibility. The stress suite (`python -m ora stress`) passes 23 of 24 checks; `docs/ORA_TRAINING.md` lists the one that fails and the weak spots.
+These figures are against the old 40 m-step label, except the two new rows. Against dense line of sight ([ACCURACY.md](ACCURACY.md)) the old surrogate reaches only R² 54–60%, and the old 80% surrogate / 20% Earth-prior blend ranks candidates at 74–82% rank correlation. **The app no longer uses either.** It ranks relay candidates by their computed 8 km viewshed share (99.5–99.6% rank correlation with dense truth) and picks coverage-first sites by exact greedy over every candidate. The Shackleton placement and twin results above are unchanged by this. The stress suite (`python -m ora stress`) passes 23 of 24 checks on the old models; `docs/ORA_TRAINING.md` lists the one that fails.
 
 ### Drawn areas and layouts (main app, step 3)
 
@@ -120,7 +127,8 @@ The main MOONMESH app no longer starts from fixed landing regions. Draw a square
 
 - No placement is optimal. The search is a heuristic over screened candidates.
 - The siting prior is trained on Earth, where towers follow roads, power and people as well as terrain. On the Moon it is a ranking prior, never a decision.
-- The twin uses simulated telemetry on 20 m terrain. Thermal constants are illustrative.
+- The twin uses simulated telemetry on 20 m terrain. Thermal constants are illustrative, so a twin "requirements met" holds only under those listed values.
+- A relay plan marked "requirements met" means every mining site links to a gateway that sees Earth part of the time. It does not mean continuous Earth contact, and it does not cover cold, dust or space weather.
 - Tunnel loss numbers are placeholders until fitted from the bench test. The bench validates the method, not lunar values.
 - Laser power is evaluated as a technology. It is not presented as flight heritage.
 - Prior work was searched, not exhausted: "not found" is not "does not exist".
