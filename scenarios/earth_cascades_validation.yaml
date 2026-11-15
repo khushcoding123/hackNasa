@@ -1,0 +1,11 @@
+# Earth check of the terrain-to-graph engine.
+# Run with: python -m ora run scenarios/earth_cascades_validation.yaml
+# Reproduces the qualitative TerrainLOS result: terrain graphs have lower degree and more
+# disconnection than unit-disk graphs at the same range.
+kind: earth
+tile: N47W122
+window_km: 30
+candidates: 300
+max_range_km: 8
+mast_m: 30
+seed: 0

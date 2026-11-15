@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#070b12"><meta name="description" content="ORA: place relays on real lunar terrain, test them against failures and the lunar night, and take the network underground."><title>ORA lab · MOONMESH</title><link rel="icon" href="/moon.svg" type="image/svg+xml"><link rel="stylesheet" href="/ora-base.css"><link rel="stylesheet" href="/ora.css"><script type="module" src="/ora.js"></script></head>
+<body>
+<a class="skip-link" href="#view">Skip to content</a>
+<aside class="rail" id="navigation">
+ <a class="brand" href="/" aria-label="MOONMESH home"><span class="mark" aria-hidden="true"></span><span>MOONMESH<small>ORA RELAY LAB</small></span></a>
+ <button id="menu-toggle" class="mobile-menu" aria-expanded="false" aria-controls="ora-nav">Menu <span aria-hidden="true">☰</span></button>
+ <nav id="ora-nav" aria-label="ORA views">
+  <p class="nav-label">SURFACE NETWORK</p>
+  <button data-tab="network" aria-current="page"><span class="nav-number">01</span> Place relays</button>
+  <button data-tab="resilience"><span class="nav-number">02</span> Resilience lab</button>
+  <button data-tab="twin"><span class="nav-number">03</span> Digital twin</button>
+  <button data-tab="night"><span class="nav-number">04</span> Lunar night</button>
+  <p class="nav-label secondary-label">BEYOND THE SURFACE</p>
+  <button data-tab="tunnel"><span class="nav-number">05</span> Underground</button>
+  <button data-tab="laser"><span class="nav-number">06</span> Lasers</button>
+  <button data-tab="earth"><span class="nav-number">07</span> Earth mines</button>
+  <button data-tab="access"><span class="nav-number">08</span> Earth access</button>
+  <button data-tab="data"><span class="nav-symbol" aria-hidden="true">⊙</span> Models &amp; limits</button>
+  <p class="nav-label secondary-label">MISSION PLANNER</p>
+  <a class="nav-link" href="/">← Back to MOONMESH</a>
+ </nav>
+ <div class="rail-bottom"><span class="prototype"><span class="dot"></span> Planning prototype</span></div>
+</aside>
+<main>
+ <div class="topline"><span>ORA <span class="separator">/</span> OPEN RELAY REPEATER NETWORK</span><span class="telemetry"><span class="dot"></span> NASA LOLA · JPL DE440 · FCC ASR</span></div>
+ <header><div><p class="eyebrow" id="chapter">01 / PLACE RELAYS</p><h1 id="title" tabindex="-1">Relays for a lunar mine.</h1><p id="purpose" class="subtitle">The model proposes sites. Line of sight on real terrain decides.</p></div></header>
+ <form id="scenario" class="panel configuration">
+  <div class="config-heading"><span class="eyebrow">SCENARIO</span><span id="state" class="state-label" role="status">Loading</span></div>
+  <div class="fields mission-fields">
+   <label>Scenario<select name="scenario" required></select></label>
+   <label>Candidate sites<input name="candidates" type="number" min="40" max="600" step="10" required></label>
+   <label>Radio range (km)<input name="max_range_km" type="number" min="1" max="20" step="0.5" required></label>
+   <label>Relay mast (m)<input name="relay_mast_m" type="number" min="1" max="100" step="1" required></label>
+   <label>Mining sites<input name="mining_sites" type="number" min="1" max="6" step="1" required></label>
+   <label>Spare relays<input name="extra_relays" type="number" min="0" max="8" step="1" required></label>
+   <button class="primary" type="submit" disabled>Build network <span aria-hidden="true">↗</span></button>
+  </div>
+ </form>
+ <div class="scenario-strip"><p id="subtitle">Preparing the scenario…</p><span id="status" role="status" aria-live="polite"></span></div>
+ <div id="view" tabindex="-1"><section class="panel initial-state"><span class="eyebrow">BUILDING</span><h2>Reading the terrain.</h2><p class="muted">Finding candidate sites, tracing line of sight and choosing relays. The first build takes about 15 seconds.</p></section></div>
+ <footer><span>ORA <span class="separator">/</span> RELAY PLACEMENT AND RESILIENCE</span><span>Planning estimates · Heuristic placement, never a proven optimum</span></footer>
+</main>
+</body></html>

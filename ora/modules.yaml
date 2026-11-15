@@ -1,0 +1,18 @@
+# ORA node module catalogue.
+#
+# PLACEHOLDER VALUES (every entry is marked assumed: true until a source is filled in). Mass (kg) and power (W, positive = draw) are illustrative figures chosen
+# only so the configurator can total a parts list and report what a module swap costs. None is
+# taken from a datasheet. Replace every number before it goes on a slide.
+core:                 {mass_kg: 2.0, power_w: 1.0, role: "computer, clock and mesh radio", assumed: true, source: "none yet"}
+"power:solar+battery": {mass_kg: 6.0, power_w: 0.0, role: "panel and battery for sunlit sites", assumed: true, source: "none yet"}
+"power:battery":       {mass_kg: 8.0, power_w: 0.0, role: "larger battery for dark sites", assumed: true, source: "none yet"}
+"power:laser_receiver": {mass_kg: 3.0, power_w: 0.0, role: "tuned photovoltaic receiver for beamed power", assumed: true, source: "none yet"}
+"thermal:insulation":  {mass_kg: 1.0, power_w: 0.0, role: "multi-layer insulation", assumed: true, source: "none yet"}
+"thermal:phase_change": {mass_kg: 2.5, power_w: 0.0, role: "phase-change buffer for long darkness", assumed: true, source: "none yet"}
+"antenna:omni":        {mass_kg: 0.5, power_w: 2.0, role: "omnidirectional RF", assumed: true, source: "none yet"}
+"antenna:directional": {mass_kg: 3.0, power_w: 8.0, role: "steerable dish toward Earth", assumed: true, source: "none yet"}
+"antenna:optical":     {mass_kg: 4.0, power_w: 6.0, role: "optical terminal for trunk links", assumed: true, source: "none yet"}
+"anchor:regolith_spike": {mass_kg: 1.0, power_w: 0.0, role: "spike for soft regolith", assumed: true, source: "none yet"}
+"anchor:rock_bolt":    {mass_kg: 2.0, power_w: 0.0, role: "bolt for rock or steep ground", assumed: true, source: "none yet"}
+"dust:shield":         {mass_kg: 1.5, power_w: 0.5, role: "dust cover and electrostatic shield", assumed: true, source: "none yet"}
+"shock:isolated_mount": {mass_kg: 2.0, power_w: 0.0, role: "shock mount for blast zones", assumed: true, source: "none yet"}

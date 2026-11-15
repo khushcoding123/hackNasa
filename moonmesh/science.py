@@ -14,7 +14,7 @@ from lunar_core.terrain import (
     MOON_RADIUS_M, TerrainGrid, polar_stereographic_south, polar_stereographic_south_inverse, radial_points,
 )
 
-from .data import DATA, LOLA, PRODUCTS, SITES
+from .data import DATA, LOLA, PRODUCTS, SITES, activate
 from .network import battery, evaluate, link_margin, metrics, optimize, passes, spans
 
 
@@ -160,6 +160,7 @@ PROVENANCE = {
 
 
 def scenario(mission, include_map=True):
+    activate(mission.site)
     if mission.site not in SITES:
         raise ValueError("Select a supported landing region.")
     load_kernels(DATA / "kernels")

@@ -5,6 +5,7 @@ __pycache__/
 node_modules/
 /web/*.js
 .playwright-cli/
+/web/cesium/
 
 # training pipeline
 data/

@@ -1,5 +1,7 @@
 # MOONMESH UI redesign plan
 
+> The visual system below remains the design reference. The navigation and startup behavior have been superseded by the guided Moon-first journey in [PRODUCT_FLOW.md](PRODUCT_FLOW.md); missions no longer run automatically.
+
 ## Product outcome
 
 MOONMESH should feel like a quiet lunar mission console: spacious, precise, minimal, and unmistakably space-oriented. A new visitor should understand the current mission, locate a direct-to-Earth blackout, see what terrain caused it, evaluate the screened relay recommendation, and test a relay failure without instruction. The interface is a planning prototype, so every claim must remain appropriately qualified.

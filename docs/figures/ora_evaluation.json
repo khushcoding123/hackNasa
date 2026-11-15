@@ -1,0 +1,97 @@
+{
+ "siting_prior": {
+  "tiles": [
+   {
+    "tile": "N46W121",
+    "towers": 146,
+    "auc_pct": 86.4,
+    "view_only_auc_pct": 79.6,
+    "towers_in_top10_pct": 41.8,
+    "towers_in_top20_pct": 67.8
+   },
+   {
+    "tile": "N43W110",
+    "towers": 5,
+    "auc_pct": 89.2,
+    "view_only_auc_pct": 90.9,
+    "towers_in_top10_pct": 60.0,
+    "towers_in_top20_pct": 60.0
+   },
+   {
+    "tile": "N40W106",
+    "towers": 41,
+    "auc_pct": 96.0,
+    "view_only_auc_pct": 93.0,
+    "towers_in_top10_pct": 70.7,
+    "towers_in_top20_pct": 90.2
+   },
+   {
+    "tile": "N34W117",
+    "towers": 77,
+    "auc_pct": 81.6,
+    "view_only_auc_pct": 63.2,
+    "towers_in_top10_pct": 32.5,
+    "towers_in_top20_pct": 54.5
+   },
+   {
+    "tile": "N36W118",
+    "towers": 2,
+    "note": "too few usable towers to score"
+   },
+   {
+    "tile": "N41W112",
+    "towers": 51,
+    "auc_pct": 89.2,
+    "view_only_auc_pct": 93.7,
+    "towers_in_top10_pct": 54.9,
+    "towers_in_top20_pct": 82.4
+   },
+   {
+    "tile": "N44W115",
+    "towers": 2,
+    "note": "too few usable towers to score"
+   },
+   {
+    "tile": "N37W112",
+    "towers": 6,
+    "auc_pct": 88.8,
+    "view_only_auc_pct": 73.2,
+    "towers_in_top10_pct": 66.7,
+    "towers_in_top20_pct": 83.3
+   }
+  ],
+  "pooled": {
+   "towers": 330,
+   "background": 3160,
+   "auc_pct": 88.2,
+   "view_only_auc_pct": 82.1,
+   "towers_in_top10_pct": 48.5,
+   "towers_in_top20_pct": 74.2,
+   "chance_top10_pct": 10.0,
+   "chance_top20_pct": 20.0,
+   "tiles_beating_view_only": "4 of 6",
+   "mean_tile_auc_pct": 88.5
+  }
+ },
+ "coverage_surrogate": {
+  "cells": 9600,
+  "windows": 16,
+  "r2_pct": 70.88064683789821,
+  "spearman_pct": 82.25570411692654,
+  "mae_points": 5.742867253501164,
+  "within_10_points_pct": 83.51041666666667,
+  "worst_window_r2_pct": 1.8964159598959363,
+  "worst_window_spearman_pct": 63.473926316461984,
+  "worst_window_mae_points": 6.440778114637719,
+  "mean_window_r2_pct": 54.845941413831625,
+  "best_quarter_found_pct": 66.70833333333333,
+  "chance_best_quarter_pct": 25.0,
+  "mae_points_by_true_view": {
+   "0-10%": 5.0,
+   "10-30%": 5.6,
+   "30-60%": 6.0,
+   "60-100%": 12.7
+  }
+ },
+ "note": "Models loaded as saved; none of these tiles or sites were used for training or tuning."
+}

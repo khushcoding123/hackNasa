@@ -1,0 +1,355 @@
+{
+ "trained": "2026-11-14T22:54:22+00:00",
+ "features": [
+  "slope",
+  "tpi_300",
+  "tpi_1000",
+  "tpi_3000",
+  "relief_500",
+  "rel_elev_3000",
+  "ridge_dist",
+  "viewshed",
+  "horizon_mean",
+  "horizon_max",
+  "horizon_std",
+  "horizon_open",
+  "sector_min",
+  "sector_max"
+ ],
+ "seed": 0,
+ "siting_prior": {
+  "task": "tower cell vs background cell from terrain and skyline features, Earth",
+  "labels": "FCC Antenna Structure Registration (public US government record)",
+  "terrain": "SRTM-derived 1 arc-second tiles (AWS open terrain tiles), resampled to 30 m",
+  "tiles": {
+   "N47W122": {
+    "towers": 54,
+    "background": 432
+   },
+   "N44W122": {
+    "towers": 72,
+    "background": 576
+   },
+   "N35W116": {
+    "towers": 23,
+    "background": 184
+   },
+   "N35W118": {
+    "towers": 31,
+    "background": 248
+   },
+   "N39W107": {
+    "towers": 51,
+    "background": 408
+   },
+   "N38W108": {
+    "towers": 45,
+    "background": 360
+   },
+   "N45W114": {
+    "towers": 6,
+    "background": 160
+   },
+   "N46W112": {
+    "towers": 15,
+    "background": 160
+   },
+   "N40W111": {
+    "towers": 16,
+    "background": 160
+   },
+   "N37W119": {
+    "towers": 27,
+    "background": 216
+   },
+   "N48W114": {
+    "towers": 2,
+    "background": 160
+   },
+   "N36W112": {
+    "towers": 39,
+    "background": 312
+   },
+   "N44W116": {
+    "towers": 0,
+    "background": 160
+   },
+   "N46W116": {
+    "towers": 1,
+    "background": 160
+   },
+   "N42W122": {
+    "towers": 62,
+    "background": 496
+   },
+   "N48W120": {
+    "towers": 20,
+    "background": 160
+   },
+   "N38W120": {
+    "towers": 16,
+    "background": 160
+   },
+   "N40W109": {
+    "towers": 10,
+    "background": 160
+   },
+   "N33W111": {
+    "towers": 20,
+    "background": 160
+   },
+   "N45W118": {
+    "towers": 9,
+    "background": 160
+   }
+  },
+  "tiles_used": [
+   "N47W122",
+   "N44W122",
+   "N35W116",
+   "N35W118",
+   "N39W107",
+   "N38W108",
+   "N46W112",
+   "N40W111",
+   "N37W119",
+   "N36W112",
+   "N42W122",
+   "N48W120",
+   "N38W120",
+   "N33W111"
+  ],
+  "min_towers_per_tile": 15,
+  "cross_validation": "leave one 1-degree tile out",
+  "folds": [
+   {
+    "held_out": "N47W122",
+    "towers": 54,
+    "auc": 0.8972908093278464,
+    "average_precision": 0.6049863389201577,
+    "recall_top10pct": 0.4444444444444444,
+    "recall_top20pct": 0.6666666666666666,
+    "viewshed_only_auc": 0.8322616598079561
+   },
+   {
+    "held_out": "N44W122",
+    "towers": 72,
+    "auc": 0.7780912422839507,
+    "average_precision": 0.4364619358395476,
+    "recall_top10pct": 0.3472222222222222,
+    "recall_top20pct": 0.4861111111111111,
+    "viewshed_only_auc": 0.8305844907407407
+   },
+   {
+    "held_out": "N35W116",
+    "towers": 23,
+    "auc": 0.77882797731569,
+    "average_precision": 0.3561372083258485,
+    "recall_top10pct": 0.30434782608695654,
+    "recall_top20pct": 0.5652173913043478,
+    "viewshed_only_auc": 0.6618620037807182
+   },
+   {
+    "held_out": "N35W118",
+    "towers": 31,
+    "auc": 0.8577003121748179,
+    "average_precision": 0.4064767370220989,
+    "recall_top10pct": 0.3870967741935484,
+    "recall_top20pct": 0.7096774193548387,
+    "viewshed_only_auc": 0.746618106139438
+   },
+   {
+    "held_out": "N39W107",
+    "towers": 51,
+    "auc": 0.8664455978469819,
+    "average_precision": 0.5615466537761512,
+    "recall_top10pct": 0.49019607843137253,
+    "recall_top20pct": 0.6666666666666666,
+    "viewshed_only_auc": 0.8097846981930028
+   },
+   {
+    "held_out": "N38W108",
+    "towers": 45,
+    "auc": 0.9290432098765432,
+    "average_precision": 0.6982114401439282,
+    "recall_top10pct": 0.5777777777777777,
+    "recall_top20pct": 0.8222222222222222,
+    "viewshed_only_auc": 0.9651234567901235
+   },
+   {
+    "held_out": "N46W112",
+    "towers": 15,
+    "auc": 0.8966666666666666,
+    "average_precision": 0.500359319572921,
+    "recall_top10pct": 0.4666666666666667,
+    "recall_top20pct": 0.6666666666666666,
+    "viewshed_only_auc": 0.8433333333333333
+   },
+   {
+    "held_out": "N40W111",
+    "towers": 16,
+    "auc": 0.94609375,
+    "average_precision": 0.712607516695392,
+    "recall_top10pct": 0.5625,
+    "recall_top20pct": 0.875,
+    "viewshed_only_auc": 0.8984375
+   },
+   {
+    "held_out": "N37W119",
+    "towers": 27,
+    "auc": 0.906721536351166,
+    "average_precision": 0.4216907639659787,
+    "recall_top10pct": 0.48148148148148145,
+    "recall_top20pct": 0.7777777777777778,
+    "viewshed_only_auc": 0.9135802469135802
+   },
+   {
+    "held_out": "N36W112",
+    "towers": 39,
+    "auc": 0.6179322813938198,
+    "average_precision": 0.23491338802120862,
+    "recall_top10pct": 0.15384615384615385,
+    "recall_top20pct": 0.2564102564102564,
+    "viewshed_only_auc": 0.6829388560157791
+   },
+   {
+    "held_out": "N42W122",
+    "towers": 62,
+    "auc": 0.8165322580645161,
+    "average_precision": 0.5462078932238648,
+    "recall_top10pct": 0.45161290322580644,
+    "recall_top20pct": 0.5645161290322581,
+    "viewshed_only_auc": 0.7933792924037462
+   },
+   {
+    "held_out": "N48W120",
+    "towers": 20,
+    "auc": 0.9109375,
+    "average_precision": 0.6976631346572368,
+    "recall_top10pct": 0.55,
+    "recall_top20pct": 0.8,
+    "viewshed_only_auc": 0.885625
+   },
+   {
+    "held_out": "N38W120",
+    "towers": 16,
+    "auc": 0.8453125,
+    "average_precision": 0.40155165806706156,
+    "recall_top10pct": 0.5,
+    "recall_top20pct": 0.6875,
+    "viewshed_only_auc": 0.82109375
+   },
+   {
+    "held_out": "N33W111",
+    "towers": 20,
+    "auc": 0.7828125,
+    "average_precision": 0.3798056031004616,
+    "recall_top10pct": 0.35,
+    "recall_top20pct": 0.55,
+    "viewshed_only_auc": 0.7671875
+   }
+  ],
+  "mean_auc": 0.8450291529501427,
+  "mean_recall_top10pct": 0.4333708805983164,
+  "chance_recall_top10pct": 0.1,
+  "auc_lost_when_feature_shuffled": {
+   "slope": 0.009811903653644911,
+   "tpi_300": 0.036493465228983286,
+   "tpi_1000": 0.023361597072118406,
+   "tpi_3000": 0.002583631568170667,
+   "relief_500": 0.017161727392058766,
+   "rel_elev_3000": 0.016884983919847378,
+   "ridge_dist": 0.015243154083137502,
+   "viewshed": 0.050911566100514484,
+   "horizon_mean": 0.005036537151067726,
+   "horizon_max": -0.0006068971211697931,
+   "horizon_std": 0.007887246740315152,
+   "horizon_open": 0.004955755864070606,
+   "sector_min": 0.0028306222570595304,
+   "sector_max": 0.0
+  },
+  "limits": [
+   "Earth towers follow roads, power and population as well as terrain; no road or population data is used to correct this.",
+   "Earth to Moon is a domain shift; the score is a ranking prior, never a decision.",
+   "Registry positions are owner-reported and can be tens of metres off."
+  ]
+ },
+ "coverage_surrogate": {
+  "task": "exact viewshed share within 8 km (10 m mast, 2 m receiver) from terrain, skyline and multi-range view features, Moon",
+  "labels": "computed by ora.features.view_rings on LOLA 20 m terrain",
+  "features": [
+   "slope",
+   "tpi_300",
+   "tpi_1000",
+   "tpi_3000",
+   "relief_500",
+   "rel_elev_3000",
+   "ridge_dist",
+   "horizon_mean",
+   "horizon_max",
+   "horizon_std",
+   "horizon_open",
+   "sector_min",
+   "sector_max",
+   "view_1km",
+   "view_2km",
+   "view_4km",
+   "mast_m"
+  ],
+  "windows": 86,
+  "cells": 51600,
+  "augmentation": "correlated height noise 2 m and 5 m, masts 3 m and 20 m, peak-weighted loss (1 + 3 x max(share - 0.4, 0))",
+  "cross_validation": "5 folds of 60 km spatial blocks, training windows only",
+  "folds": [
+   {
+    "fold": 0,
+    "cells": 10800,
+    "r2": 0.7116774610415877,
+    "spearman": 0.8326396596042357,
+    "mean_abs_error": 0.0616281901492001
+   },
+   {
+    "fold": 1,
+    "cells": 10200,
+    "r2": 0.6922861937873162,
+    "spearman": 0.8207572086660327,
+    "mean_abs_error": 0.059420756854236874
+   },
+   {
+    "fold": 2,
+    "cells": 10200,
+    "r2": 0.6362625239306129,
+    "spearman": 0.8009018415799236,
+    "mean_abs_error": 0.06324202226565648
+   },
+   {
+    "fold": 3,
+    "cells": 10200,
+    "r2": 0.6720268014140129,
+    "spearman": 0.8200751340200586,
+    "mean_abs_error": 0.061057730529368845
+   },
+   {
+    "fold": 4,
+    "cells": 10200,
+    "r2": 0.7211615827754068,
+    "spearman": 0.8569790237004983,
+    "mean_abs_error": 0.06704726910283113
+   }
+  ],
+  "mean_r2": 0.6866829125897873,
+  "mean_spearman": 0.8262705735141498,
+  "limits": [
+   "Screens candidates only. The final set is always re-checked with exact line of sight."
+  ]
+ },
+ "marginal_gain": {
+  "task": "coverage a candidate adds given the relays already chosen",
+  "training_rows": 240456,
+  "windows": 86,
+  "rollouts": "3 per window, 8 steps, 70% greedy and 30% random picks",
+  "limits": [
+   "Needs no line-of-sight matrix at use time; the final set is still re-checked exactly."
+  ]
+ }
+}

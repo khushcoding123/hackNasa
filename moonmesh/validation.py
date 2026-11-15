@@ -22,7 +22,7 @@ import numpy as np
 from lunar_core.geometry import Body, SurfacePoint, horizontal_arrays
 from lunar_core.kernels import load_kernels
 
-from .data import DATA, ROOT, SITES
+from .data import DATA, LOCAL, ROOT, SITES
 
 API = "https://ssd.jpl.nasa.gov/api/horizons.api"
 REFERENCES = ROOT / "tests" / "data" / "horizons"
@@ -98,7 +98,7 @@ def compare(reference):
 
 def main(argv=None):
     refresh = "--refresh" in (sys.argv[1:] if argv is None else argv)
-    for site, (_, lat, lon) in SITES.items():
+    for site, (_, lat, lon) in [i for i in SITES.items() if i[0] not in LOCAL]:
         for body in TARGETS:
             for start, stop in PERIODS:
                 fetch(site, lat, lon, body, start, stop, refresh=refresh)

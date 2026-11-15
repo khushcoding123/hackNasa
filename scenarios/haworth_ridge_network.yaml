@@ -1,0 +1,14 @@
+# A surface relay network around the MOONMESH Haworth research point.
+site: haworth
+candidates: 200
+radius_km: 12
+max_range_km: 10
+relay_mast_m: 10
+mining_sites: 3
+gateways: 2
+extra_relays: 3
+start: 2026-11-01
+days: 30
+step_h: 2
+seed: 0
+notes: Mining sites are the lowest gentle ground within 3.5 km of the research point.

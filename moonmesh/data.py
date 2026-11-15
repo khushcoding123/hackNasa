@@ -6,7 +6,7 @@ import shutil
 import numpy as np
 
 from lunar_core.kernels import KERNELS
-from lunar_core.terrain import polar_stereographic_south
+from lunar_core.terrain import polar_stereographic_south, set_frame
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / ".moonmesh-data"
@@ -17,6 +17,21 @@ SITES = {
     "nobile-rim-1": ("Nobile Rim 1", -85.4, 37.3),
     "malapert": ("Malapert Massif", -85.964, 357.681),
 }
+
+LOCAL = set()   # drawn areas that use a local projection rather than the south polar one
+
+
+def activate(site):
+    """Select the projection a site's terrain is stored in. Local-frame areas register themselves on first use."""
+    path = DATA / "terrain" / f"{site}_near20km.npz"
+    if site.startswith("area-") and path.is_file():
+        with np.load(path) as data:
+            if "frame" in data.files:
+                SITES[site] = (str(data["name"]), float(data["lat"]), float(data["lon"]))
+                LOCAL.add(site)
+                set_frame(data["frame"])
+                return
+    set_frame(None)
 
 
 def download(url, path, size=None):

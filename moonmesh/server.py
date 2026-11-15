@@ -1,12 +1,15 @@
+import hashlib
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.staticfiles import StaticFiles
 from spiceypy.utils.exceptions import SpiceyError
 
-from .data import SITES
+from .data import LOCAL, SITES
 from .models import Mission
 from .science import scenario
+from ora.api import router as ora_router
+from . import tiles
 
 app = FastAPI(title="MOONMESH", description="Lunar landing-site and communications planning prototype")
 
@@ -24,7 +27,7 @@ def compute(mission, **kwargs):
 
 @app.get("/api/config")
 def config():
-    return dict(defaults=Mission(), sites=SITES)
+    return dict(defaults=Mission(), sites={k: v for k, v in SITES.items() if k not in LOCAL})
 
 
 @app.post("/api/mission")
@@ -35,7 +38,7 @@ def mission(body: Mission):
 @app.post("/api/compare")
 def compare(body: Mission):
     output = []
-    for site in SITES:
+    for site in [s for s in SITES if s not in LOCAL]:
         result = compute(body.model_copy(update=dict(site=site, latitude=None, longitude=None)), include_map=False)
         output.append({key: result[key] for key in ("site", "direct", "solar", "network", "worst", "recommended", "feasible")})
     return output
@@ -72,4 +75,41 @@ def sensitivity(body: Mission):
     return rows
 
 
+@app.get("/api/terrain/info")
+def terrain_info():
+    """Source metadata, units, and regional DEM footprints for the 3D Moon viewer."""
+    try:
+        return tiles.info()
+    except (FileNotFoundError, ValueError) as error:
+        raise HTTPException(503, str(error)) from error
+
+
+@app.get("/api/terrain/tile")
+def terrain_tile(request: Request, west: float, south: float, east: float, north: float,
+                 size: int = Query(tiles.DEFAULT_SIZE, ge=tiles.MIN_SIZE, le=tiles.MAX_SIZE)):
+    """Read-only elevation samples for one rectangle (degrees).
+
+    Body: little-endian float32, (size + 2) x (size + 2) metres, row 0 = north, one padding sample on every side.
+    Metadata is returned in X-Terrain-* headers. Cesium meshes are built in the browser."""
+    try:
+        data = tiles.tile(west, south, east, north, size)
+    except tiles.TileError as error:
+        raise HTTPException(422, str(error)) from error
+    except (FileNotFoundError, ValueError) as error:
+        raise HTTPException(503, str(error)) from error
+    headers = {
+        "X-Terrain-Size": str(size), "X-Terrain-Padding": str(tiles.PADDING), "X-Terrain-Unit": "m",
+        "X-Terrain-Min": f"{data['minimum']:.2f}", "X-Terrain-Max": f"{data['maximum']:.2f}",
+        "X-Terrain-Resolution-M": f"{data['resolution_m']:.1f}", "X-Terrain-Sources": ",".join(data["sources"]),
+        "Cache-Control": "public, max-age=604800, immutable",
+    }
+    body = data["heights"].tobytes()
+    headers["ETag"] = '"' + hashlib.md5(body).hexdigest() + '"'
+    if request.headers.get("if-none-match") == headers["ETag"]:
+        return Response(status_code=304, headers={"ETag": headers["ETag"], "Cache-Control": headers["Cache-Control"]})
+    return Response(body, media_type="application/octet-stream", headers=headers)
+
+
+
+app.include_router(ora_router)
 app.mount("/", StaticFiles(directory=Path(__file__).resolve().parents[1] / "web", html=True), name="web")

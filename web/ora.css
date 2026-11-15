@@ -1,0 +1,23 @@
+/* ORA lab additions. Tokens and base components come from style.css. */
+.nav-link{display:block;padding:10px 12px;color:var(--muted);text-decoration:none;font-size:14px;border-radius:8px}
+.nav-link:hover,.nav-link:focus-visible{color:var(--cyan)}
+.ora-map{display:block;width:100%;aspect-ratio:1;max-height:560px;border-radius:8px;background:#0c1520;cursor:crosshair}
+.ora-chart{display:block;width:100%;height:280px;border-radius:8px;background:#0c1520}
+.ora-strip{display:block;width:100%;height:150px;border-radius:8px;background:#0c1520}
+.ora-mine{display:block;width:100%;height:380px;border-radius:8px;background:#0c1520}
+.ora-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;align-items:end}
+.ora-grid label{display:grid;gap:6px;font-size:12px;color:var(--muted)}
+.ora-grid label.check{display:flex;align-items:center;gap:8px;min-height:40px;color:var(--text);font-size:13px}
+.ora-grid input[type=number],.ora-grid select{width:100%}
+.key{display:flex;flex-wrap:wrap;gap:6px 16px;margin:10px 0 0;padding:0;list-style:none;font-size:12px;color:var(--muted)}
+.key li{display:flex;align-items:center;gap:6px}
+.key i{display:inline-block;width:10px;height:10px;border-radius:50%}
+.key i.line{width:16px;height:3px;border-radius:2px}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid var(--border);font-size:12px}
+.pill.ok{color:var(--green);border-color:var(--green)}.pill.warn{color:var(--amber);border-color:var(--amber)}.pill.bad{color:var(--red);border-color:var(--red)}
+.note{font-size:13px;color:var(--muted);line-height:1.55;max-width:75ch}
+.tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.tabs button[aria-pressed=true]{border-color:var(--cyan);color:var(--cyan)}
+input[type=range].time{width:100%;accent-color:var(--cyan);margin-top:10px}
+.ora-list{margin:0;padding-left:18px;font-size:13px;line-height:1.6;color:var(--muted)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}

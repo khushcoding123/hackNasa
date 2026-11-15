@@ -1,0 +1,72 @@
+{
+ "source": "doi:10.5281/zenodo.18835598 (CC BY 4.0)",
+ "nlos_rows_skipped": 0,
+ "measured": {
+  "CH4": {
+   "ghz": 3.9936,
+   "distances_m": [
+    3,
+    40
+   ],
+   "repeats_per_position": 400,
+   "points": 38,
+   "alpha_db_per_100m": -47.63916412254418,
+   "alpha_ci95": [
+    -51.71425014961723,
+    -42.90400916374296
+   ],
+   "offset_db": -25.32847328402339,
+   "rms_residual_db": 1.4486199687343677,
+   "free_space_alpha_zero_rms_db": 11.588627610052988,
+   "path_loss_exponent": 0.2261770855877491
+  },
+  "CH7": {
+   "ghz": 6.4896,
+   "distances_m": [
+    3,
+    40
+   ],
+   "repeats_per_position": 400,
+   "points": 38,
+   "alpha_db_per_100m": -42.27295452091254,
+   "alpha_ci95": [
+    -46.931836303262905,
+    -36.75521629716602
+   ],
+   "offset_db": -19.68147383221344,
+   "rms_residual_db": 1.4925029040478366,
+   "free_space_alpha_zero_rms_db": 10.311181855507506,
+   "path_loss_exponent": 0.4038535776030076
+  }
+ },
+ "simulated": {
+  "CH4": {
+   "ghz": 3.9936,
+   "label": "simulated (CloudRT ray tracing)",
+   "points": 38,
+   "alpha_db_per_100m": 11.645499562015655,
+   "alpha_ci95": [
+    5.094892045719667,
+    18.286343833628674
+   ],
+   "offset_db": -6.269851018143955,
+   "rms_residual_db": 2.118142858325408,
+   "free_space_alpha_zero_rms_db": 3.519411579529133,
+   "path_loss_exponent": 2.422288061492301
+  },
+  "CH7": {
+   "ghz": 6.4896,
+   "label": "simulated (CloudRT ray tracing)",
+   "points": 38,
+   "alpha_db_per_100m": 9.43084675536285,
+   "alpha_ci95": [
+    2.2262638271783457,
+    16.535255750945712
+   ],
+   "offset_db": -6.19709249732726,
+   "rms_residual_db": 2.2169275461504623,
+   "free_space_alpha_zero_rms_db": 3.1773532149972743,
+   "path_loss_exponent": 2.4618933182174456
+  }
+ }
+}

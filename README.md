@@ -23,14 +23,24 @@ python -m uvicorn moonmesh.server:app --host 127.0.0.1 --port 8765
 
 ## Demonstration
 
-1. Run the default Haworth mission for November 2026. This is the repository's research window.
-2. Open **Sites** to compare Haworth, Nobile Rim 1 and Malapert Massif using the same period.
-3. Open **Blackouts** and select a blackout start time to inspect the Earth elevation, terrain angle, RF margin and distance to the controlling horizon sample.
-4. Set the availability, maximum blackout, mast, power and deployment constraints in **Expert settings**. Open **Relays** and optimize. The search returns the smallest screened configuration that meets the requirements, or the best evaluated configuration when the requirements are infeasible.
-5. Open **Resilience** and disable a selected relay. Inspect the resulting timeline and the per-relay criticality table. Enable **Require N−1** and run again to optimize for the worst individual relay failure.
-6. Run **Sensitivity analysis** or export the current mission. JSON includes the scenario, provenance and failure results. CSV includes the timeline and completed comparison or sensitivity runs. **Print report** opens a printable mission summary.
+1. Open **Explore the Moon**. Rotate or zoom the globe; no mission runs automatically.
+2. Choose **Set up my mission**, enter the region, UTC dates, and communication goals, then select **Calculate network**. Haworth in November 2026 is the reference research scenario.
+3. **See your network** opens the calculated landing terrain in 3D. Inspect recommended towers, change the selected time, or switch to Whole Moon for context.
+4. Continue to **Understand blackouts**. Select an outage to inspect terrain clearance, Earth geometry, and RF margin together.
+5. Continue to **Test resilience**. Disable a selected relay and inspect coverage and blackout changes. Return to setup to change parameters; recalculate to unlock updated analysis.
+6. Use **Optional analysis tools** for region comparison, individual tower details, sensitivity, and data sources. Export JSON, CSV, or a printable report from the header.
 
-The interface follows **Mission → Sites → Blackouts → Relays → Resilience**. Sensitivity and Data & assumptions are secondary analysis tools. Configuration changes are labeled **Changes not applied** until you run the mission. Exports are in the header menu. See [UI_REDESIGN_PLAN.md](UI_REDESIGN_PLAN.md) for the visual and interaction specification.
+The guided flow and product priorities are documented in [PRODUCT_FLOW.md](PRODUCT_FLOW.md). The original visual direction remains in [UI_REDESIGN_PLAN.md](UI_REDESIGN_PLAN.md). The workspace is a full-screen **CesiumJS** Moon (1,737,400 m radius, no Earth imagery, atmosphere or Cesium ion). **Map** mode is orthographic with even lighting; **3D** adds perspective, tilt, true-scale (1×) terrain with vertex normals, terrain shadows and *Interactive lighting* — dragging sweeps a directional light across slopes. It is an exploration aid and never affects mission dates, solar geometry or communication results. Imagery streams as tiles from the public LROC WAC WMS (`luna_wac_global` in Map mode, `luna_wac_normalized_reflectance` in 3D, 100 m/pixel source limit); the bundled color map is an explicitly labelled lower-detail fallback if the service fails. Elevation comes from the read-only `GET /api/terrain/tile` endpoint (`/api/terrain/info` lists sources, units and region footprints): the global LOLA grid everywhere, LOLA 240 m and 20 m DEMs around Haworth, Nobile Rim 1 and Malapert Massif. The browser builds the Cesium quantized-mesh tiles and normals itself (`frontend/terrain-mesh.ts`). Detail stops at each source's resolution and the status bar reports imagery, terrain and screen resolution separately. `npm run build` bundles Cesium and copies its workers/assets to `web/cesium`. Tests: `npm run test:terrain` and `python -m unittest tests.test_terrain_tiles`.
+
+## ORA relay lab
+
+Open [the ORA lab](http://127.0.0.1:8765/ora.html) from the MOONMESH menu. ORA places relays for a lunar mining site on real terrain, tests the network against node failures, runs it through time as a digital twin, sizes batteries for the lunar night, and takes the same graph engine underground. See [docs/ORA.md](docs/ORA.md) for what is built and the measured results, and [docs/ORA_TRAINING.md](docs/ORA_TRAINING.md) for the training procedure and datasets.
+
+```shell
+python -m ora.data --earth
+python -m ora.train
+python -m ora --help
+```
 
 ## Model and validation
 
