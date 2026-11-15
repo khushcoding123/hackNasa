@@ -3,7 +3,8 @@
   "private": true,
   "scripts": {
     "build": "node scripts/build_frontend.mjs",
-    "test:terrain": "esbuild frontend/terrain-mesh.ts --bundle --platform=node --format=esm --outfile=tmp/terrain-mesh-test.mjs && node tests/test_terrain_mesh.mjs tmp/terrain-mesh-test.mjs"
+    "test:terrain": "esbuild frontend/terrain-mesh.ts --bundle --platform=node --format=esm --outfile=tmp/terrain-mesh-test.mjs && node tests/test_terrain_mesh.mjs tmp/terrain-mesh-test.mjs",
+    "test:site": "esbuild frontend/imagery-status.ts frontend/site-projection.ts frontend/site-surface.ts --bundle --platform=node --format=esm --outdir=tmp/site-test --out-extension:.js=.mjs --log-level=warning && node tests/test_site_view.mjs tmp/site-test"
   },
   "devDependencies": {
     "@types/three": "^0.180.0",
