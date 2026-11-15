@@ -77,10 +77,6 @@ export class MoonView {
  private pin: {lat: number; lon: number} | undefined;
  private lightYaw = 40;
  private lightElevation = 30;
- private sharpError = 1.6;
- private lastFrame = 0;
- private slowFrames = 0;
- private fastFrames = 0;
  private drawKind: "rect" | "free" | undefined;
  private drawing: {start: Cartesian2; screen: Cartesian2[]; points: Cartesian3[]} | undefined;
  private draft: Cartesian3[] = [];
@@ -144,8 +140,7 @@ export class MoonView {
   scene.backgroundColor = Color.BLACK;
   if (scene.sun) scene.sun.show = false; if (scene.moon) scene.moon.show = false; scene.fog.enabled = false;
   scene.globe.showGroundAtmosphere = false; scene.globe.baseColor = Color.fromCssColorString("#26272a");
-  scene.globe.depthTestAgainstTerrain = true; scene.globe.maximumScreenSpaceError = this.sharpError;
-  scene.globe.tileCacheSize = 400; scene.globe.preloadSiblings = false; scene.globe.loadingDescendantLimit = 12;
+  scene.globe.depthTestAgainstTerrain = true; scene.globe.maximumScreenSpaceError = 2.6;
   scene.globe.lightingFadeInDistance = 1e12; scene.globe.lightingFadeOutDistance = 1e12; scene.globe.dynamicAtmosphereLighting = false;
   scene.light = new DirectionalLight({direction: new Cartesian3(1, 0, 0), intensity: 2});
   scene.shadowMap.softShadows = true; scene.shadowMap.size = 4096; scene.shadowMap.darkness = 0.42; scene.shadowMap.maximumDistance = 60_000;
@@ -157,13 +152,11 @@ export class MoonView {
   control.inertiaSpin = 0.7; control.inertiaZoom = 0.6;
   this.imagery = addImagery(viewer, state => this.onImageryState(state));
   // Continuous rendering only while the camera is moving or lighting is being dragged: idle frames cost nothing.
-  // Sharpness adapts to the machine: tile error rises when frames get slow and falls back when there is headroom, so motion stays smooth and stills are as sharp as the data allows (no MSAA switching, which hitches).
   camera.moveStart.addEventListener(() => { scene.requestRenderMode = false; });
   camera.moveEnd.addEventListener(() => { scene.requestRenderMode = true; scene.requestRender(); this.view = this.readView(); this.clampZoom(); this.refreshReadouts(); });
   camera.changed.addEventListener(() => { this.clampZoom(); });
   scene.preRender.addEventListener(() => { if (this.mode === "3d") this.updateLight(); });
-  viewer.resolutionScale = Math.min(2, window.devicePixelRatio || 1);
-  scene.postRender.addEventListener(() => { this.adaptQuality(); this.positionLabels(); if (!scene.globe.tilesLoaded) scene.requestRender(); });   // keep streaming until tiles settle, then idle
+  scene.postRender.addEventListener(() => { this.positionLabels(); if (!scene.globe.tilesLoaded) scene.requestRender(); });   // keep streaming until tiles settle, then idle
   scene.globe.tileLoadProgressEvent.addEventListener(count => { this.root.dataset.loading = String(count); scene.requestRender(); if (count === 0) this.refreshReadouts(); });
   this.setupLabels();
   this.setupPicking();
@@ -582,15 +575,6 @@ export class MoonView {
   viewer.scene.requestRender();
  }
 
- /** Frame-time feedback: sharper terrain when frames are cheap, coarser when they are not. */
- private adaptQuality() {
-  const globe = this.viewer?.scene.globe; if (!globe) return;
-  const now = performance.now(), dt = now - this.lastFrame; this.lastFrame = now;
-  if (dt > 400 || dt <= 0) return;   // idle gap between requested renders, not a real frame time
-  if (dt > 28) { this.slowFrames++; this.fastFrames = 0; } else if (dt < 18) { this.fastFrames++; this.slowFrames = 0; } else { this.slowFrames = this.fastFrames = 0; }
-  if (this.slowFrames >= 6 && this.sharpError < 4) { this.sharpError = Math.min(4, this.sharpError + 0.4); globe.maximumScreenSpaceError = this.sharpError; this.slowFrames = 0; }
-  else if (this.fastFrames >= 90 && this.sharpError > 1.2) { this.sharpError = Math.max(1.2, this.sharpError - 0.2); globe.maximumScreenSpaceError = this.sharpError; this.fastFrames = 0; }
- }
 
  // ---------- drawn area ----------
  private lift(lat: number, lon: number, metresUp = 40) {

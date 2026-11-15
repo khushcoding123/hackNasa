@@ -1,7 +1,6 @@
-import hashlib
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.staticfiles import StaticFiles
 from spiceypy.utils.exceptions import SpiceyError
 
@@ -85,7 +84,7 @@ def terrain_info():
 
 
 @app.get("/api/terrain/tile")
-def terrain_tile(request: Request, west: float, south: float, east: float, north: float,
+def terrain_tile(west: float, south: float, east: float, north: float,
                  size: int = Query(tiles.DEFAULT_SIZE, ge=tiles.MIN_SIZE, le=tiles.MAX_SIZE)):
     """Read-only elevation samples for one rectangle (degrees).
 
@@ -101,13 +100,9 @@ def terrain_tile(request: Request, west: float, south: float, east: float, north
         "X-Terrain-Size": str(size), "X-Terrain-Padding": str(tiles.PADDING), "X-Terrain-Unit": "m",
         "X-Terrain-Min": f"{data['minimum']:.2f}", "X-Terrain-Max": f"{data['maximum']:.2f}",
         "X-Terrain-Resolution-M": f"{data['resolution_m']:.1f}", "X-Terrain-Sources": ",".join(data["sources"]),
-        "Cache-Control": "public, max-age=604800, immutable",
+        "Cache-Control": "public, max-age=3600",
     }
-    body = data["heights"].tobytes()
-    headers["ETag"] = '"' + hashlib.md5(body).hexdigest() + '"'
-    if request.headers.get("if-none-match") == headers["ETag"]:
-        return Response(status_code=304, headers={"ETag": headers["ETag"], "Cache-Control": headers["Cache-Control"]})
-    return Response(body, media_type="application/octet-stream", headers=headers)
+    return Response(data["heights"].tobytes(), media_type="application/octet-stream", headers=headers)
 
 
 

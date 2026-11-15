@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 GLOBAL_META = ROOT / "web" / "assets" / "moon-elevation.json"
 GLOBAL_GRID = ROOT / "web" / "assets" / "moon-elevation.i16"
 PADDING = 1
-MIN_SIZE, MAX_SIZE, DEFAULT_SIZE = 5, 129, 65   # 65 samples per tile: about 4x fewer requests than 33 for the same detail
+MIN_SIZE, MAX_SIZE, DEFAULT_SIZE = 5, 129, 33
 # Region edges blend into the next source over this many source pixels.
 FEATHER_PIXELS = {"near20km": 40, "far": 60}
 SOURCE_LABELS = {
