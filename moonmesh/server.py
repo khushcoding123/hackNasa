@@ -10,7 +10,12 @@ from .models import Mission
 from .science import scenario
 from ora.api import router as ora_router
 from . import tiles
-from moonmesh_train.coverage import router as coverage_router
+try:  # Surface coverage needs the optional training environment (rasterio, numba, prepared terrain).
+    from moonmesh_train.coverage import router as coverage_router
+except ImportError as error:
+    import logging
+    coverage_router = None
+    logging.getLogger("moonmesh").warning("Surface coverage disabled (%s); start with the training venv to enable it.", error)
 
 app = FastAPI(title="MOONMESH", description="Lunar landing-site and communications planning prototype")
 
@@ -113,5 +118,6 @@ def terrain_tile(request: Request, west: float, south: float, east: float, north
 
 
 app.include_router(ora_router)
-app.include_router(coverage_router)
+if coverage_router is not None:
+    app.include_router(coverage_router)
 app.mount("/", StaticFiles(directory=Path(__file__).resolve().parents[1] / "web", html=True), name="web")
