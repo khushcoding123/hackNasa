@@ -118,6 +118,7 @@ export class SiteView {
  private areaEdges: {a: AreaPart; b: AreaPart; line: Line}[] = [];
  private areaOutline: {points: Vector2[]; line: Line} | undefined;
  private areaReach = 0;
+ private surveyedGround = 0;   // mean node height in scene units, used until the terrain grid has loaded
  private areaCentre = new Vector2();
  private planRing: {points: Vector2[]; line: Line; label: {el: HTMLElement; world: Vector3}} | undefined;
  private satellite: {group: Group; dir: Vector3; aim: Vector3; boom: Vector3; label: {el: HTMLElement; world: Vector3}; links: {part: AreaPart; line: Line}[];
@@ -125,6 +126,7 @@ export class SiteView {
  // Satellite clock: seconds after the overhead pass (the mission start when a mission is applied).
  private satTime = 0; private satSpan = 86_400; private satPlaying = true; private satSpeed = 60; private satLast = 0; private satShown = 0;
  private horizons: HorizonSet | undefined;
+ private satStarted = false;
 
  constructor(private root: HTMLElement, private options: SiteOptions) {
   this.result = options.result; this.index = options.index ?? 0; this.disabled = new Set(options.disabled ?? []);
@@ -182,6 +184,13 @@ export class SiteView {
   this.observer = new ResizeObserver(() => this.resize()); this.observer.observe(root);
   void this.load();
   this.setupCube();
+  // A mission or planned area: draw its nodes, satellite and time dial at once, at their surveyed heights, so they are
+  // visible while the terrain streams in; they settle onto the terrain when it arrives.
+  if (options.area || options.result) {
+   this.buildMarkers(); this.flyover();
+   this.loader.hide();
+   this.note("Loading lunar terrain under the network…");
+  }
   const loop = () => { if (this.disposed) return; this.tickSatellite(); this.controls.update(); this.renderer.render(this.scene, this.camera); this.cube?.update(); this.placeLabels(); this.frame = requestAnimationFrame(loop); };
   loop();
  }
@@ -239,10 +248,8 @@ export class SiteView {
    const source = grid.source === "near20km" ? "20 m regional LOLA" : grid.source === "far" ? "240 m regional LOLA" : "Global LOLA";
    this.q("[data-quality]").textContent = `${source} terrain · ${Number.isFinite(m) ? Math.round(m).toLocaleString() : "?"} m source`;
    this.note(`${(grid.half * 2 / 1000).toFixed(0)} km terrain context · source ${grid.sources.join(" + ")} · true scale`);
-   this.loader.show(this.options.focus === "area" ? "Rendering detailed view" : "Rendering site view", "Draping LROC imagery over the terrain…");
-   // Keep the cover up until the imagery is on the terrain, but never longer than 12 s: slow imagery keeps streaming behind it.
-   const imagery = Promise.allSettled([this.loadOuterImagery(grid), this.loadInner()]);
-   await Promise.race([imagery, new Promise(resolve => setTimeout(resolve, 12_000))]);
+   // The terrain is in: drop the cover now and let the LROC imagery drape over it as it streams.
+   void this.loadOuterImagery(grid); void this.loadInner();
    if (!this.disposed) requestAnimationFrame(() => requestAnimationFrame(() => this.loader.hide()));
   } catch (error) {
    if (this.disposed || (error as Error).name === "AbortError") return;
@@ -549,6 +556,7 @@ export class SiteView {
    const line = new Line(new BufferGeometry(), new LineDashedMaterial({color: 0x84deff, dashSize: 45, gapSize: 28}));
    this.markers.add(line); this.areaOutline = {points, line};
   }
+  if (this.areaParts.length) this.surveyedGround = this.areaParts.reduce((sum, p) => sum + p.base.y, 0) / this.areaParts.length;
   const flat = [...this.areaParts.map(p => new Vector2(p.base.x, p.base.z)), ...(this.areaOutline?.points ?? [])];
   const lo = new Vector2(Infinity, Infinity), hi = new Vector2(-Infinity, -Infinity);
   for (const p of flat) { lo.min(p); hi.max(p); }
@@ -570,8 +578,8 @@ export class SiteView {
   // Time dial: the whole mission when one is applied, otherwise one day from the overhead pass.
   const r = this.result;
   this.satSpan = r && r.times.length > 1 ? Math.max(3600, (utc(r.times[r.times.length - 1]) - utc(r.times[0])) / 1000) : 86_400;
-  this.satTime = clamp(area.seconds, 0, this.satSpan);
-  this.satPlaying = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // Only the first build sets the clock; the rebuild when the terrain arrives keeps where the dial is.
+  if (!this.satStarted) { this.satTime = clamp(area.seconds, 0, this.satSpan); this.satPlaying = !matchMedia("(prefers-reduced-motion: reduce)").matches; this.satStarted = true; }
   this.q<HTMLElement>(".site3d-timebar").hidden = false;
   this.q<HTMLInputElement>("[data-sat-time]").max = String(Math.round(this.satSpan));
   void loadHorizons(L).then(set => { if (this.satellite?.group === group) { this.horizons = set; this.updateSatellite(); } });
@@ -793,7 +801,7 @@ export class SiteView {
 
  // ---------- camera ----------
  private groundAt(x: number, z: number) {
-  const g = this.grid; if (!g) return 0;
+  const g = this.grid; if (!g) return this.surveyedGround;
   const col = clamp((x / g.half + 1) * (g.size - 1) / 2, 0, g.size - 1);
   const row = clamp((z / g.half + 1) * (g.size - 1) / 2, 0, g.size - 1);
   const c = Math.min(g.size - 2, Math.floor(col)), r = Math.min(g.size - 2, Math.floor(row));

@@ -111,3 +111,11 @@ def test_api_reports_loaded_models_and_assessment():
             assert row["name"] in loaded and row["sha256"] == loaded[row["name"]]["sha256"]
     assert net["score_method"] == SITING_METHOD and not net["score_evidence"]["fallback"]
     assert not any(r["used"] for r in net["score_evidence"]["models"])  # relays are ranked by computed viewshed, not a model
+
+
+def test_saved_reports_carry_provenance_even_when_the_result_is_a_list():
+    from ora.__main__ import stamped
+    listed = stamped([{"window": [1, 2]}])
+    assert listed["results"] == [{"window": [1, 2]}] and "provenance" in listed
+    mapped = stamped({"a": 1})
+    assert mapped["a"] == 1 and "provenance" in mapped

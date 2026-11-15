@@ -31,6 +31,8 @@ FIGURES = ROOT / "docs" / "figures"
 def stamped(report):
     """Attach the code revision and model hashes, so a saved report can be tied to what produced it."""
     from .status import stamp
+    if not isinstance(report, dict):   # e.g. the per-window list from `benchmark`: keep it under "results"
+        return {"results": report, "provenance": stamp()}
     return {**report, "provenance": stamp()}
 DEFAULT = "shackleton_rim_to_floor"
 

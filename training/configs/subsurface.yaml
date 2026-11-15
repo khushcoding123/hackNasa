@@ -13,15 +13,24 @@ radio:
 # Material models. status explains how well each value is sourced.
 materials:
   regolith:
-    # Carrier, Olhoeft, Mendell (1991) Lunar Sourcebook ch. 9, as recalled:
+    # Carrier, Olhoeft, Mendell (1991) Lunar Sourcebook ch. 9 (pp. 475-594):
     #   eps' = 1.919**density_g_cc ; tan_delta = 10**(0.038*(FeO+TiO2 wt%) + 0.312*density - 3.260)
-    # TODO: confirm both formulas against the Sourcebook text before quoting results.
-    status: literature_recalled_unverified
+    # Checked 2026-11-15 against literature that could be read (the Sourcebook itself was not available):
+    # - Palmer et al. 2015 (arXiv:1504.05167, p. 15): Olhoeft & Strangway (1975) fitted eps' = base**density to 92 lunar
+    #   samples with base 1.93 +/- 0.17. Our 1.919 lies inside that band.
+    # - Recent lunar radar papers quote both formulas above, with these coefficients, as Carrier et al. (1991).
+    # - Conflicting secondary versions exist: Campbell et al. (2006) attribute to Carrier et al. a density-free fit
+    #   log10(tan_delta) = 0.03*(FeO+TiO2) - 2.699, and other papers print other constants (-2.65 with a frequency term).
+    # TODO: confirm against the Sourcebook text before quoting results; until then keep the status below.
+    status: secondary_sources_agree_primary_unverified
     density_g_cc: [1.3, 2.0]
     feo_tio2_wt_pct: [5.0, 25.0]
   basalt:
     # Solid mare-basalt range as recalled from Apollo sample measurements. TODO: verify and cite.
     # Treated as an assumed range; the model is trained across it, so it is an input, not a constant.
+    # Checked 2026-11-15: no readable source gave solid-basalt eps' values. The Apollo 17 Surface Electrical Properties
+    # experiment is summarised as finding an in-situ loss tangent no larger than 0.05 and possibly as small as 0.002,
+    # which brackets the tan_delta range below; the eps' range remains unsourced.
     status: assumed_range_unverified
     eps_real: [6.0, 9.0]
     tan_delta: [0.003, 0.03]

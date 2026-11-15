@@ -17,3 +17,6 @@ dist/
 .pytest_cache/
 .vercel
 .env*
+
+# Prompt 12 reference PDFs (about 70 MB; sources listed at the top of docs/CODEX_PROMPTS.md)
+/docs/references/*.pdf

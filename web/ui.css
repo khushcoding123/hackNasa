@@ -609,3 +609,24 @@ button.primary { box-shadow: none !important; }
 .site3d-timebar select { flex: none; min-height: 28px; padding: 2px 6px; font: 11px var(--mono); background: rgba(255,255,255,.08); color: #e4e4e7; border: 1px solid var(--line); border-radius: 8px; }
 @media (max-width: 1100px) { .site3d-timebar { bottom: auto; top: 112px; width: calc(100% - 40px); min-width: 0; } }
 @media (max-width: 767px) { .site3d-timebar { top: 96px; flex-wrap: wrap; border-radius: 18px; } .site3d-timebar span { order: 3; } }
+
+/* ORA relay lab inside the mission panel (views from frontend/ora-lab.ts; standalone page uses web/ora.css) */
+#view .ora-map { display: block; width: 100%; aspect-ratio: 1; max-height: 560px; border-radius: 12px; background: #0c1520; cursor: crosshair; }
+#view .ora-chart { display: block; width: 100%; height: 260px; border-radius: 12px; background: #0c1520; }
+#view .ora-mine { display: block; width: 100%; height: 340px; border-radius: 12px; background: #0c1520; }
+#view .ora-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; align-items: end; }
+#view .ora-grid label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+#view .ora-grid label.check { display: flex; align-items: center; gap: 8px; min-height: 40px; color: var(--text); font-size: 13px; }
+#view .ora-grid input[type=number], #view .ora-grid select { width: 100%; }
+#view .key { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 10px 0 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted); }
+#view .key li { display: flex; align-items: center; gap: 6px; }
+#view .key i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+#view .key i.line { width: 16px; height: 3px; border-radius: 2px; }
+#view .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); font-size: 12px; }
+#view .pill.ok { color: var(--green); border-color: var(--green); } #view .pill.warn { color: var(--amber); border-color: var(--amber); } #view .pill.bad { color: var(--red); border-color: var(--red); }
+#view .note { font-size: 13px; color: var(--muted); line-height: 1.55; }
+#view .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+#view .tabs button[aria-pressed=true] { border-color: var(--cyan); color: var(--cyan); }
+#view input[type=range].time { width: 100%; accent-color: var(--cyan); margin-top: 10px; }
+#view .ora-list { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.6; color: var(--muted); }
+.menu-pop .lab-state { color: var(--cyan); letter-spacing: 0; text-transform: none; }

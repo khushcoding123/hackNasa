@@ -1,0 +1,110 @@
+# Prompt 12: published lunar surface-coverage studies and the cases 11_benchmarks.py reproduces.
+# Every study value carries its page in the PDF under docs/references/. "NOT STATED" means the study does not give it.
+# Values under `assumed` are ours, needed to run a case; they are reported as assumptions, never as the study's.
+# All results are simulator-to-simulator consistency (our viewshed vs theirs), not validation against measurements.
+
+terrain:
+  product: LDEM_85S_20M          # LOLA PDS south polar DEM, 20 m/px, read from the app cache .moonmesh-data/terrain
+  pixel_m: 20
+  search_decimation: 2           # Malapert grid search runs on a 40 m block-mean DEM; best sites are re-run at 20 m
+  spacing_fraction: 0.5          # LOS sample spacing as a fraction of the DEM pixel (the tracer allows at most 0.5)
+
+studies:
+  tall_lunar_towers:
+    file: docs/references/tall_lunar_towers_20230012634.pdf
+    title: "Tiffin & Mahlin, Tall Lunar Towers (NASA LaRC, NTRS 20230012634)"
+    values:
+      tower location: {value: "Connecting Ridge; coordinates NOT STATED (results quoted from its Ref. [4], Edwards et al. 2023)", page: 8}
+      tower heights: {value: "10 m and 50 m", page: 8}
+      receiver height: {value: "2 m (astronaut or rover)", page: 8}
+      visible area: {value: "185 km² (10 m) and 325 km² (50 m); 50 m gives 76% more", page: 8}
+      analysis extent: {value: "20 km radial traverse region = 1,256 km²; 10 m covers 14.7%, 50 m 25.9% of it (14.7% × 1,256 = 185 km², 25.9% × 1,256 = 325 km²)", page: 8}
+      terrain product and resolution: {value: NOT STATED, page: null}
+      area method: {value: "line of sight only (stated as conservative)", page: 8}
+      frequencies: {value: NOT STATED, page: null}
+      propagation tool: {value: NOT STATED, page: null}
+  nasa_viewshed_trade:
+    file: docs/references/nasa_viewshed_trade_20230014675.pdf
+    title: "Scardelletti et al., Lunar Surface Network Relay Terminal (NASA GRC, ICSSC 2023, NTRS 20230014675)"
+    values:
+      region: {value: "Malapert Massif, 20 km × 20 km; centre coordinates NOT STATED", page: 14}
+      tower heights: {value: "4 m and 20 m", page: 14}
+      receiver height: {value: "2 m", page: 14}
+      tower candidates: {value: "every ~1 km (400 towers); habitat at the highest point in the region", page: 14}
+      best-coverage tower: {value: "8.3 km from habitat; 4 m covers 23.7%, 20 m covers 29.2% of the region", page: 15}
+      best with slope < 20° and LOS to habitat: {value: "9.5 km from habitat; 4 m 10.6%, 20 m 12.1%", page: 17}
+      terrain product and resolution: {value: NOT STATED, page: null}
+      area method: {value: "viewshed percentage of the region", page: 15}
+      frequencies: {value: NOT STATED, page: null}
+      propagation tool: {value: NOT STATED, page: null}
+  jpl_rapid_low_cost_path:
+    file: docs/references/jpl_rapid_low_cost_path.pdf
+    title: "JPL, A Rapid Low-Cost Path to Lunar Communication and Navigation"
+    values:
+      tower location: {value: "surface station at (-89.51°, 225°), on the Connecting Ridge upper rim", page: 7}
+      tower height: {value: "15 m", page: 6}
+      receiver height: {value: "2 m (rover)", page: 6}
+      analysis extent: {value: "8 km radial distance", page: 6}
+      terrain product and resolution: {value: "LOLA south pole DEM, 5 m resolution", page: 6}
+      area method: {value: "QGIS viewshed, LOS area percentage; grid search 1 km then 100 m", page: 6}
+      coverage result: {value: "NOT STATED as a number (figure 6b only)", page: 6}
+      frequencies: {value: "UHF 442.5 MHz and S-band 2245 MHz", page: 7}
+      propagation tool: {value: "Altair FEKO: two-ray model in LOS areas, knife-edge diffraction elsewhere; TX 0 dBm, 0 dBi antennas", page: 7}
+      path loss result: {value: "NOT STATED as numbers (figure 7 maps only)", page: 7}
+  nasa_nokia_surface_network:
+    file: docs/references/nasa_nokia_surface_network_20240003815.pdf
+    title: "NASA/Nokia, Future Lunar Surface Network Study (NTRS 20240003815)"
+    values:
+      tower location: {value: "Connecting Ridge Site 1 (CR1), (-89.468°, 222.6°)", page: 88}
+      tower heights: {value: "15 m and 30 m lander (3GPP NIB)", page: 87}
+      receiver height: {value: "2 m astronaut, 4 m LTV", page: 87}
+      terrain product and resolution: {value: "PGDA product 78, NASA Site 15; resolution NOT STATED", page: 88}
+      frequencies: {value: "2600 MHz centre, 20 MHz bandwidth", page: 87}
+      propagation tool: {value: "Nokia Bell Labs parabolic-profile model (8 dB RMS error vs Canary Islands measurements)", page: 86}
+      coverage result: {value: "video rates to 10 km in gentler directions; about 1 km where steep terrain blocks (heatmaps only, no table)", page: 90}
+      path gain vs antenna height: {value: "NOT STATED as numbers (figures 37 and 40 only)", page: 89}
+
+cases:
+  - id: tlt_connecting_ridge
+    study: tall_lunar_towers
+    site: {lat: -89.468, lon: 222.6}
+    tower_heights_m: [10, 50]
+    receiver_height_m: 2
+    radius_m: 20000
+    published_km2: {10: 185, 50: 325}
+    # The study says only "the center" of the Connecting Ridge; CR1 sits about 17 m below a rise 200-1000 m away in
+    # LOLA 20 m terrain, so a 10 m tower there is shadowed. Also report the best tower near CR1.
+    local_search: {radius_m: 1500, step_m: 300, refine_top: 3}
+    assumed:
+      - "Tower at NASA/Nokia CR1 (-89.468°, 222.6°): Tall Lunar Towers gives no coordinates; its Ref. [4] is the same NASA 3GPP work."
+      - "Extent: a 20 km radius disk, the 1,256 km² region its percentages refer to."
+      - "Because the exact tower location is not stated, the best site within 1.5 km of CR1 is reported too."
+  - id: glenn_malapert_grid
+    study: nasa_viewshed_trade
+    site: {lat: -85.964, lon: 357.681}
+    region_half_m: 10000
+    grid_spacing_m: 1000
+    tower_heights_m: [4, 20]
+    receiver_height_m: 2
+    published_pct: {4: 23.7, 20: 29.2}
+    refine_top: 5
+    assumed:
+      - "Region centred on the app's Malapert research point (-85.964°, 357.681°): the study gives no centre."
+      - "Tower candidates on a regular 1 km grid inside the region (20 × 20 = 400)."
+  - id: jpl_surface_station
+    study: jpl_rapid_low_cost_path
+    site: {lat: -89.51, lon: 225.0}
+    tower_heights_m: [15]
+    receiver_height_m: 2
+    radius_m: 8000
+    path_loss_ghz: [0.4425, 2.245]
+    assumed:
+      - "20 m LOLA instead of the study's 5 m DEM; FSPL + knife-edge instead of FEKO's two-ray model."
+  - id: nokia_cr1_heights
+    study: nasa_nokia_surface_network
+    site: {lat: -89.468, lon: 222.6}
+    pairs_m: [[15, 2], [30, 4]]
+    radius_m: 10000
+    path_loss_ghz: [2.6]
+    assumed:
+      - "LOLA PDS 20 m instead of PGDA 78 Site 15; FSPL + knife-edge instead of Nokia's parabolic-profile model."

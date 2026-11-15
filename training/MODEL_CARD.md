@@ -14,9 +14,9 @@ used `C:\moonmesh-data`). Source/configuration files live in this repository.
 
 | Source | Role | Recorded license / unresolved conditions |
 |---|---|---|
-| NASA GSFC LOLA PGDA 90, LDEM_80S_20MPP_ADJ | Primary 20 m DEM; derived slope, relative elevation and roughness | Catalog says `check catalog`; exact license is null / TODO. Do not infer a license from NASA attribution. |
-| NASA GSFC LOLA PGDA 78, Haworth_final_adj_5mpp_surf.tif | Native 5 m cross-source sensitivity and aligned 20 m terrain | Exact license is null / TODO in supplied metadata. |
-| NASA LOLA PDS LDEM_85S_20M and LDEM_75S_240M | Existing read-only app terrain cross-check | Exact license is null / TODO; PDS label documents spherical reference and encoding. |
+| NASA GSFC LOLA PGDA 90, LDEM_80S_20MPP_ADJ | Primary 20 m DEM; derived slope, relative elevation and roughness | License: null (no license text on https://pgda.gsfc.nasa.gov/products/90, checked 2026-11-15). Its Data Usage Policy asks users to cite Barker et al. 2023, Planet. Sci. J. 4, 183, doi:10.3847/PSJ/acf3e1 (data doi:10.60903/gsfcpgda-lola-spole). Do not infer a license from NASA attribution. |
+| NASA GSFC LOLA PGDA 78, Haworth_final_adj_5mpp_surf.tif | Native 5 m cross-source sensitivity and aligned 20 m terrain | License: null (no license or citation text on https://pgda.gsfc.nasa.gov/products/78, checked 2026-11-15; the page defers to a product README not yet read). |
+| NASA LOLA PDS LDEM_85S_20M and LDEM_75S_240M | Existing read-only app terrain cross-check | License: null (the PDS labels carry no license text); PDS label documents spherical reference and encoding. |
 | WPI LunarRF atlas v2.0, Zenodo record 23301640 | Haworth 20 m simulated atlas comparison and terrain context; not learned inputs | CC BY 4.0 recorded in `training/data_manifest.json`; retain WPI/LunarRF attribution and release citation. |
 
 Product URLs, hashes, provider/version, acquisition gaps and verification state are
@@ -25,7 +25,7 @@ Alignment details are in `reports/align/report.md` and
 `derived/terrain/haworth/grid.json`. Primary terrain exactly matches LunarRF on
 joint pixels; tested terrain registrations are zero shift. The master grid has
 4809 rows × 4859 columns, 20 m pixels, lunar south polar stereographic radius
-1,737,400 m. PGDA vertical reference remains null / TODO. Quality layers (observation
+1,737,400 m. PGDA vertical reference remains null / TODO: the PGDA 90 and 78 product pages (checked 2026-11-15) give heights in metres in the DE421 MOON_ME frame but no reference radius. Quality layers (observation
 counts, uncertainty, effective resolution) were unavailable. This step performed
 no new source downloads or external license verification; redistribution requires
 resolving the stated license gaps.

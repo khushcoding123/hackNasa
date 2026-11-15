@@ -6,6 +6,7 @@ import type {Result, Comparison, Candidate, Sensitivity, Metrics, AreaResult, Re
 import {assessmentBadge, assessmentHtml} from "./evidence.js";
 import {hazardView} from "./hazard.js";
 import {cachedHorizons, horizonDeg} from "./horizon.js";
+import {AREA_TABS, ORA_TABS, createOraLab, type OraLab, type OraTab} from "./ora-lab.js";
 import {ORBIT_LIMITS, OrbitSettings, altitudeForSpeed, getOrbit, gravityAtOrbit, inclinationDeg, orbitPeriod, orbitRadius, orbitSpeed, resetOrbit, satelliteAccess, satelliteState, setOrbit, surfaceGravity} from "./orbital-preview.js";
 
 const $=<T extends HTMLElement=HTMLElement>(q:string)=>document.querySelector<T>(q)!;
@@ -23,7 +24,9 @@ let referenceBusy=false, referenceError="";
 let configurationComparison:RelayConfigurationComparison|undefined;
 let comparisonBusy=false, comparisonError="";
 let comparisonDraft:{name:string;relay_ids:string[]}[]=[];
-const independentViews=["landing","configure","surface","reference"];
+// The ORA relay lab lives in the panel too: "lab-<tab>" views. Area analyses fill in after each calculation.
+const LAB_VIEWS=Object.keys(ORA_TABS).map(t=>"lab-"+t);
+const independentViews=["landing","configure","surface","reference",...LAB_VIEWS];
 const steps=["landing","configure","layout","overview","communication","resilience","cost"];
 const MOON_R=1737400, DEG=Math.PI/180;
 const toXY=(lat:number,lon:number)=>{const rho=2*MOON_R*Math.tan((90+lat)*DEG/2);return [rho*Math.sin(lon*DEG),rho*Math.cos(lon*DEG)];};
@@ -33,6 +36,7 @@ const views:Record<string,[string,string]>={landing:["Start with the Moon.","01 
 views.surface=["Surface coverage","Explore simulated surface links independently of mission dates."];
 views.hazard=["How the terrain responds to cold.","Experimental · A model trained on NASA Diviner polar temperatures, shown beside the physics results."];
 views.reference=["End-to-end simulation","Run the Haworth reference mission and inspect each hop from the lander to Earth."];
+for(const [tab,[,title,purpose]] of Object.entries(ORA_TABS))views["lab-"+tab]=[title,`Relay lab · ${purpose}`];
 views["mission-compare"]=["Compare relay configurations","Compare placement, availability, blackouts, and cost for the same applied mission."];
 document.querySelector('.menu-pop')?.insertAdjacentHTML('afterbegin','<button data-view="reference">End-to-end simulation</button><button data-view="mission-compare">Compare relay configurations</button><button data-view="surface">Surface coverage</button>');
 document.querySelector('.menu-pop [data-view="sensitivity"]')?.insertAdjacentHTML('afterend','<button data-view="hazard" disabled>Hazard response <small>experimental</small></button>');
@@ -141,6 +145,17 @@ const hours=(x:number)=>n(x)+" h";
 const utc=(x:string)=>x.slice(0,16).replace("T"," ")+" UTC";
 const escape=(s:unknown)=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]!));
 const status=(s:string,error=false)=>{const node=$("#status");node.textContent=s;node.classList.toggle("error",error);};
+let oraLab:OraLab|undefined;
+/** The ORA relay lab, drawn into the mission panel. Its area analyses use the area calculated on the Moon. */
+function relayLab(){
+ let said="";
+ // The lab clears its message when a step ends; only replace the status line if it still shows the lab's own message.
+ oraLab??=createOraLab({view:outlet,auto:true,status:(text,error)=>{if(text||error){said=text;status(text,error);}else if($("#status").textContent===said){said="";status(oraLab?.busy?"Relay lab working…":"Relay lab up to date.");}},
+  scenarioBody:()=>layout&&area?{polygon:area}:{},
+  visible:()=>active.startsWith("lab-")&&active==="lab-"+(oraLab?.tab??""),
+  state:(text)=>{document.querySelectorAll<HTMLElement>("[data-lab-state]").forEach(n=>{n.textContent=text==="Working"?"· calculating":"";});}});
+ return oraLab;
+}
 const panel=(title:string,html:string)=>`<section class="panel"><h2>${title}</h2>${html}</section>`;
 const row=(cells:string[])=>"<tr>"+cells.map(c=>"<td>"+c+"</td>").join("")+"</tr>";
 const table=(columns:string[],rows:string[],cls="")=>`<div class="table-wrap" role="region" aria-label="Scrollable results table" tabindex="0"><table class="${cls}"><thead><tr>${columns.map(c=>'<th scope="col">'+c+"</th>").join("")}</tr></thead><tbody>${rows.join("")}</tbody></table></div>`;
@@ -278,6 +293,7 @@ async function run(){
    $("#subtitle").textContent=`${result.site.name} · ${result.config.start} to ${result.config.end} UTC`;
    status(`${result.times.length.toLocaleString()} samples · ${result.config.minutes} min intervals · ${result.candidates.length} relay candidates evaluated`);
    areaDirty=false;shownStale=false;dirty();moon?.setMission(result);
+   if(fresh&&layout)void relayLab().analyseArea();
    if(fresh&&layout){satelliteSeconds=0;moon?.setLayout(layout,layoutFormat);moon?.setSatellitePreview(layout,0);moon?.showSatelliteOverview(layout,0);}
    navigate(fresh?"layout":"overview");
    if(!fresh)moon?.flyToSite(result.site.lat,result.site.lon);
@@ -453,6 +469,11 @@ function environmentPanel(){
 function render(){
  document.body.dataset.step=active;flow();form.hidden=active!=="configure";$("#area-setup").hidden=active!=="configure";
  if(active==="surface"){$("#flow-actions").innerHTML="";surfaceCoverage(outlet);return;}
+ if(active.startsWith("lab-")){
+  const tab=active.slice(4) as OraTab;
+  $("#flow-actions").innerHTML=`<div><span class="eyebrow">RELAY LAB</span><p>${AREA_TABS.includes(tab)?(layout?"Calculated on the area you drew. It updates on its own when you calculate a new area.":"Draw an area and calculate it to fill this in."):"Independent of the area; runs with its defaults the first time you open it."}</p></div>`;
+  relayLab().open(tab);return;
+ }
  if(active==="reference"){$("#flow-actions").innerHTML="";renderReference();return;}
  if(active==="mission-compare"&&result){$("#flow-actions").innerHTML="";renderConfigurationComparison();return;}
  if(active==="landing"){
