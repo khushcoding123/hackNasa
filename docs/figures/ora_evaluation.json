@@ -93,5 +93,23 @@
    "60-100%": 12.7
   }
  },
- "note": "Models loaded as saved; none of these tiles or sites were used for training or tuning."
+ "note": "Models loaded as saved; none of these tiles or sites were used for training or tuning.",
+ "provenance": {
+  "generated": "2026-11-15T21:04:40+00:00",
+  "code": {
+   "commit": "44045737d275e681997f07d688e8b4445fdbf25a",
+   "branch": "repair/phase0-baseline",
+   "uncommitted_changes": true,
+   "diff_sha256": "4f3ab34395f0f851a40c2dff013f408e19bf34b31cb058f57ab513a2727933b3",
+   "untracked_files": 0
+  },
+  "models": {
+   "ora_siting_prior": "9898338e3155af9b22cafa1d75d7eeeee0c2d24bd8917689d6994cae9ca0cad6",
+   "ora_coverage_surrogate": "b40ffa53ded4fc1aaa552fbf54a1b631e87eef8b23ef59bf16d41d9d1b10129e",
+   "ora_gain_model": "112fb8da59547396c0590036519aaa6df191a9a776c0c90daeabb5e00ed72d80",
+   "ora_view_estimator": "bf7cf974863c94f3c9b172ed825c6d675f3f2b9e992156c6a5d6f8504e19b3dd",
+   "ora_gain_selector": "5f8566feba794b6bb18bde14f4dd97717f17de817b5b0c957dba6607f3ce2437",
+   "ora_hazard_thermal": "9b75bd4e1f42209de52b2f5f78925d949c7f7f8b8cbb86eb366c1db062cb90dd"
+  }
+ }
 }
