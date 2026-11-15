@@ -198,9 +198,9 @@ body.planner { --top: 76px; --rail-w: 242px; background: #06090d; }
 .welcome-source span { padding: 0 5px; }
 .planner:not([data-step=landing]) .welcome, .planner:not(.panel-collapsed) .welcome, .planner.exploring .welcome,
 body:has(.moon-workspace.drawing) .welcome, body:has(.moon-workspace[data-site=open]) .welcome { display: none; }
-body:has(.moon-workspace.drawing) #moon { left: 0 !important; }
-/* The site view fills the workspace beside the navigation rail; the rail stays on top, so starting at 0 hid the view's controls. */
-body:has(.moon-workspace[data-site=open]) #moon { left: var(--rail-w) !important; }
+/* Drawing and the site view fill the workspace beside the navigation rail. The rail stays on top, so starting at 0
+   hid the left of the globe (where drawing could not reach) and the site view's controls. */
+body:has(.moon-workspace.drawing) #moon, body:has(.moon-workspace[data-site=open]) #moon { left: var(--rail-w) !important; }
 
 /* Exploration dock and overlays. */
 .vw-left { top: 20px; left: 22px; width: min(340px, calc(100% - 140px)); gap: 10px; grid-template-columns: minmax(0,1fr) auto; }
@@ -415,4 +415,17 @@ body:has(.moon-workspace[data-site=open]) #moon { left: var(--rail-w) !important
   #printable .panel, #printable .metric, #printable th { background: white; color: #111; border-color: #ccc; }
   #printable .table-wrap { border-color: #ccc; }
   #printable .metric small, #printable th { color: #444; }
+}
+
+/* Site view layout follows the view's own width (the rail changes it), not the window's. Below 860 px the HUD sits
+   above the collapsed controls instead of overlapping them, and gives way while the controls are open. */
+.site3d { container: site / inline-size; }
+@container site (max-width: 860px) {
+  .site3d .site3d-hud { top: auto; bottom: 92px; left: 14px; right: 14px; max-width: none; justify-items: start; text-align: left; gap: 4px; }
+  .site3d .site3d-hud span:first-child { white-space: normal; }
+  .site3d:has(.site3d-panel[open]) .site3d-hud { display: none; }
+}
+@media (max-width: 767px) {
+  /* The landing page reserves the lower screen for its intro; the site view replaces it, so use the full height. */
+  body:has(.moon-workspace[data-site=open]) #moon { top: var(--top) !important; bottom: 48px !important; }
 }

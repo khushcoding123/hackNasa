@@ -82,6 +82,28 @@ export function requestSize(half: number, sourceM: number, maxSize: number, minS
  return Math.max(minSize, Math.min(maxSize, Math.ceil(2 * half / (sourceM / 2))));
 }
 
+/** NAC request sizes for a square of half-width `half`: a quick preview (if one beats WAC by 2×), then full size
+ * (likewise). Server render time grows with output size, so the preview keeps slow polar renders from leaving nothing. */
+export function nacSteps(half: number, maxSize: number, wacM: number): number[] {
+ const useful = (size: number) => 2 * half / size < wacM / 2;
+ const preview = [512, 1024].find(size => size < maxSize && useful(size));
+ return [preview, useful(maxSize) ? maxSize : undefined].filter((s): s is number => s !== undefined);
+}
+
+/** Split a `size` px image of the square [−half, half]² into n × n WMS requests of at most `maxTile` px each, so no
+ * single render runs into the server's (or a proxy's) response time limit. BBOX edges are pixel edges, so the tiles
+ * stitch exactly. Rows start at the north edge, like the image. */
+export function tileBoxes(half: number, size: number, maxTile: number): {x: number; y: number; px: number; bbox: [number, number, number, number]}[] {
+ const n = Math.max(1, Math.ceil(size / maxTile)), px = size / n;
+ if (!Number.isInteger(px)) throw new Error(`Image size ${size} does not split into ${n} whole tiles.`);
+ const step = 2 * half / n, out = [];
+ for (let row = 0; row < n; row++) for (let col = 0; col < n; col++) {
+  const west = -half + col * step, north = half - row * step;
+  out.push({x: col * px, y: row * px, px, bbox: [west, north - step, west + step, north] as [number, number, number, number]});
+ }
+ return out;
+}
+
 const metres = (m: number) => m >= 1000 ? `${(m / 1000).toFixed(1)} km` : m >= 10 ? `${Math.round(m)} m` : `${m.toFixed(1)} m`;
 /** What the eye actually gets: the coarser of the source product and the texture pixel. Never claims finer than the source. */
 export function imageryLabel(name: string, sourceM: number, texelM: number): string {

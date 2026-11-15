@@ -1,5 +1,5 @@
 import {MAP_LAYER, WAC_RESOLUTION_M, BUNDLED_RESOLUTION_M, WMS_URL} from "./imagery.js";
-import {orthoSrs, reprojectEquirect} from "./site-projection.js";
+import {orthoSrs, reprojectEquirect, tileBoxes} from "./site-projection.js";
 
 export {WAC_RESOLUTION_M, BUNDLED_RESOLUTION_M};
 /** LROC NAC polar mosaics (controlled south: 85°–90°S; uncontrolled north: 85.5°–90°N), both 1 m/px. */
@@ -13,21 +13,32 @@ const sleep = (ms: number, signal: AbortSignal) => new Promise<void>((resolve, r
  signal.addEventListener("abort", () => { clearTimeout(t); reject(new DOMException("Aborted", "AbortError")); }, {once: true});
 });
 
+/** Abort `signal`'s work after `ms` too. The timeout rejects with a TimeoutError so it can be told apart from a cancel. */
+function withTimeout(signal: AbortSignal, ms: number) {
+ const control = new AbortController();
+ const timer = setTimeout(() => control.abort(new DOMException(`LROC imagery request timed out after ${Math.round(ms / 1000)} s`, "TimeoutError")), ms);
+ const cancel = () => control.abort(signal.reason);
+ if (signal.aborted) cancel(); else signal.addEventListener("abort", cancel, {once: true});
+ return {signal: control.signal, done: () => { clearTimeout(timer); signal.removeEventListener("abort", cancel); }};
+}
+
 /** A local orthographic WMS image in east/north metres about the site, matching the terrain's texture space.
- * Transient failures (network, 429, 5xx) are retried with backoff; aborts and other HTTP errors are not. */
+ * Transient failures (network, 429, 5xx) are retried with backoff. Aborts, timeouts (the server's render time grows
+ * with image size, so asking again does not help) and other HTTP errors are not. */
 export async function loadWmsPatch(lat: number, lon: number, half: number, size: number, layer: string, signal: AbortSignal,
- options: {transparent?: boolean; attempts?: number} = {}): Promise<HTMLCanvasElement> {
+ options: {transparent?: boolean; attempts?: number; timeoutMs?: number; bbox?: [number, number, number, number]} = {}): Promise<HTMLCanvasElement> {
  const transparent = options.transparent ?? true;
  const params = new URLSearchParams({
   SERVICE: "WMS", VERSION: "1.1.1", REQUEST: "GetMap", LAYERS: layer, STYLES: "",
-  SRS: orthoSrs(lat, lon), BBOX: `${-half},${-half},${half},${half}`,
+  SRS: orthoSrs(lat, lon), BBOX: (options.bbox ?? [-half, -half, half, half]).join(","),
   WIDTH: String(size), HEIGHT: String(size), FORMAT: transparent ? "image/png" : "image/jpeg", TRANSPARENT: transparent ? "TRUE" : "FALSE",
  });
  const attempts = options.attempts ?? 3;
  for (let attempt = 1; ; attempt++) {
   let transient = true;
+  const current = withTimeout(signal, options.timeoutMs ?? 60_000);
   try {
-   const response = await fetch(`${WMS_URL}?${params}`, {signal});
+   const response = await fetch(`${WMS_URL}?${params}`, {signal: current.signal});
    transient = response.status === 429 || response.status >= 500;
    if (!response.ok || !response.headers.get("content-type")?.startsWith("image/")) throw new Error(`LROC imagery unavailable (${response.status}).`);
    const bitmap = await createImageBitmap(await response.blob());
@@ -35,10 +46,30 @@ export async function loadWmsPatch(lat: number, lon: number, half: number, size:
    canvas.getContext("2d")!.drawImage(bitmap, 0, 0, size, size); bitmap.close();
    return canvas;
   } catch (error) {
+   const timedOut = !signal.aborted && current.signal.aborted;
+   if (timedOut) throw current.signal.reason;
    if (signal.aborted || (error as Error).name === "AbortError" || !transient || attempt >= attempts) throw error;
    await sleep(700 * 2 ** (attempt - 1), signal);
-  }
+  } finally { current.done(); }
  }
+}
+
+/** A large orthographic image fetched as tiles of at most `maxTile` px and stitched. If any tile fails, the rest are
+ * cancelled and the whole image fails, so a partial mosaic is never shown. */
+export async function loadWmsMosaic(lat: number, lon: number, half: number, size: number, layer: string, signal: AbortSignal,
+ options: {transparent?: boolean; maxTile: number; attempts?: number; timeoutMs?: number}): Promise<HTMLCanvasElement> {
+ const boxes = tileBoxes(half, size, options.maxTile);
+ if (boxes.length === 1) return loadWmsPatch(lat, lon, half, size, layer, signal, options);
+ const control = new AbortController(), stop = () => control.abort(signal.reason);
+ if (signal.aborted) stop(); else signal.addEventListener("abort", stop, {once: true});
+ try {
+  const tiles = await Promise.all(boxes.map(box => loadWmsPatch(lat, lon, half, box.px, layer, control.signal, {...options, bbox: box.bbox})
+   .catch(error => { control.abort(error); throw error; })));
+  const canvas = document.createElement("canvas"); canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  tiles.forEach((tile, i) => ctx.drawImage(tile, boxes[i].x, boxes[i].y));
+  return canvas;
+ } finally { signal.removeEventListener("abort", stop); }
 }
 
 export const loadWacPatch = (lat: number, lon: number, half: number, size: number, signal: AbortSignal) =>

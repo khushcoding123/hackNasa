@@ -142,6 +142,30 @@ await test("resolution labels never claim more than the source resolves", async 
  assert.equal(proj.requestSize(2000, 100, 2048), 256);
 });
 
+await test("NAC requests: preview then full size, only where they beat WAC", async () => {
+ assert.deepEqual(proj.nacSteps(2000, 2048, 100), [512, 2048]);     // 20 m site centre: 7.8 m preview, 2 m full
+ assert.deepEqual(proj.nacSteps(7000, 2048, 100), [512, 2048]);
+ assert.deepEqual(proj.nacSteps(20_000, 2048, 100), [1024, 2048]);  // global centre: 512 px (78 m) would not beat WAC
+ assert.deepEqual(proj.nacSteps(45_000, 2048, 100), [2048]);        // 240 m patch: only the full size helps
+ assert.deepEqual(proj.nacSteps(175_000, 2048, 100), []);           // global patch: NAC would be coarser than WAC
+});
+
+await test("large images split into whole tiles that stitch exactly, north row first", async () => {
+ const one = proj.tileBoxes(7000, 280, 2048);
+ assert.deepEqual(one, [{x: 0, y: 0, px: 280, bbox: [-7000, -7000, 7000, 7000]}]);
+ const four = proj.tileBoxes(175_000, 4096, 2048);
+ assert.equal(four.length, 4);
+ assert.deepEqual(four[0], {x: 0, y: 0, px: 2048, bbox: [-175_000, 0, 0, 175_000]});        // north-west first
+ assert.deepEqual(four[3], {x: 2048, y: 2048, px: 2048, bbox: [0, -175_000, 175_000, 0]});  // south-east last
+ const sixteen = proj.tileBoxes(2000, 2048, 512);
+ assert.equal(sixteen.length, 16);
+ // Same metres per pixel in every tile as in the whole image, and tiles cover the square exactly once.
+ let area = 0;
+ for (const t of sixteen) { assert.equal((t.bbox[2] - t.bbox[0]) / t.px, 4000 / 2048); area += (t.bbox[2] - t.bbox[0]) * (t.bbox[3] - t.bbox[1]); }
+ assert.ok(Math.abs(area - 4000 ** 2) < 1e-6);
+ assert.throws(() => proj.tileBoxes(2000, 1000, 384), /whole tiles/);
+});
+
 // ---------------------------------------------------------------- Site view terrain surface
 function grid(half, size, fn) {
  const heights = new Float32Array(size * size), step = 2 * half / (size - 1);

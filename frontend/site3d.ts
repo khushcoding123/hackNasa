@@ -5,9 +5,10 @@ import {
 import {OrbitControls} from "three/examples/jsm/controls/OrbitControls.js";
 import {MOON_RADIUS_M} from "./terrain-mesh.js";
 import {
- BUNDLED_RESOLUTION_M, NAC_RESOLUTION_M, WAC_RESOLUTION_M, blendCentre, cropCentre, loadBundledPatch, loadWacPatch, loadWmsPatch, nacLayerAt, withNac,
+ BUNDLED_RESOLUTION_M, NAC_RESOLUTION_M, WAC_RESOLUTION_M, blendCentre, cropCentre, loadBundledPatch, loadWacPatch, loadWmsMosaic, nacLayerAt, withNac,
 } from "./site-imagery.js";
-import {imageryLabel, requestSize} from "./site-projection.js";
+import {imageryLabel, nacSteps, requestSize} from "./site-projection.js";
+import {MAP_LAYER} from "./imagery.js";
 import {buildSurface, surfaceHeight} from "./site-surface.js";
 import type {Result} from "./types.js";
 
@@ -191,7 +192,7 @@ export class SiteView {
   this.q("[data-camera='lander']").onclick = () => this.stand(this.lander);
   this.q<HTMLSelectElement>("[data-stand]").onchange = e => {
    const id = (e.target as HTMLSelectElement).value; const t = this.towers.get(id);
-   if (t) this.stand(t.top, this.lander);
+   if (t) this.stand(new Vector3(t.top.x, t.top.y - 30, t.top.z), this.lander, 30);
    (e.target as HTMLSelectElement).value = "";
   };
   this.q("canvas").addEventListener("keydown", e => { if (e.key === "Escape") this.options.onClose(); });
@@ -297,7 +298,9 @@ export class SiteView {
  }
 
  /** Bundled map first (always available), then LROC WAC over the whole patch, then NAC near the poles. Each step
-  * only ever upgrades what is shown, so a failed request leaves the previous imagery in place. Rerun to retry. */
+  * only ever upgrades what is shown, so a failed request leaves the previous imagery in place. The server's render
+  * time grows with output size (a single 2048 px north-pole NAC image can take minutes, and slow responses are cut
+  * off), so large images come as a quick preview, then full size, each fetched as tiles with a timeout. Rerun to retry. */
  private async loadImagery() {
   this.imageryAbort?.abort();
   const control = new AbortController(); this.imageryAbort = control;
@@ -306,10 +309,12 @@ export class SiteView {
   const retry = this.q<HTMLButtonElement>("[data-retry-imagery]"); retry.hidden = true;
   this.note(this.terrainNote);
   const {lat, lon, detail} = this.options, {half, inner} = PATCHES[detail];
-  const maxSize = Math.min(2048, this.renderer.capabilities.maxTextureSize);
-  const wacSize = requestSize(half, WAC_RESOLUTION_M, maxSize);
+  const maxTexture = this.renderer.capabilities.maxTextureSize;
+  const maxSize = Math.min(2048, maxTexture), wacFull = requestSize(half, WAC_RESOLUTION_M, Math.min(4096, maxTexture));
+  const wacSize = Math.min(wacFull, maxSize);
   const wac = loadWacPatch(lat, lon, half, wacSize, signal).then(canvas => ({canvas}), (error: Error) => ({error}));
   const failures: string[] = [];
+  const failed = (what: string, error: unknown) => { if (!signal.aborted) { failures.push(what); console.warn(`${what} imagery unavailable`, error); } };
   try {
    if (!this.outerImagery) this.offer("outer", {canvas: await loadBundledPatch(lat, lon, half, signal), kind: "bundled",
     name: "Bundled NASA color map (fallback)", sourceM: BUNDLED_RESOLUTION_M, texelM: 2 * half / 256});
@@ -317,29 +322,38 @@ export class SiteView {
   const response = await wac;
   if (signal.aborted) return;
   if ("canvas" in response) this.offer("outer", {canvas: response.canvas, kind: "wac", name: "LROC WAC", sourceM: WAC_RESOLUTION_M, texelM: 2 * half / wacSize});
-  else { failures.push("LROC WAC"); console.warn("LROC WAC imagery unavailable", response.error); }
+  else failed("LROC WAC", response.error);
+  const jobs: Promise<void>[] = [];
+  // Global patches: a 4096 px WAC image reaches the 100 m source; it takes ~15 s, so it follows the 2048 px one.
+  if ("canvas" in response && wacFull > wacSize) jobs.push(loadWmsMosaic(lat, lon, half, wacFull, MAP_LAYER, signal, {transparent: false, maxTile: 2048, attempts: 2, timeoutMs: 60_000})
+   .then(canvas => this.offer("outer", {canvas, kind: "wac", name: "LROC WAC", sourceM: WAC_RESOLUTION_M, texelM: 2 * half / wacFull}), error => failed("full-resolution LROC WAC", error)));
   const layer = nacLayerAt(lat);
   if (layer) {
    const name = `LROC NAC ${lat < 0 ? "south-pole" : "north-pole"} mosaic`;
-   const wide = this.outerImagery;
-   // NAC over the wide patch only where it would beat WAC by a clear margin at this texture size.
-   const outerTexel = 2 * half / maxSize, innerTexel = 2 * inner / maxSize;
-   const jobs: Promise<void>[] = [];
-   if (wide && outerTexel < WAC_RESOLUTION_M / 2) jobs.push(loadWmsPatch(lat, lon, half, maxSize, layer, signal).then(overlay => {
-    const result = withNac(wide.canvas, overlay);
-    if (result.coverage > 0.02) this.offer("outer", {canvas: result.canvas, kind: result.centerCovered ? "nac" : wide.kind, name: result.centerCovered ? name : wide.name,
-     sourceM: result.centerCovered ? NAC_RESOLUTION_M : wide.sourceM, texelM: result.centerCovered ? outerTexel : wide.texelM});
-   }));
-   jobs.push(loadWmsPatch(lat, lon, inner, maxSize, layer, signal).then(overlay => {
-    const base = this.outerImagery ? cropCentre(this.outerImagery.canvas, half, inner, maxSize) : overlay;
-    const result = withNac(base, overlay);
-    if (result.coverage > 0.02 && result.centerCovered) this.offer("inner", {canvas: result.canvas, kind: "nac", name, sourceM: NAC_RESOLUTION_M, texelM: innerTexel});
-   }));
-   for (const outcome of await Promise.allSettled(jobs)) if (outcome.status === "rejected") {
-    if (signal.aborted) return;
-    failures.push("LROC NAC"); console.warn("LROC NAC imagery unavailable", outcome.reason);
-   }
+   // NAC only where it beats WAC by a clear margin: a preview size if one qualifies, then the full size.
+   const nac = async (region: "outer" | "inner", h: number) => {
+    let got = false;
+    for (const size of nacSteps(h, maxSize, WAC_RESOLUTION_M)) {
+     const full = size === maxSize;
+     try {
+      // 512 px tiles: polar NAC renders slowly (a single 2048 px north-pole image can take minutes).
+      const overlay = await loadWmsMosaic(lat, lon, h, size, layer, signal, {maxTile: 512, attempts: 2, timeoutMs: 60_000});
+      const wide = this.outerImagery;
+      if (region === "outer") {
+       if (!wide) continue;
+       const result = withNac(wide.canvas, overlay);
+       if (result.coverage > 0.02 && result.centerCovered) this.offer("outer", {canvas: result.canvas, kind: "nac", name, sourceM: NAC_RESOLUTION_M, texelM: 2 * h / size});
+      } else {
+       const result = withNac(wide ? cropCentre(wide.canvas, half, inner, size) : overlay, overlay);
+       if (result.coverage > 0.02 && result.centerCovered) this.offer("inner", {canvas: result.canvas, kind: "nac", name, sourceM: NAC_RESOLUTION_M, texelM: 2 * h / size});
+      }
+      got = true;
+     } catch (error) { failed(got ? "full-resolution LROC NAC" : "LROC NAC", error); return; }
+    }
+   };
+   jobs.push(nac("outer", half), nac("inner", inner));
   }
+  await Promise.all(jobs);
   if (signal.aborted || !failures.length) return;
   retry.hidden = false;
   this.note(`${[...new Set(failures)].join(" and ")} imagery unavailable · showing ${this.outerImagery ? this.outerImagery.name : "untextured terrain"} with measured terrain.`);
@@ -394,7 +408,10 @@ export class SiteView {
   const antenna = new Mesh(new CylinderGeometry(0.04, 0.05, 2.6, 8), legMat); antenna.position.set(0, 2.8, 0); body.add(antenna);
   const dish = new Mesh(new ConeGeometry(1.05, 0.45, 24, 1, true), legMat); dish.rotation.z = Math.PI; dish.position.set(0, 4.15, 0); body.add(dish);
   this.markers.add(body);
-  label("LANDER", out => out.set(lander.x, lander.y * this.exaggeration + 8 * this.scale, lander.z), "lander");
+  // At the site itself the pin already marks the lander: one label instead of two overlapping ones.
+  const siteLabel = this.labels.find(l => l.el.classList.contains("site"));
+  if (siteLabel && Math.hypot(lander.x, lander.z) < 150) siteLabel.el.textContent = `${this.options.name.toUpperCase()} · LANDER`;
+  else label("LANDER", out => out.set(lander.x, this.surfaceY(lander) + 8 * this.scale, lander.z), "lander");
   for (const c of r.candidates.filter(c => r.recommended.includes(c.id))) {
    const base = toLocal(this.basis, c.lat, c.lon, c.elevation);
    const top = base.clone().add(new Vector3(0, 30, 0));
@@ -416,19 +433,18 @@ export class SiteView {
   this.applyScale(); this.paint();
  }
  private applyScale() {
-  const ex = this.exaggeration;
   // Scale about each object's own base so markers stay planted on the (possibly exaggerated) surface.
-  const grow = (mesh: Mesh, anchor: Vector3, lift: number) => { mesh.scale.setScalar(this.scale); mesh.position.set(anchor.x, anchor.y * ex + lift * this.scale, anchor.z); };
-  this.pin.position.set(0, this.groundAt(0, 0) * ex, 0);
+  const grow = (mesh: Mesh, anchor: Vector3, lift: number) => { mesh.scale.setScalar(this.scale); mesh.position.set(anchor.x, this.surfaceY(anchor) + lift * this.scale, anchor.z); };
+  this.pin.position.set(0, this.surfaceY(new Vector3()), 0);
   const l = this.lander; const lander = this.markers.getObjectByName("lander") as Mesh | undefined;
   if (l && lander) grow(lander, l, 1.25);
   for (const t of this.towers.values()) {
    const base = new Vector3(t.top.x, t.top.y - 30, t.top.z);
    grow(t.mast, base, 15);
    t.head.scale.setScalar(this.scale);
-   t.head.position.set(base.x, base.y * ex + 30 * this.scale, base.z);
+   t.head.position.set(base.x, this.surfaceY(base) + 30 * this.scale, base.z);
    if (t.link && l) {
-    const from = new Vector3(l.x, l.y * ex + 2.5 * this.scale, l.z);
+    const from = new Vector3(l.x, this.surfaceY(l) + 2.5 * this.scale, l.z);
     t.link.geometry.setFromPoints([from, t.head.position.clone()]);
     t.link.computeLineDistances?.();
    }
@@ -509,6 +525,13 @@ export class SiteView {
  }
 
  // ---------- camera ----------
+ /** Exaggerated height of the drawn surface under a marker. Mission objects come with their own DEM elevation; their
+  * feet go on the mesh actually shown (which interpolates a coarser grid away from the centre), so nothing floats.
+  * Outside the terrain patch, the object's own elevation is used. */
+ private surfaceY(p: Vector3) {
+  const g = this.grid, inside = g && Math.abs(p.x) <= g.half && Math.abs(p.z) <= g.half;
+  return (inside ? this.groundAt(p.x, p.z) : p.y) * this.exaggeration;
+ }
  /** Unexaggerated scene height of the terrain surface at (x, z): the same merged surface the mesh is built from. */
  private groundAt(x: number, z: number) {
   const g = this.grid; if (!g) return 0;
@@ -531,11 +554,10 @@ export class SiteView {
   this.controls.update();
  }
  /** Stand a person-height above a point and look toward another (or north-ish), to judge line of sight by eye. */
- private stand(at?: Vector3, toward?: Vector3) {
+ private stand(at?: Vector3, toward?: Vector3, height = 0) {
   if (!at) return;
-  const ex = this.exaggeration;
-  const eye = new Vector3(at.x, at.y * ex + 4, at.z);
-  const look = toward ? new Vector3(toward.x, toward.y * ex + 4, toward.z) : eye.clone().add(new Vector3(0, 0, -500));
+  const eye = new Vector3(at.x, this.surfaceY(at) + height + 4, at.z);
+  const look = toward ? new Vector3(toward.x, this.surfaceY(toward) + 4, toward.z) : eye.clone().add(new Vector3(0, 0, -500));
   const dir = look.clone().sub(eye).setY(0).normalize();
   this.camera.position.copy(eye);
   this.controls.target.copy(eye).addScaledVector(dir, 30);
