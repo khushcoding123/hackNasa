@@ -1,6 +1,6 @@
 import {MoonView} from "./moon.js";
 import {map, timeline, horizon, powerTimeline} from "./charts.js";
-import type {Result, Comparison, Candidate, Sensitivity, Metrics} from "./types.js";
+import type {Result, Comparison, Candidate, Sensitivity, Metrics, AreaResult} from "./types.js";
 
 const $=<T extends HTMLElement=HTMLElement>(q:string)=>document.querySelector<T>(q)!;
 const form=$<HTMLFormElement>("#mission"), outlet=$("#view");
@@ -10,14 +10,18 @@ let disabled=new Set<string>(), busy=false, version=0, lastBody="";
 let candidateSort="recovered", pending="";
 let moon:MoonView|undefined;
 let stale=false, configured=false, shownStale=false;
-const steps=["landing","configure","overview","communication","resilience"];
+let area:[number,number][]|undefined, areaKey="", areaDirty=false, layout:AreaResult|undefined, layoutKey="", layoutFormat="";
+const steps=["landing","configure","layout","overview","communication","resilience"];
+const MOON_R=1737400, DEG=Math.PI/180;
+const toXY=(lat:number,lon:number)=>{const rho=2*MOON_R*Math.tan((90+lat)*DEG/2);return [rho*Math.sin(lon*DEG),rho*Math.cos(lon*DEG)];};
+const toLatLon=(x:number,y:number):[number,number]=>[2*Math.atan(Math.hypot(x,y)/(2*MOON_R))/DEG-90,((Math.atan2(x,y)/DEG)%360+360)%360];
 let sites:Record<string,[string,number,number]>={};
-const views:Record<string,[string,string]>={landing:["Start with the Moon.","01 · Explore the surface. Your mission starts with a place, a time, and a goal."],configure:["Tell us about your mission.","02 · Choose a landing region, dates, and communication goals. Then calculate your network."],overview:["Your mission, in three dimensions.","03 · Inspect the lander and calculated relay network. Explore the local terrain, or switch to Whole Moon for context."],sites:["Choose your horizon.","Compare landing regions over the same mission period and assumptions."],communication:["Understand the silence.","Trace each communication blackout to terrain, geometry, and RF conditions."],relays:["Bridge the distance.","Explore the smallest screened relay configuration and its physical constraints."],resilience:["Plan for the unexpected.","Disable a relay and inspect how the remaining paths perform."],sensitivity:["Question the assumptions.","Change one assumption at a time and compare the modeled outcome."],data:["The science behind the signal.","Inspect sources, model assumptions, and the limits of these planning estimates."]};
+const views:Record<string,[string,string]>={landing:["Start with the Moon.","01 · Explore the surface. Then draw the area you want to analyse: a square or any shape."],configure:["Tell us about your mission.","02 · Draw an area, choose dates and communication goals, then calculate."],layout:["Plan the network.","03 · The best layout of towers and links inside the area you drew, compared with simpler formats."],overview:["Your mission, in three dimensions.","04 · Inspect the lander and calculated relay network. Explore the local terrain, or switch to Whole Moon for context."],sites:["Choose your horizon.","Compare landing regions over the same mission period and assumptions."],communication:["Understand the silence.","Trace each communication blackout to terrain, geometry, and RF conditions."],relays:["Bridge the distance.","Explore the smallest screened relay configuration and its physical constraints."],resilience:["Plan for the unexpected.","Disable a relay and inspect how the remaining paths perform."],sensitivity:["Question the assumptions.","Change one assumption at a time and compare the modeled outcome."],data:["The science behind the signal.","Inspect sources, model assumptions, and the limits of these planning estimates."]};
 function dirty(){
  // Compare only editable fields; API configuration may include additional model defaults.
  const same=(a:unknown,b:unknown):boolean=>a!==null&&typeof a==="object"?Object.entries(a).every(([k,v])=>same(v,(b as Record<string,unknown>)?.[k])):a===b;
- const edited=!!result&&!same(values(),result.config);stale=edited;
- $("#dirty").textContent=edited?"Changes not applied":result?"Scenario applied":configured?"Ready to calculate":"Preparing scenario";
+ const edited=(!!result&&!same(values(),result.config))||(!!result&&areaDirty);stale=edited;
+ $("#dirty").textContent=edited?"Changes not applied":result?"Scenario applied":!area?"Draw an area first":configured?"Ready to calculate":"Preparing scenario";
  $("#dirty").classList.toggle("stale",edited);updateNavigation();
 }
 form.addEventListener("input",dirty);
@@ -42,6 +46,7 @@ function updateNavigation(){
  $(".export-menu").hidden=!result||stale||active==="landing";
  if(moon&&shownStale!==stale){shownStale=stale;moon.setMission(stale?undefined:result);}
  $("#start-mission").hidden=active!=="landing";
+ $<HTMLButtonElement>('button[type="submit"]').disabled=busy||!configured||!area;
 }
 $("#start-mission").onclick=()=>navigate("configure");
 function navigate(view:string,focus=true){
@@ -51,7 +56,7 @@ function navigate(view:string,focus=true){
  document.querySelectorAll<HTMLButtonElement>(`[data-view="${view}"]`).forEach(b=>b.setAttribute("aria-current","step"));
 
  $("#title").innerHTML=views[view][0];$("#purpose").textContent=views[view][1];
- const index=steps.indexOf(view);$("#chapter").textContent=index<0?"OPTIONAL / DEEPER ANALYSIS":`STEP 0${index+1} OF 05`;
+ const index=steps.indexOf(view);$("#chapter").textContent=index<0?"OPTIONAL / DEEPER ANALYSIS":`STEP 0${index+1} OF 0${steps.length}`;
  form.hidden=view!=="configure";updateNavigation();
  $("#panel-tab-label").textContent=view==="landing"?"Guide":"Mission";
  setPanel(view!=="landing");
@@ -60,8 +65,8 @@ function navigate(view:string,focus=true){
 function flow(){
  const index=steps.indexOf(active);
  const previous=index>0?steps[index-1]:"overview";
- const next=index===0?"configure":index===2?"communication":index===3?"resilience":"";
- $("#flow-actions").innerHTML=`<div><span class="eyebrow">${index<0?"OPTIONAL ANALYSIS":`STEP ${index+1} / 5`}</span><p>${active==="landing"?"First, explore. Then set the mission parameters.":active==="configure"?"Your network is calculated only when you submit this form.":active==="resilience"?"Ready to share? Export your applied mission from the header.":"Your applied mission stays with you at every step."}</p></div><div class="flow-buttons">${index!==0?`<button data-go="${previous}">← ${index<0?"Back to network":"Back"}</button>`:""}${next?`<button class="primary" data-go="${next}">${next==="configure"?"Set up my mission":next==="communication"?"Next: understand blackouts":"Next: test resilience"} →</button>`:active==="resilience"?'<button data-go="configure">Revise mission parameters</button>':""}</div>`;
+ const next=({landing:"configure",layout:"overview",overview:"communication",communication:"resilience"} as Record<string,string>)[active]??"";
+ $("#flow-actions").innerHTML=`<div><span class="eyebrow">${index<0?"OPTIONAL ANALYSIS":`STEP ${index+1} / ${steps.length}`}</span><p>${active==="landing"?"First, explore. Then set the mission parameters.":active==="configure"?"Your network is calculated only when you submit this form.":active==="resilience"?"Ready to share? Export your applied mission from the header.":"Your applied mission stays with you at every step."}</p></div><div class="flow-buttons">${index!==0?`<button data-go="${previous}">← ${index<0?"Back to the Earth link":"Back"}</button>`:""}${next?`<button class="primary" data-go="${next}">${next==="configure"?"Set up my mission":next==="overview"?"Next: the Earth link":next==="communication"?"Next: understand blackouts":"Next: test resilience"} →</button>`:active==="resilience"?'<button data-go="configure">Revise mission parameters</button>':""}</div>`;
  $("#flow-actions").querySelectorAll<HTMLButtonElement>('[data-go]').forEach(b=>b.onclick=()=>navigate(b.dataset.go!));
 }
 
@@ -136,12 +141,21 @@ function values(){
 }
 
 async function run(){
- if(!configured||busy||!form.reportValidity())return;
+ if(!configured||busy||!area||!form.reportValidity())return;
  busy=true;
  document.body.classList.add("computing");$("#view").setAttribute("aria-busy","true");
  $<HTMLButtonElement>('button[type="submit"]').disabled=true;
  status("Computing terrain, ephemerides and candidate relay paths…");
  try{
+   const fresh=layoutKey!==JSON.stringify(area);
+   if(fresh){
+    status("Choosing relay sites and comparing layouts inside your area… this takes about 20 seconds.");
+    layout=await api<AreaResult>("ora/area",{polygon:area});layoutKey=JSON.stringify(area);layoutFormat=layout.recommended;
+    const region=$<HTMLSelectElement>('[name="site"]');if(!region.querySelector(`option[value="${layout.site.key}"]`))region.add(new Option(layout.site.name,layout.site.key));
+    region.value=layout.site.key;for(const name of ["latitude","longitude"])$<HTMLInputElement>(`[name="${name}"]`).value="";
+    sites[layout.site.key]=[layout.site.name,layout.site.lat,layout.site.lon];
+    status("Computing terrain, ephemerides and candidate relay paths…");
+   }
    const requested=values(), key=JSON.stringify(requested);
    const next=await api<Result>("mission",requested);
    result=next; version++;
@@ -151,8 +165,10 @@ async function run(){
    $(".export-options p").textContent="Exports use the applied scenario and current relay failure state.";
    $("#subtitle").textContent=`${result.site.name} · ${result.config.start} to ${result.config.end} UTC`;
    status(`${result.times.length.toLocaleString()} samples · ${result.config.minutes} min intervals · ${result.candidates.length} relay candidates evaluated`);
-   shownStale=false;dirty();moon?.setMission(result);navigate("overview");
-   moon?.flyToSite(result.site.lat,result.site.lon);
+   areaDirty=false;shownStale=false;dirty();moon?.setMission(result);
+   if(fresh&&layout){moon?.setLayout(layout,layoutFormat);moon?.flyToSite(layout.site.lat,layout.site.lon,Math.max(30000,layout.site.radius_m*5+16000));}
+   navigate(fresh?"layout":"overview");
+   if(!fresh)moon?.flyToSite(result.site.lat,result.site.lon);
  }catch(error){status((result?"Previous results shown. ":"")+(error as Error).message,true);if(!result)outlet.innerHTML=`<section class="panel initial-state"><h2>Mission could not be computed</h2><p class="muted">Review the settings and use Run mission to retry. The error is shown above.</p></section>`;}
  finally{busy=false;document.body.classList.remove("computing");$("#view").setAttribute("aria-busy","false");$<HTMLButtonElement>('button[type="submit"]').disabled=false;}
 }
@@ -239,11 +255,11 @@ function configuration(){
 function render(){
  document.body.dataset.step=active;flow();form.hidden=active!=="configure";
  if(active==="landing"){
-  outlet.innerHTML=`<section class="panel introduction"><p class="eyebrow">A CONNECTION STARTS HERE</p><h2>From the surface to a working plan.</h2><p>Search and zoom, then click anywhere on the Moon to drop a pin. Open its card to explore the terrain in 3D. Switch the globe to 3D and drag to sweep light across slopes.</p><p>Terrain can hide Earth from a lunar lander. Relay towers may help restore contact. MOONMESH shows when, where, and under which assumptions.</p><ol class="journey-list"><li><strong>Choose your mission</strong><span>A landing region, dates, and coverage goal.</span></li><li><strong>Calculate a network</strong><span>Inspect the recommended towers on the Moon.</span></li><li><strong>Understand and test it</strong><span>Explore blackouts and simulate relay failures.</span></li></ol><button class="primary" data-go="configure">Set up my mission →</button><p class="caption">${result&&!stale?"Your applied mission is ready in Step 3.":"No towers are placed before you calculate a mission."}</p></section>`;
+  outlet.innerHTML=`<section class="panel introduction"><p class="eyebrow">A CONNECTION STARTS HERE</p><h2>From the surface to a working plan.</h2><p>Search, zoom and click the Moon to read coordinates, elevation and nearby features. Then <strong>draw the area you care about</strong>, a square or any shape near the south pole, and MOONMESH plans the towers and links inside it.</p><div class="draw-actions"><button class="primary" data-draw-start="rect">▭ Draw a square</button><button data-draw-start="free">✎ Draw freeform</button><button data-pole-go>⌖ Go to the pole</button></div><p>Terrain can hide Earth from a lunar lander. Relay towers may help restore contact. MOONMESH shows when, where, and under which assumptions.</p><ol class="journey-list"><li><strong>Draw an area</strong><span>Anywhere between 85° S and the pole.</span></li><li><strong>Plan the layout</strong><span>Towers, gateways and links, with tree, loop and mesh compared.</span></li><li><strong>Understand and test it</strong><span>The Earth link, blackouts and relay failures.</span></li></ol><button class="primary" data-go="configure">Set up my mission →</button><p class="caption">${result&&!stale?"Your applied mission is ready in Step 3.":"No towers are placed before you calculate a mission."}</p></section>`;
   connect();return;
  }
  if(active==="configure"){
-  outlet.innerHTML=panel("What happens next?",`<p>Choose <strong>Calculate network</strong> above. We evaluate terrain, sunlight, direct communication, and a screened set of relay candidates for your mission period. Step 03 opens with the result.</p><p class="muted">${stale?"You changed the mission parameters. Calculate again to update the network; analysis steps are locked until then.":"Start with the provided research scenario, or change the parameters. No mission runs automatically."}</p>`);connect();return;
+  outlet.innerHTML=panel("Your area",area?`<p class="callout">${area.length} corner${area.length===1?"":"s"} drawn. Calculate to plan the network inside it.</p><div class="draw-actions"><button data-draw-start="rect">Redraw as a square</button><button data-draw-start="free">Redraw freeform</button></div>`:`<p class="callout amber">Draw the area to analyse first. Click a button below, then drag on the Moon near the south pole.</p><div class="draw-actions"><button class="primary" data-draw-start="rect">▭ Draw a square</button><button data-draw-start="free">✎ Draw freeform</button><button data-pole-go>⌖ Go to the pole</button></div>`)+panel("What happens next?",`<p>Choose <strong>Calculate network</strong> above. We plan towers and links inside your area, then evaluate terrain, sunlight and direct communication for your mission period. Step 03 opens with the layout.</p><p class="muted">${stale?"You changed the mission parameters. Calculate again to update the network; analysis steps are locked until then.":"Start with the provided research scenario, or change the parameters. No mission runs automatically."}</p>`);connect();return;
  }
  if(!result)return;
  const net=live(), r=result;
@@ -260,6 +276,7 @@ function render(){
  const failures=table(["Disabled relay","Availability","Longest blackout","Coverage lost","Blackout increase","Windows lost","Meets limits"],
  r.failures.map(f=>row([f.id,pct(f.metrics.availability),hours(f.metrics.longest),n(f.availability_lost)+" pp",hours(f.blackout_increase),String(f.windows_lost),f.meets?"Yes":"No"])));
  switch(active){
+ case "layout":outlet.innerHTML=layoutView();break;
  case "overview":outlet.innerHTML=`<div class="network-hero"><section class="panel mission-summary"><p class="eyebrow">MISSION / ${escape(r.site.name.toUpperCase())}</p><h2>${net.meets?"A path to connection.":"Every connection counts."}</h2><span class="verdict ${net.meets?"green":"amber"}">${net.meets?"✓ Active network meets communication limits":"△ Active network falls short of communication limits"}</span><div class="hero-value">${pct(net.metrics.availability)} <small>active coverage</small></div><p class="muted">${n(net.metrics.availability-r.direct.availability)} percentage points more of the mission covered than direct contact alone. ${escape(planState())}.</p><div class="hero-stats"><div><span class="muted">Longest active blackout</span><strong>${hours(net.metrics.longest)}</strong></div><div><span class="muted">Screened recommendation</span><strong>${r.recommended.length} relays</strong></div></div><button class="primary" data-go="communication">Next: understand blackouts →</button><button class="quiet" data-go="relays">Inspect individual tower details</button></section><section class="panel"><h2>Towers on the Moon</h2><div id="scene-selection" aria-live="polite"><p class="caption">Select a tower in the Moon view to inspect it. Green = available path, amber = unavailable, red = disabled. Dashed links are unavailable at the selected time.</p></div></section></div>`+kpis+timelinePanel()+`<details id="map-details" class="panel"><summary>See the 2D terrain map</summary>${mapPanel()}</details><div class="split">${panel("From direct to connected",comparison)}${panel("Independent surface paths",nodes+`<p class="caption">Each powered relay supplies a separate two-hop path. No relay-to-relay chain is modeled.</p>`+readout([["Mission length",hours(r.times.length*Number(r.config.minutes)/60)],["Darkness limit",r.darkness_meets?"Met":"Exceeded"]]))}</div>`;break;
  case "sites":outlet.innerHTML=panel("Find the right horizon",`<p class="muted table-note">Approximate research points, evaluated over the applied mission period. Select a region, then Run mission to apply it.</p><button id="compare" class="primary" ${pending==="compare"?"disabled":""}>${pending==="compare"?"Comparing regions…":"Compare all regions"}</button><div id="comparison">${siteRows()}</div>`)+`<div class="split">${mapPanel()}${panel("Applied landing point",context)}</div>`;break;
  case "communication":outlet.innerHTML=timelinePanel()+outageTable()+`<p class="callout">${r.outages.length?"Select a blackout above to see its cause in the charts below.":"No direct blackouts were found in this sampled period."} Continue to Step 05 to test the network.</p>`+charts+panel("Applied landing terrain",context)+panel("Darkness intervals",r.darkness.length?table(["Start","End","Duration"],r.darkness.map(d=>row([utc(d.start),utc(d.end),hours(d.hours)]))):'<p class="muted">No darkness intervals in this sampled period.</p>');break;
@@ -269,6 +286,18 @@ function render(){
  case "data":outlet.innerHTML=panel("Scenario configuration",configuration())+panel("Planning model, with limits",`<p>MOONMESH estimates communication for approximate lunar research points. It is a planning prototype; terrain sampling, RF assumptions, and a restricted relay catalog limit its results.</p><p class="muted">Flat-horizon visibility excludes local terrain. Terrain visibility adds the sampled horizon. Direct RF also requires adequate link margin. A relay path requires surface line of sight, both radio links, and usable power. Missing terrain is uncertain and excluded from credited availability. N−1 tests individual relay failures while retaining shared Earth receiver assumptions.</p>`)+panel("Data provenance",provenance())+panel("Power assumptions",readout([["Battery endurance",hours(Number(r.config.battery_hours))],["Initial charge",pct(Number(r.config.initial_charge_pct))],["Net charging rate",n(Number(r.config.charge_ratio))+" reserve hours / sunlight hour"]]))+[["earth_radio","Earth radio profile"],["surface_radio","Surface radio profile"]].map(([key,title])=>panel(title,readout(rf.map(([name,label])=>[label,n(Number((r.config[key] as Record<string,number>)[name]),3)])))).join("");break;
  }
  connect();paint();
+}
+
+function layoutView(){
+ const L=layout;if(!L)return panel("Layout","<p class='muted'>Draw an area and calculate to see its layout.</p>");
+ const best=L.layouts[L.recommended], nodes=L.nodes, outside=nodes.filter(v=>v.outside).length, worst=Math.min(best.worst_after_node_loss,best.worst_after_link_loss);
+ const kpis=`<div class="metrics">${metric("MINES LINKED",pct(100*L.plan.served),`${L.plan.mines.length} mining sites to ${L.plan.gateways.length} gateways`,L.plan.feasible?"green":"amber")}${metric("WORST SINGLE FAILURE",pct(100*worst),"mines still linked after losing any relay or link in the best layout",worst>=1?"green":"amber")}${metric("RELAYS CHOSEN",String(L.plan.chosen.length),`${L.candidates} candidate sites screened`)}${metric("AREA",n(L.site.area_km2,1)+" km²",escape(L.site.name))}${metric("OUTSIDE YOUR SHAPE",String(outside),outside?"sites just beyond the edge, used because nothing inside links up":"all sites are inside",outside?"amber":"green")}</div>`;
+ const rows=Object.entries(L.layouts).map(([key,m])=>row([`<button data-format="${key}" aria-pressed="${key===layoutFormat}">${escape(m.name)}</button>${key===L.recommended?' <span class="pill ok">best</span>':""}<small class="coords">${escape(m.blurb)}</small>`,String(m.links),n(m.link_km,0)+" km",String(m.single_points_of_failure),String(m.single_path_links),pct(100*m.worst_after_node_loss),pct(100*m.worst_after_link_loss),n(m.schneider_r_random,2)]));
+ const role:Record<string,string>={gateway:"Gateway",relay:"Relay",mine:"Mining site"};
+ const sitesTable=table(["Node","Role","Position","Elevation","Sunlight","Earth view",""],nodes.map(v=>row([`${v.role==="gateway"?"G":v.role==="mine"?"M":"R"}${v.id}`,role[v.role],`${n(v.lat,4)}°, ${n(v.lon,3)}° E`,n(v.elevation,0)+" m",pct(100*v.sun),pct(100*v.earth),v.outside?"outside the area":""])));
+ return kpis+panel("Best format for this area",`<p class="callout ${worst>=1?"":"amber"}">${escape(L.reason)}</p><p class="muted">Green links on the Moon show the layout selected below. Violet rings mark sites just outside your shape.</p>`)+
+  panel("Compare layouts",table(["Layout","Links","Cable","Single points of failure","Single-path links","Mines linked after worst relay loss","after worst link loss","Robustness to random failure"],rows)+`<p class="caption">Select a layout to draw it on the Moon. Every format uses the same relay sites; they differ in which line-of-sight links are built. Robustness is the Schneider R score (0 to 1, higher is better).</p>`)+
+  panel("Sites",sitesTable+`<p class="caption">${escape(L.score_method)}. Mining sites sit on the lowest gentle ground inside the shape; gateways are the sites with the longest view of Earth. Sunlight and Earth view are shares of a 30 day period from the scenario start.</p>`);
 }
 
 function provenance(){
@@ -330,6 +359,9 @@ function connect(){
   $("#optimize-note").textContent="";dirty();
  });
  outlet.querySelectorAll<HTMLButtonElement>("[data-go]").forEach(b=>b.onclick=()=>navigate(b.dataset.go!));
+ outlet.querySelectorAll<HTMLButtonElement>("[data-format]").forEach(b=>b.onclick=()=>{layoutFormat=b.dataset.format!;moon?.setLayout(layout,layoutFormat);render();outlet.querySelector<HTMLButtonElement>(`[data-format="${layoutFormat}"]`)?.focus();});
+ outlet.querySelectorAll<HTMLButtonElement>("[data-draw-start]").forEach(b=>b.onclick=()=>startDrawing(b.dataset.drawStart as "rect"|"free"));
+ outlet.querySelectorAll<HTMLButtonElement>("[data-pole-go]").forEach(b=>b.onclick=()=>moon?.flyToPlace(-89.6,0,160000));
  outlet.querySelectorAll<HTMLButtonElement>("[data-site]").forEach(b=>b.onclick=()=>{if(!b.dataset.site)return;$<HTMLSelectElement>('[name="site"]').value=b.dataset.site;for(const name of ["latitude","longitude"])$<HTMLInputElement>(`[name="${name}"]`).value="";dirty();navigate("configure");$<HTMLSelectElement>('[name="site"]').focus();});
  const sorter=document.querySelector<HTMLSelectElement>("#candidate-sort");if(sorter)sorter.onchange=()=>{candidateSort=sorter.value;render();$("#candidate-sort").focus();};
  const picker=document.querySelector<HTMLSelectElement>("#map-candidate");if(picker){picker.value=selected;picker.onchange=()=>{selected=picker.value;navigate("relays");};}
@@ -391,21 +423,25 @@ $("#report").onclick=async()=>{
 };
 
 window.addEventListener("resize",paint);
-function chooseRegion(site:string){
- const select=$<HTMLSelectElement>('[name="site"]');if(!select.querySelector(`option[value="${site}"]`))return;
- select.value=site;for(const name of ["latitude","longitude"])$<HTMLInputElement>(`[name="${name}"]`).value="";dirty();navigate("configure");select.focus();
+function startDrawing(kind:"rect"|"free"){setPanel(false);moon?.setDrawMode(kind);status("Drawing: drag on the Moon. Use Go to the pole first if the south pole is not in view.");}
+function chooseRegion(_site:string){startDrawing("rect");}
+function onArea(polygon:[number,number][]){
+ area=polygon.length>=3?polygon:undefined;areaKey=JSON.stringify(area??[]);areaDirty=true;layout=undefined;layoutKey="";moon?.setLayout(undefined,"");
+ if(!area)moon?.showArea(undefined);
+ dirty();navigate(area?"configure":"landing",false);
+ status(area?"Area drawn. Choose dates and goals, then Calculate network.":"Area cleared.");
 }
 function selectTower(c:Candidate){
  selected=c.id;moon?.update(cursor,disabled,selected);
  if(active==="overview")paint();else if(active!=="landing"&&active!=="configure")render();
  else{status(`Tower ${c.id} · ${pct(c.coverage.availability)} full-path availability · ${n(c.distance,2)} km from the lander`);}
 }
-function usePin(lat:number,lon:number,site:string){
- const select=$<HTMLSelectElement>('[name="site"]');if(!select.querySelector(`option[value="${site}"]`))return;
- select.value=site;$<HTMLInputElement>('[name="latitude"]').value=lat.toFixed(6);$<HTMLInputElement>('[name="longitude"]').value=(((lon%360)+360)%360).toFixed(6);
- dirty();navigate("configure");status(`Pin set as the mission location (${lat.toFixed(4)}°, ${lon.toFixed(4)}°). Calculate to test it.`);
+function usePin(lat:number,lon:number,_site:string){
+ const [x,y]=toXY(lat,lon), half=3000;
+ const polygon=[[-half,-half],[half,-half],[half,half],[-half,half]].map(([dx,dy])=>toLatLon(x+dx,y+dy));
+ moon?.showArea(polygon);onArea(polygon);
 }
-moon=new MoonView($("#moon"),{onUsePin:usePin,onChooseRegion:chooseRegion,onSelectCandidate:selectTower});
+moon=new MoonView($("#moon"),{onUsePin:usePin,onChooseRegion:chooseRegion,onSelectCandidate:selectTower,onArea});
 (window as unknown as {__moonview?:MoonView}).__moonview=moon;   // diagnostics hook for browser tests
 async function initialize(){
  try{

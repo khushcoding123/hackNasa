@@ -1,0 +1,26 @@
+{
+ "site": "connecting-ridge",
+ "pixel_m": 240.0,
+ "scanned_cells": 872,
+ "paper": {
+  "radius_km": 20.0,
+  "user_height_m": 2.0,
+  "tower_10m_share": 0.147,
+  "tower_50m_share": 0.259,
+  "tower_10m_km2": 185.0,
+  "tower_50m_km2": 325.0,
+  "optimal_share_approx": 0.4
+ },
+ "ours": {
+  "window_centre_10m": 0.029042359915853893,
+  "window_centre_50m": 0.10435073627844713,
+  "best_10m": 0.2855828074201568,
+  "best_50m": 0.34795611015490535,
+  "median_10m": 0.04764773379231211,
+  "median_50m": 0.07259753298909927,
+  "cell_matching_paper_10m": {
+   "share_10m": 0.14729871868426087,
+   "share_50m": 0.22468206157965193
+  }
+ }
+}

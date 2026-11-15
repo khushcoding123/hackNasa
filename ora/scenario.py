@@ -20,7 +20,7 @@ from moonmesh.data import DATA
 from moonmesh.science import Observer, mask_for
 
 from .data import ALL_SITES, terrain
-from .features import CHEAP, cell_features, rasters
+from .features import CHEAP, FEATURES, prior_features, rasters, surrogate_features
 from .graph import build_los_graph, candidate_sites, to_latlon
 from .links import SURFACE_RADIO
 from .optimize import place
@@ -41,6 +41,7 @@ class Scenario:
     demand_mast_m: float = 2.0
     mining_sites: int = 3  # picked on the lowest gentle ground near the centre, unless ``demand`` is given
     demand: tuple = ()  # optional explicit (lat, lon east) pairs
+    polygon: tuple = ()  # optional drawn area as (lat, lon east) vertices; relays and mines stay inside it
     gateways: int = 2
     extra_relays: int = 3
     slope_limit: float = 20.0
@@ -63,6 +64,8 @@ def load(name_or_path):
     raw.setdefault("name", path.stem)
     if "demand" in raw:
         raw["demand"] = tuple(tuple(float(v) for v in pair) for pair in raw["demand"])
+    if "polygon" in raw:
+        raw["polygon"] = tuple(tuple(float(v) for v in pair) for pair in raw["polygon"])
     if isinstance(raw.get("start"), str):
         raw["start"] = date.fromisoformat(raw["start"])
     return Scenario(**{k: v for k, v in raw.items() if k in Scenario.__dataclass_fields__})
@@ -111,21 +114,33 @@ def siting_scores(dem, px_m, cells, layers=None):
     Uses the trained Earth-tower prior when it is available. Otherwise falls back to a
     transparent terrain heuristic (prominence plus view), so the app still runs untrained.
     """
-    features = cell_features(dem, px_m, cells, layers)
-    model = _models().get("ora_siting_prior")
+    full = prior_features(dem, px_m, cells, layers)
+    features = full[:, :len(FEATURES)]
+    models = _models()
+    model, surrogate = models.get("ora_siting_prior"), models.get("ora_coverage_surrogate")
+    rank = lambda v: np.argsort(np.argsort(v)) / max(len(v) - 1, 1)
+    if surrogate is not None and model is not None:
+        # The Earth prior ranks lunar cells poorly (Spearman 0.18 with true visibility), so the lunar coverage
+        # surrogate leads and the prior only breaks ties.
+        wide, _ = surrogate_features(dem, px_m, cells, layers)
+        seen = surrogate.predict(wide[:, :surrogate.n_features_in_])
+        tower = model.predict_proba(full[:, :model.n_features_in_])[:, 1]
+        return 0.8 * rank(seen) + 0.2 * rank(tower), features, "lunar coverage surrogate (80%) with Earth-tower prior (20%)"
     if model is not None:
-        return model.predict_proba(features)[:, 1], features, "trained Earth-tower prior"
+        return model.predict_proba(full[:, :model.n_features_in_])[:, 1], features, "trained Earth-tower prior"
     rank = lambda v: np.argsort(np.argsort(v)) / max(len(v) - 1, 1)
     return 0.5 * rank(features[:, CHEAP.index("tpi_1000")]) + 0.5 * rank(features[:, -1]), features, "terrain heuristic (untrained)"
 
 
-def floor_sites(dem, px_m, center, count, search_m=3_500, spacing_m=1_500, slope_limit=10.0):
+def floor_sites(dem, px_m, center, count, search_m=3_500, spacing_m=1_500, slope_limit=10.0, mask=None):
     """Mining sites: the lowest gentle cells near the centre, spaced apart (the permanently shadowed floor)."""
     rows, cols = dem.shape
     yy, xx = np.ogrid[:rows, :cols]
     dy, dx = np.gradient(np.nan_to_num(dem, nan=np.nanmean(dem)), px_m, px_m)
     ok = (np.hypot(xx - center[0], yy - center[1]) * px_m <= search_m) & np.isfinite(dem) \
         & (np.degrees(np.arctan(np.hypot(dx, dy))) <= slope_limit)
+    if mask is not None:
+        ok &= mask
     r, c = np.nonzero(ok)
     chosen = []
     for i in np.argsort(dem[r, c]):
@@ -146,13 +161,27 @@ def _build(scenario):
     name, lat0, lon0 = ALL_SITES[scenario.site]
     x0, y0 = polar_stereographic_south(lat0, lon0)
     center = (float((x0 - grid.x_left) / px - 0.5), float((grid.y_top - y0) / px - 0.5))
+    mask = None
+    if scenario.polygon:
+        from .area import polygon_mask
+        mask = polygon_mask(grid, scenario.polygon)
     relays = candidate_sites(dem, px, scenario.candidates, center, scenario.radius_km * 1000, scenario.slope_limit,
-                             seed=scenario.seed)
+                             seed=scenario.seed, mask=mask)
+    inside = len(relays)
+    if mask is not None:
+        # A drawn area may have no ground that sees Earth. Allow gateway-only sites in a ring just outside it.
+        yy, xx = np.ogrid[:dem.shape[0], :dem.shape[1]]
+        ring = (np.hypot(xx - center[0], yy - center[1]) * px <= scenario.radius_km * 1000 + 6_000) & ~mask
+        outside = candidate_sites(dem, px, max(30, scenario.candidates // 3), center, scenario.radius_km * 1000 + 6_000,
+                                  scenario.slope_limit, seed=scenario.seed + 1, mask=ring)
+        if len(outside):
+            relays = np.vstack([relays, outside])
     if scenario.demand:
         dx, dy = polar_stereographic_south(*np.array(scenario.demand).T)
         demand_xy = np.column_stack([(dx - grid.x_left) / px - 0.5, (grid.y_top - dy) / px - 0.5])
     else:
-        demand_xy = floor_sites(dem, px, center, scenario.mining_sites)
+        demand_xy = floor_sites(dem, px, center, scenario.mining_sites, search_m=scenario.radius_km * 1000 if mask is not None else 3_500,
+                                spacing_m=min(1_500, scenario.radius_km * 400) if mask is not None else 1_500, mask=mask)
     sites = np.vstack([relays, demand_xy])
     n_relays = len(relays)
     demand = list(range(n_relays, len(sites)))
@@ -176,14 +205,15 @@ def _build(scenario):
         if all(np.hypot(*(sites[i] - sites[g])) * px >= 1500 for g in gateways):
             gateways.append(int(i))
     candidates = [i for i in range(n_relays) if i not in gateways]
-    prior = {i: float(score[i]) for i in range(n_relays)}
+    # Ground just outside a drawn area may be used when nothing inside links up, but is deliberately less attractive.
+    prior = {i: float(score[i]) * (1.0 if i < inside else 0.5) for i in range(n_relays)}
     # A relay that sits in shadow has to be kept alive through it, so chains pay heavily for shade.
     shade = {i: 4.0 * (1.0 - float(sun_frac[i])) for i in range(n_relays)}
     plan = place(G, demand, gateways, candidates, prior, scenario.extra_relays, shade_penalty=shade)
     return dict(scenario=scenario, grid=grid, center=center, sites=sites, heights=heights, lat=lat, lon=lon, ground=ground,
                 n_relays=n_relays, demand=demand, gateways=gateways, candidates=candidates, G=G, times=times, lit=lit,
                 earth=earth, sun_frac=sun_frac, earth_frac=earth_frac, score=score, features=features,
-                score_method=method, plan=plan, site_name=name)
+                score_method=method, plan=plan, site_name=name, inside=inside)
 
 
 def build(scenario):

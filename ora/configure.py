@@ -66,8 +66,9 @@ def parts_list(config):
     """Modules with their catalogue role, and total mass and power (placeholder catalogue values)."""
     entries = catalog()
     parts = [dict(module=m, **entries.get(m, {"mass_kg": 0.0, "power_w": 0.0, "role": "not in catalogue"})) for m in config.modules]
+    assumed = [p["module"] for p in parts if p.get("assumed", True)]
     return dict(parts=parts, notes=list(config.notes), mass_kg=sum(p["mass_kg"] for p in parts),
-                power_w=sum(p["power_w"] for p in parts))
+                power_w=sum(p["power_w"] for p in parts), assumed_modules=assumed)
 
 
 def swaps(before, after):

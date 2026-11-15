@@ -7,7 +7,7 @@ import {LANDMARKS, coordinate, type Landmark} from "./landmarks.js";
 import {addImagery, type ImageryHandle, type ImageryState} from "./imagery.js";
 import {MoonTerrainProvider, loadTerrainInfo} from "./terrain.js";
 import {SiteView} from "./site3d.js";
-import type {Candidate, Result} from "./types.js";
+import type {AreaResult, Candidate, Result} from "./types.js";
 
 const MOON = Ellipsoid.MOON, R = MOON.maximumRadius;
 Ion.defaultAccessToken = "";               // no Cesium ion: all data comes from this app or the public WMS
@@ -60,6 +60,8 @@ export interface MoonHooks {
  onUsePin?: (lat: number, lon: number, site: string) => void;
  onChooseRegion?: (siteId: string) => void;
  onSelectCandidate?: (candidate: Candidate) => void;
+ /** A square or free-form area was drawn: vertices as [latitude, east longitude]. */
+ onArea?: (polygon: [number, number][]) => void;
 }
 
 /** CesiumJS Moon workspace. Visual and geographic only: all mission values come from the mission API. */
@@ -96,6 +98,9 @@ export class MoonView {
  private lightYaw = 40;
  private lightElevation = 30;
  private site: SiteView | undefined;
+ private drawKind: "rect" | "free" | undefined;
+ private drawing: {start: Cartesian2; screen: Cartesian2[]; points: Cartesian3[]} | undefined;
+ private draft: Cartesian3[] = [];
 
  constructor(private root: HTMLElement, private hooks: MoonHooks = {}) {
   root.classList.add("moon-workspace");
@@ -115,6 +120,7 @@ export class MoonView {
      <label>Imagery <select data-imagery><option value="auto">LROC WAC (live)</option><option value="bundled">Bundled (lower detail)</option></select></label>
      <p class="vw-note">Terrain is shown at true 1× scale.</p><p class="vw-note">Click the Moon to drop a pin, then open its 3D site view.</p>
     </div></div>
+   <div class="vw-draw" role="group" aria-label="Draw an area to analyse"><button class="vw-chip" data-draw="rect" aria-pressed="false" title="Drag across the Moon to draw a square or rectangle">▭ Draw square</button><button class="vw-chip" data-draw="free" aria-pressed="false" title="Press and drag to draw any shape">✎ Draw freeform</button><button class="vw-chip" data-draw="clear" hidden>Clear area</button><button class="vw-chip" data-pole title="Zoom to the 85–90° S cap, where 20 m terrain exists">⌖ Go to the pole</button></div>
   </div>
   <div class="vw-right" role="group" aria-label="Map controls">
    <div class="vw-modes" role="group" aria-label="View mode"><button data-mode="map" aria-pressed="true">Map</button><button data-mode="3d" aria-pressed="false">3D</button></div>
@@ -328,6 +334,12 @@ export class MoonView {
   q<HTMLButtonElement>("[data-site3d]").onclick = () => this.openSite();
   const layers = q<HTMLButtonElement>("[data-layers]"), menu = q("#vw-layer-menu");
   layers.onclick = () => { menu.hidden = !menu.hidden; layers.setAttribute("aria-expanded", String(!menu.hidden)); };
+  this.root.querySelectorAll<HTMLButtonElement>("[data-draw]").forEach(b => b.onclick = () => {
+   const kind = b.dataset.draw as "rect" | "free" | "clear";
+   if (kind === "clear") { this.showArea(undefined); this.setLayout(undefined, ""); this.hooks.onArea?.([]); return; }
+   this.setDrawMode(this.drawKind === kind ? undefined : kind);
+  });
+  q<HTMLButtonElement>("[data-pole]").onclick = () => this.flyToPlace(-89.6, 0, 160_000);
   q<HTMLInputElement>("[data-labels]").onchange = e => { this.labelsOn = (e.target as HTMLInputElement).checked; this.positionLabels(); };
   q<HTMLInputElement>("[data-mission]").onchange = e => this.setMissionVisible((e.target as HTMLInputElement).checked);
   q<HTMLInputElement>("[data-plan]").onchange = e => this.setPlanHighlight((e.target as HTMLInputElement).checked);
@@ -406,7 +418,10 @@ export class MoonView {
  private setupPicking() {
   const viewer = this.viewer!, scene = viewer.scene;
   this.handler = new ScreenSpaceEventHandler(scene.canvas);
+  this.handler.setInputAction((event: {position: Cartesian2}) => this.drawDown(event.position), ScreenSpaceEventType.LEFT_DOWN);
+  this.handler.setInputAction((event: {position: Cartesian2}) => this.drawUp(event.position), ScreenSpaceEventType.LEFT_UP);
   this.handler.setInputAction((event: {position: Cartesian2}) => {
+   if (this.drawKind) return;
    const picked = scene.pick(event.position);
    const id = picked?.id && typeof picked.id === "object" && "id" in picked.id ? String((picked.id as Entity).id) : "";
    if (id.startsWith("pin:")) { this.selectPin(Number(id.slice(4))); return; }
@@ -422,6 +437,7 @@ export class MoonView {
   for (const type of ["pointerup", "pointercancel"]) scene.canvas.addEventListener(type, () => clearTimeout(press));
   scene.canvas.addEventListener("pointermove", e => { if (e.pointerType === "touch" && Math.hypot(e.clientX - start[0], e.clientY - start[1]) > 8) clearTimeout(press); });
   this.handler.setInputAction((event: {endPosition: Cartesian2}) => {
+   if (this.drawing) this.drawMove(event.endPosition);
    this.hover.x = event.endPosition.x; this.hover.y = event.endPosition.y;
    if (this.hover.frame) return;
    this.hover.frame = requestAnimationFrame(() => {
@@ -445,7 +461,7 @@ export class MoonView {
    <dl><dt>Terrain elevation</dt><dd>${Math.round(c.height).toLocaleString()} m <small>above the 1,737.4 km reference sphere</small></dd>
    <dt>Elevation source</dt><dd>${terrain ? `LOLA · about ${Math.round(terrain.resolutionM).toLocaleString()} m/px` : "Loading terrain tiles…"}</dd>
    <dt>Nearby features</dt><dd><ul>${near.map(n => `<li><button data-place="${n.f.id}">${escapeHtml(n.f.name)}</button> <small>${n.d < 1000 ? "<1" : Math.round(n.d / 1000).toLocaleString()} km</small></li>`).join("")}</ul></dd></dl>
-   ${region ? `<button class="primary" data-choose="${MISSION_REGIONS[region.id]}">Use ${escapeHtml(region.name)} for a mission →</button>` : ""}`;
+   ${region ? `<button class="primary" data-choose="${MISSION_REGIONS[region.id]}">Draw an area near ${escapeHtml(region.name)} →</button>` : ""}`;
   node.hidden = false;
   node.querySelector<HTMLButtonElement>(".vw-close")!.onclick = () => { node.hidden = true; };
   node.querySelectorAll<HTMLButtonElement>("[data-place]").forEach(b => b.onclick = () => { const f = LANDMARKS.find(f => f.id === b.dataset.place); if (f) this.focusLandmark(f); });
@@ -613,7 +629,7 @@ export class MoonView {
  private refreshMission() {
   const viewer = this.viewer; if (!viewer) return;
   const r = this.result;
-  if (!r || !this.missionVisible) { for (const e of [...viewer.entities.values]) if (!String(e.id).startsWith("pin")) viewer.entities.remove(e); this.towers.clear(); this.lander = undefined; this.planRing = undefined; viewer.scene.requestRender(); return; }
+   if (!r || !this.missionVisible) { for (const e of [...viewer.entities.values]) if (!/^(pin|area|layout)/.test(String(e.id))) viewer.entities.remove(e); this.towers.clear(); this.lander = undefined; this.planRing = undefined; viewer.scene.requestRender(); return; }
   if (!this.lander) {
    this.lander = viewer.entities.add({id: "lander", position: Cartesian3.fromDegrees(r.site.lon, r.site.lat, r.site.elevation + 4, MOON),
     point: {pixelSize: 12, color: Color.fromCssColorString("#84deff"), outlineColor: Color.BLACK, outlineWidth: 2, heightReference: HeightReference.NONE, disableDepthTestDistance: 2e5},
@@ -664,6 +680,93 @@ export class MoonView {
   this.site = new SiteView(this.root, {...place, detail, result: mission, index: this.index, disabled: this.disabled, onClose: () => this.closeSite()});
  }
  closeSite() { this.site?.dispose(); this.site = undefined; delete this.root.dataset.site; }
+ // ---------- drawn area ----------
+ private lift(lat: number, lon: number, metresUp = 40) {
+  const globe = this.viewer!.scene.globe, h = globe.getHeight(Cartographic.fromDegrees(lon, lat, 0)) ?? 0;
+  return Cartesian3.fromDegrees(lon, lat, h + metresUp, MOON);
+ }
+ setDrawMode(kind: "rect" | "free" | undefined) {
+  const viewer = this.viewer; if (!viewer) return;
+  this.drawKind = kind; this.drawing = undefined; this.draft = [];
+  viewer.scene.screenSpaceCameraController.enableInputs = !kind;
+  this.root.classList.toggle("drawing", !!kind);
+  this.root.querySelectorAll<HTMLButtonElement>("[data-draw]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.draw === kind)));
+  viewer.entities.removeById("area-draft");
+  if (kind) {
+   viewer.entities.add({id: "area-draft", polyline: {positions: new CallbackProperty(() => this.draft.length > 1 ? [...this.draft, this.draft[0]] : [], false), width: 3, material: Color.fromCssColorString("#84deff"), depthFailMaterial: Color.fromCssColorString("#84deff")}});
+   this.toast(kind === "rect" ? "Drag across the Moon to draw a square. Areas must be near the south pole (use Go to the pole)." : "Press and drag to draw a free-form shape around the area. Areas must be near the south pole.");
+  } else this.toast("");
+  viewer.scene.requestRender();
+ }
+ private pickLatLon(position: Cartesian2) {
+  const point = this.surfacePoint(position); if (!point) return undefined;
+  const c = Cartographic.fromCartesian(point, MOON)!;
+  return {lat: deg(c.latitude), lon: (deg(c.longitude) + 360) % 360, point};
+ }
+ private drawDown(position: Cartesian2) {
+  if (!this.drawKind) return;
+  const here = this.pickLatLon(position); if (!here) return;
+  this.drawing = {start: position.clone(), screen: [position.clone()], points: [here.point]};
+  this.draft = [here.point];
+ }
+ private drawMove(position: Cartesian2) {
+  const d = this.drawing; if (!d || !this.viewer) return;
+  if (this.drawKind === "rect") {
+   const s = d.start, corners = [new Cartesian2(s.x, s.y), new Cartesian2(position.x, s.y), new Cartesian2(position.x, position.y), new Cartesian2(s.x, position.y)];
+   const picks = corners.map(c => this.pickLatLon(c)); if (picks.some(p => !p)) return;
+   d.screen = corners; d.points = picks.map(p => p!.point); this.draft = d.points;
+  } else {
+   const last = d.screen[d.screen.length - 1];
+   if (Math.hypot(position.x - last.x, position.y - last.y) < 7) return;
+   const p = this.pickLatLon(position); if (!p) return;
+   d.screen.push(position.clone()); d.points.push(p.point); this.draft = d.points;
+  }
+  this.viewer.scene.requestRender();
+ }
+ private drawUp(position: Cartesian2) {
+  const d = this.drawing; if (!d || !this.drawKind) return;
+  this.drawMove(position);
+  this.drawing = undefined;
+  const reach = Math.max(...d.screen.map(p => Math.hypot(p.x - d.start.x, p.y - d.start.y)));
+  if (d.points.length < 3 || reach < 14) { this.draft = []; this.toast("That shape is too small. Drag a larger area.", true); return; }
+  let points = d.points;
+  if (this.drawKind === "free" && points.length > 48) { const step = points.length / 48; points = Array.from({length: 48}, (_, i) => points[Math.floor(i * step)]); }
+  const polygon = points.map(p => { const c = Cartographic.fromCartesian(p, MOON)!; return [deg(c.latitude), (deg(c.longitude) + 360) % 360] as [number, number]; });
+  this.setDrawMode(undefined);
+  this.showArea(polygon);
+  this.hooks.onArea?.(polygon);
+ }
+ showArea(polygon: [number, number][] | undefined) {
+  const viewer = this.viewer; if (!viewer) return;
+  viewer.entities.removeById("area");
+  this.root.querySelector<HTMLElement>("[data-draw=clear]")!.hidden = !polygon?.length;
+  if (polygon?.length) {
+   const color = Color.fromCssColorString("#84deff");
+   viewer.entities.add({id: "area", polyline: {positions: [...polygon, polygon[0]].map(([lat, lon]) => this.lift(lat, lon)), width: 3, material: new PolylineDashMaterialProperty({color, dashLength: 16}), depthFailMaterial: new PolylineDashMaterialProperty({color, dashLength: 16})}});
+  }
+  viewer.scene.requestRender();
+ }
+ /** Draw the planned network for a drawn area: nodes by role, links of the chosen layout. Pass undefined to clear. */
+ setLayout(result: AreaResult | undefined, format: string) {
+  const viewer = this.viewer; if (!viewer) return;
+  for (const e of [...viewer.entities.values]) if (String(e.id).startsWith("layout")) viewer.entities.remove(e);
+  if (result) {
+   const colors = {gateway: "#84deff", relay: "#73d8ae", mine: "#f4ba72"} as const, letter = {gateway: "G", relay: "R", mine: "M"} as const;
+   const at = new Map(result.nodes.map(n => [n.id, this.lift(n.lat, n.lon, 30)]));
+   for (const [a, b] of result.layouts[format]?.edges ?? []) {
+    const p = at.get(a), q = at.get(b); if (!p || !q) continue;
+    const material = Color.fromCssColorString("#73d8ae").withAlpha(0.95);
+    viewer.entities.add({id: `layout:link:${a}-${b}`, polyline: {positions: [p, q], width: 3, material, depthFailMaterial: material}});
+   }
+   for (const n of result.nodes) {
+    const color = Color.fromCssColorString(colors[n.role]);
+    viewer.entities.add({id: `layout:node:${n.id}`, position: at.get(n.id)!,
+     point: {pixelSize: n.role === "mine" ? 13 : 12, color, outlineColor: n.outside ? Color.fromCssColorString("#bba9ff") : Color.BLACK, outlineWidth: n.outside ? 3 : 2, disableDepthTestDistance: 2e5},
+     label: {text: `${letter[n.role]}${n.id}`, font: "600 12px IBM Plex Mono, monospace", fillColor: color, outlineColor: Color.BLACK, outlineWidth: 3, style: LabelStyle.FILL_AND_OUTLINE, verticalOrigin: VerticalOrigin.BOTTOM, pixelOffset: new Cartesian2(0, -14), disableDepthTestDistance: 2e5}});
+   }
+  }
+  viewer.scene.requestRender();
+ }
 
  /** For tests and diagnostics: what the viewer is currently showing. */
  diagnostics() {

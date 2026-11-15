@@ -26,7 +26,9 @@ ALL_SITES = {**SITES, **ORA_SITES}
 FCC_URL = "https://data.fcc.gov/download/pub/uls/complete/r_tower.zip"
 TILE_URL = "https://s3.amazonaws.com/elevation-tiles-prod/skadi/{band}/{name}.hgt.gz"
 # 1 degree tiles named by their south-west corner: mountainous, mostly low-population terrain.
-EARTH_TILES = ("N47W122", "N44W122", "N35W116", "N35W118", "N39W107", "N38W108")
+EARTH_TILES = ("N47W122", "N44W122", "N35W116", "N35W118", "N39W107", "N38W108",
+               "N45W114", "N46W112", "N40W111", "N37W119", "N48W114", "N36W112",
+               "N44W116", "N46W116", "N42W122", "N48W120", "N38W120", "N40W109", "N33W111", "N45W118")
 EARTH = DATA / "earth"
 EARTH_RADIUS_M = 6_371_000
 

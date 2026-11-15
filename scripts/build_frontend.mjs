@@ -18,6 +18,14 @@ await build({
   logLevel: "warning",
 });
 
+// ORA lab page (web/ora.html): its own bundle, so the Moon workspace and the relay lab stay independent.
+await build({
+  entryPoints: [path.join(root, "frontend/ora.ts")],
+  bundle: true, format: "esm", target: "es2022", minify: true, legalComments: "inline",
+  outfile: path.join(root, "web/ora.js"),
+  logLevel: "warning",
+});
+
 const source = path.join(root, "node_modules/cesium/Build/Cesium"), target = path.join(root, "web/cesium");
 rmSync(target, {recursive: true, force: true});
 mkdirSync(target, {recursive: true});

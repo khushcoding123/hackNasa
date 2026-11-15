@@ -65,3 +65,152 @@ def test_dte_map_terrain_never_exceeds_flat_by_much():
     d = dte_map()
     inside = np.isfinite(d["terrain"])
     assert d["terrain"][inside].mean() < d["flat"][inside].mean()
+
+
+def test_horizon_features_shape_and_enclosure():
+    from ora.features import HORIZON, horizon_features
+    dem = np.zeros((300, 300), np.float32)
+    dem[:, 150:] = 200.0  # a wall to the east of cell (100, 150)
+    h = horizon_features(dem, 20.0, [(100, 150)], radius_m=3000)
+    assert h.shape == (1, len(HORIZON))
+    assert h[0, HORIZON.index("horizon_max")] > 0 and h[0, HORIZON.index("horizon_open")] < 1
+
+
+def test_spaced_top_respects_spacing():
+    from ora.benchmark import SPACING_M, spaced_top
+    cells = np.array([[0, 0], [1, 0], [200, 0], [400, 0]], float)
+    chosen = spaced_top(np.array([4, 3, 2, 1.0]), cells, 10.0, 3)
+    assert chosen[0] == 0 and 1 not in chosen
+    assert all(np.hypot(*(cells[a] - cells[b])) * 10.0 >= SPACING_M for a in chosen for b in chosen if a != b)
+
+
+def test_greedy_union_never_worse_than_first_pick():
+    from ora.benchmark import greedy_union, share
+    rng = np.random.default_rng(1)
+    m = rng.random((30, 200)) < 0.15
+    assert share(m, greedy_union(m, 5)) >= share(m, [int(m.sum(axis=1).argmax())])
+
+
+def test_parts_flag_placeholder_values():
+    from ora.configure import catalog
+    assert all(entry.get("assumed") for entry in catalog().values())
+
+
+def test_tall_towers_taller_sees_more():
+    from ora.tall_towers import reproduce
+    r = reproduce()["ours"]
+    assert r["best_50m"] >= r["best_10m"] and r["window_centre_50m"] >= r["window_centre_10m"]
+
+
+def test_model_card_has_improved_surrogate_and_importance():
+    import json
+    from pathlib import Path
+    card = json.loads((Path(__file__).parents[1] / "ora" / "model_card.json").read_text())
+    assert card["coverage_surrogate"]["mean_spearman"] > 0.7
+    assert "viewshed" in card["siting_prior"]["auc_lost_when_feature_shuffled"]
+
+
+def test_fit_uwb_recovers_known_waveguide_loss():
+    from ora.fit_uwb import fit_alpha, fspl_db
+    d = np.arange(3, 41, dtype=float)
+    loss = 10.0 + fspl_db(d, 4.0) + 9.0 * d / 100
+    alpha, offset = fit_alpha(d, loss, 4.0, +1)
+    assert abs(alpha - 9.0) < 1e-6 and abs(offset - 10.0) < 1e-6
+    rss = -10.0 - fspl_db(d, 4.0) - 9.0 * d / 100
+    assert abs(fit_alpha(d, rss, 4.0, -1)[0] - 9.0) < 1e-6
+
+
+def test_lunar_split_is_sealed_and_buffered():
+    from ora.lunar_windows import SPACING_M, split
+    train, test = split()
+    assert len(train) >= 60 and len(test) >= 12
+    assert not set(train) & set(test)
+    for tx, ty in test:  # no training window touches a test window, diagonals included
+        assert all(max(abs(x - tx), abs(y - ty)) > SPACING_M * 1.01 for x, y in train)
+
+
+def test_ring_features_end_at_the_exact_viewshed():
+    from ora.data import terrain
+    from ora.features import interior_cells, view_rings
+    from ora.los import viewshed_fraction
+    g = terrain("haworth")
+    cells = interior_cells(g.heights, g.pixel_size_m, 3, np.random.default_rng(0))
+    assert np.allclose(view_rings(g.heights, g.pixel_size_m, cells)[:, -1], viewshed_fraction(g.heights, g.pixel_size_m, cells, 10.0, 2.0, 8000)[0], atol=1e-5)
+
+
+def test_gain_features_shrink_near_chosen_sites():
+    from ora.selector import gain_features
+    cells = np.array([[0, 0], [1, 0], [400, 400]], float)
+    base = np.zeros((3, 4), np.float32)
+    f = gain_features(base, cells, [0], 1)
+    assert f[1, -4] < f[2, -4]  # nearest-chosen distance column: neighbour closer than the far cell
+
+
+def test_stress_verdict_logic():
+    from ora.stress import CRITERIA, verdict
+    assert verdict("A_r2_pct", 70)["passed"] and not verdict("A_r2_pct", 50)["passed"]
+    assert verdict("B_calibration_slope", 1.0)["passed"] and not verdict("B_calibration_slope", 1.4)["passed"]
+    assert all(op in (">=", "<=", "between") for op, _ in CRITERIA.values())
+
+
+def test_app_scorer_matches_prior_width():
+    import joblib
+    from ora.train import MODELS
+    from ora.features import PRIOR_FEATURES
+    assert joblib.load(MODELS / "ora_siting_prior.joblib").n_features_in_ == len(PRIOR_FEATURES)
+
+
+
+def square(half=3000.0, lat=-89.67, lon=129.78):
+    from lunar_core.terrain import polar_stereographic_south as forward
+    from lunar_core.terrain import polar_stereographic_south_inverse as inverse
+    x, y = forward(lat, lon)
+    return [tuple(float(v) for v in inverse(x + dx, y + dy)) for dx, dy in ((-half, -half), (half, -half), (half, half), (-half, half))]
+
+
+def test_drawn_area_info_reports_size_and_centre():
+    from ora.area import info
+    meta = info(square())
+    assert meta["area_km2"] == pytest.approx(36.0, abs=0.1)
+    assert meta["lat"] == pytest.approx(-89.67, abs=0.01)
+
+
+def test_drawn_area_rejects_bad_shapes():
+    from ora.area import AreaError, info
+    for bad in ([(-89.0, 0.0), (-89.1, 10.0)],                       # too few corners
+                [(-60.0, 0.0), (-60.0, 10.0), (-61.0, 5.0)],         # outside the polar cap
+                square(half=200.0),                                  # too small
+                square(half=20_000.0)):                              # too large for exact line of sight
+        with pytest.raises(AreaError):
+            info(bad)
+
+
+def test_polygon_mask_covers_the_shape():
+    from lunar_core.terrain import TerrainGrid
+    from lunar_core.terrain import polar_stereographic_south as forward
+    from ora.area import polygon_mask
+    x, y = forward(-89.67, 129.78)
+    grid = TerrainGrid(np.zeros((1000, 1000), np.float32), x - 10_000, y + 10_000, 20.0)
+    mask = polygon_mask(grid, square(half=3000.0))
+    assert mask.sum() * 20.0 ** 2 / 1e6 == pytest.approx(36.0, abs=1.0)
+    assert mask[500, 500] and not mask[0, 0]
+
+
+def test_loop_layout_removes_single_path_links():
+    import networkx as nx
+    from ora.area import loop_layout
+    H = nx.cycle_graph(6)
+    for a, b in H.edges:
+        H.edges[a, b]["dist"] = 1.0
+    tree = nx.minimum_spanning_tree(H, weight="dist")
+    assert len(list(nx.bridges(tree))) == 5
+    assert len(list(nx.bridges(loop_layout(H, tree)))) == 0
+
+
+def test_analyse_compares_three_layouts():
+    from ora.api import NetworkBody, analyse_area
+    out = analyse_area(NetworkBody(polygon=square()))
+    assert set(out["layouts"]) == {"tree", "loop", "mesh"}
+    assert out["recommended"] in out["layouts"]
+    assert out["layouts"]["tree"]["links"] <= out["layouts"]["mesh"]["links"]
+    assert {"gateway", "mine"} <= {n["role"] for n in out["nodes"]}

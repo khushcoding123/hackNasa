@@ -1,0 +1,11 @@
+# Compare our line-of-sight coverage with the Tall Lunar Towers paper (ASCEND 2023).
+# Run: python -m ora tall-towers
+kind: benchmark
+site: connecting-ridge
+radius_km: 20
+user_height_m: 2
+tower_heights_m: [10, 50]
+paper_values:
+  tower_10m_share: 0.147
+  tower_50m_share: 0.259
+  optimal_share_approx: 0.40

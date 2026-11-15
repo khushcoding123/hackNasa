@@ -747,3 +747,10 @@ body:has(.moon-workspace[data-site="open"]) #panel-tab{display:none}
 body:has(.moon-workspace[data-site="open"]) .topbar{display:none}
 body:has(.moon-workspace[data-site="open"]) .scenario-strip{display:none}
 .moon-workspace[data-site="open"] .site3d-bar{top:16px}
+/* Drawn areas: toolbar on the Moon, and buttons in the side panel */
+.vw-draw{display:flex;flex-wrap:wrap;gap:8px}
+.vw-draw .vw-chip[aria-pressed="true"]{background:#84deff;color:#06111c;border-color:#84deff}
+.moon-workspace.drawing canvas{cursor:crosshair}
+.draw-actions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+button[data-format][aria-pressed="true"]{outline:2px solid #84deff;outline-offset:2px}
+td small.coords{display:block;max-width:260px;white-space:normal}
