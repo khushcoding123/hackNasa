@@ -79,7 +79,7 @@ legend, .configuration legend { color: #fff; font-size: 13px; font-weight: 500; 
 .metric small { font-size: 12px; line-height: 1.45; color: var(--muted); display: block; }
 .metric small:first-child { font: 500 11px var(--mono); letter-spacing: .06em; color: var(--faint); }
 .metric strong { font-family: var(--display); font-size: clamp(28px, 2.6vw, 40px); font-weight: 600; letter-spacing: -.05em; line-height: 1; margin: 14px 0 10px; font-variant-numeric: tabular-nums; }
-.hero-value { font-family: var(--display); font-size: 56px; font-weight: 600; letter-spacing: -.055em; line-height: 1; margin: 20px 0 12px; font-variant-numeric: tabular-nums; }
+.hero-value { font-family: var(--display); font-size: clamp(32px, 9.5vw, 56px); overflow-wrap: anywhere; font-weight: 600; letter-spacing: -.055em; line-height: 1; margin: 20px 0 12px; font-variant-numeric: tabular-nums; }
 .hero-value small { font-family: Inter, sans-serif; font-size: 13px; font-weight: 400; letter-spacing: 0; color: var(--muted); }
 .hero-stats { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 20px; }
 .hero-stats strong { font-family: var(--display); font-size: 22px; font-weight: 600; letter-spacing: -.03em; }
@@ -466,3 +466,44 @@ body:has(.moon-workspace[data-site=open]) #moon { bottom: 0 !important; z-index:
   #printable .metric small, #printable th { color: #444; }
   #printable h1, #printable h2, #printable h3, #printable strong { color: #111; }
 }
+
+/* ---------- View cube (CAD-style orientation widget) ---------- */
+.viewcube { position: relative; width: 124px; height: 124px; display: grid; place-items: center; perspective: 300px; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; filter: drop-shadow(0 10px 12px rgba(0,0,0,.45)); }
+.viewcube.pressed { cursor: grabbing; }
+.viewcube-scene { position: relative; width: 62px; height: 62px; transform-style: preserve-3d; }
+.viewcube-face { --facing: 0; position: absolute; inset: 0; display: grid; grid-template: 20% 60% 20% / 20% 60% 20%; transform-style: preserve-3d; backface-visibility: hidden; -webkit-backface-visibility: hidden; box-sizing: border-box;
+  background: hsl(214 10% calc(66% + var(--facing) * 24%)); border: 1px solid #8e949c; border-radius: 3px; }
+.viewcube-cell { display: grid; place-items: center; box-sizing: border-box; background: transparent; border: 0; border-radius: 0; font: 700 10.5px/1 Inter, system-ui, sans-serif; letter-spacing: .05em; color: #2a2f36; cursor: pointer; transition: background .1s; }
+.viewcube-cell.edge, .viewcube-cell.corner { box-shadow: inset 0 0 0 .5px rgba(60,66,76,.28); }
+.viewcube-cell:hover { background: rgba(58,138,255,.62); color: #fff; }
+.viewcube.pressed .viewcube-cell:hover { background: transparent; color: #2a2f36; }
+.viewcube-axes { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.viewcube-axes text { font: 700 11px Inter, system-ui, sans-serif; }
+.viewcube .vc-btn { all: unset; position: absolute; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: #d7dbe2; cursor: pointer; z-index: 2; }
+.viewcube .vc-btn:hover { background: rgba(255,255,255,.14); color: #fff; }
+.viewcube .vc-home { left: 2px; top: 2px; }
+.viewcube .vc-more { right: 2px; bottom: 2px; }
+.viewcube .vc-menu { position: absolute; right: 0; top: 100%; margin-top: 4px; min-width: 150px; padding: 4px; background: rgba(20,22,26,.96); border: 1px solid var(--border); border-radius: 10px; z-index: 6; box-shadow: 0 12px 30px rgba(0,0,0,.5); filter: none; }
+.viewcube .vc-item { padding: 8px 10px; border-radius: 7px; font-size: 12px; color: #e8ebf0; cursor: pointer; white-space: nowrap; }
+.viewcube .vc-item:hover { background: rgba(255,255,255,.1); }
+.site3d-cube { position: absolute; top: calc(var(--top, 0px) + 30px); right: 14px; z-index: 6; }
+
+/* ---------- Circular navigation dial ---------- */
+.vw-dial-wrap { display: grid; justify-items: center; gap: 8px; margin-top: 4px; }
+.vw-dial { display: block; overflow: visible; filter: drop-shadow(0 8px 18px rgba(0,0,0,.5)); user-select: none; -webkit-user-select: none; }
+.vw-dial-part { cursor: pointer; outline: none; }
+.vw-dial-part path, .vw-dial-part circle { fill: rgba(18,18,20,.82); stroke: rgba(255,255,255,.16); stroke-width: 1; transition: fill .12s; }
+.vw-dial-part text { fill: #e4e4e7; pointer-events: none; font-family: Inter, system-ui, sans-serif; font-weight: 500; }
+.vw-dial-part:hover path, .vw-dial-part:hover circle { fill: rgba(255,255,255,.2); }
+.vw-dial-part:active path, .vw-dial-part:active circle { fill: rgba(0,153,255,.7); }
+.vw-dial-part:focus-visible path, .vw-dial-part:focus-visible circle { stroke: var(--accent); stroke-width: 2; }
+.vw-dial-hub .vw-dial-dot { fill: #e4e4e7; stroke: none; pointer-events: none; }
+.vw-tilt { display: flex; gap: 8px; }
+.vw-tilt[hidden] { display: none; }
+.vw-tilt button { width: 36px; min-height: 36px; padding: 0; border-radius: 50%; background: rgba(18,18,20,.82); border: 1px solid rgba(255,255,255,.16); color: #e4e4e7; font-size: 12px; }
+
+/* Candidate limiting factor and deployment badges */
+.factor { display: inline-block; padding: 2px 9px; border-radius: 999px; font: 500 11px var(--mono, monospace); border: 1px solid currentColor; white-space: nowrap; }
+.factor.terrain { color: #ff8a4c; } .factor.rf { color: #c78bff; } .factor.power { color: #ffd23f; } .factor.temperature { color: #5ec8ff; }
+.factor.data { color: #9aa4b2; } .factor.lander { color: #ff6b8b; } .factor.none, .factor.deploy-feasible { color: #4cd68a; }
+.factor.deploy-hazard { color: #ff8a4c; } .factor.deploy-unverified { color: #9aa4b2; }

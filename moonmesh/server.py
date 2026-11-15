@@ -1,9 +1,12 @@
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from spiceypy.utils.exceptions import SpiceyError
 
+from . import costmodel
 from .data import LOCAL, SITES
 from .models import Mission
 from .excel import ExportRequest, export_workbook
@@ -47,6 +50,25 @@ def status():
 @app.post("/api/mission")
 def mission(body: Mission):
     return compute(body)
+
+
+class CostRequest(BaseModel):
+    result: dict
+    area: dict | None = None
+    scope: Literal["mission", "area"] = "mission"
+    satellite: costmodel.SatelliteSpec | None = None
+    coefficients: dict[str, float] | None = None
+
+
+@app.post("/api/cost/estimate")
+def cost_estimate(body: CostRequest):
+    """Dynamic cost of the applied network, from its node count, distances, area, mission length and optional satellite orbit."""
+    try:
+        return costmodel.estimate(body.result, body.area, scope=body.scope, satellite=body.satellite, overrides=body.coefficients)
+    except (KeyError, TypeError, IndexError) as error:
+        raise HTTPException(422, "Cannot price this snapshot. Recalculate the network and try again.") from error
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
 
 
 @app.post("/api/export/xlsx")

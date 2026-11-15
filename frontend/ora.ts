@@ -272,7 +272,7 @@ function paintTwin(){
  const base=new Map<number,J>(net.nodes.map((v:J)=>[v.id,v]));
  const nodes=sim.nodes.map((v:J)=>({...v,x:base.get(v.id).x,y:base.get(v.id).y}));
  drawMap("twin-map",{nodes,color:modeColor,label:(v:J)=>`${v.id} ${v.role==="mine"?"":n(v.temp_c[t],0)+"°C"}`,
-  edges:[...sim.edges.map((e:J)=>({a:e.a,b:e.b,color:e.up[t]==="1"?(e.kind==="optical"?"rgba(132,222,255,.95)":"rgba(115,216,174,.9)"):"rgba(242,132,140,.55)",dash:e.up[t]!=="1"})),
+  edges:[...sim.edges.map((e:J)=>({a:e.a,b:e.b,color:e.up[t]==="1"?(e.kind==="optical"?"rgba(132,222,255,.95)":"rgba(115,216,174,.9)"):"rgba(242,132,140,.55)",dash:false})),
    ...sim.beams.map((b:J)=>({a:b.source,b:b.target,color:C.amber,dash:true}))],
   pick:(v:J)=>{if(v.role==="mine")return;kills=[...kills.filter(k=>k.node!==v.id),{node:v.id,hour:t*sim.step_h}];status(`Node ${v.id} will fail at hour ${t*sim.step_h}. Run the twin to apply.`);render();}});
  $("#clock").textContent=`${sim.times[t].slice(0,16).replace("T"," ")} UTC · hour ${t*sim.step_h} · ${pct(sim.served_gateway[t])} of mines linked to a gateway, ${pct(sim.served_earth[t])} to Earth`;

@@ -55,6 +55,10 @@ class Mission(BaseModel):
     dust_cleaning_per_day: float = Field(default=0, ge=0, le=1)
     dust_solar_loss: float = Field(default=0.8, ge=0, le=1)
     resilient: bool = False
+    # Deployment feasibility and failure what-ifs. None means "use the relay slope limit".
+    route_slope_limit: float | None = Field(default=None, gt=0, le=45)
+    avoid_hazard_routes: bool = True   # when true (the default), relays whose straight traverse crosses terrain steeper than the limit are not selectable
+    power_loss_hours: float = Field(default=24, ge=1, le=720)
     latitude: float | None = Field(default=None, ge=-90, le=-85)
     longitude: float | None = Field(default=None, ge=-180, le=360)
     dem_bias_m: float = Field(default=0, ge=-30, le=30)

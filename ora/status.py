@@ -186,7 +186,11 @@ def libraries():
                 wanted[requirement.name.lower()] = requirement
                 role.setdefault(requirement.name.lower(), scope)
     rows = [dict(name="python", version=sys.version.split()[0], required=True, needed_for="app", ok=sys.version_info >= (3, 11))]
-    for name in LIBRARIES:
+    # Every package the requirement files list is checked, not only the ones named above: a missing runtime
+    # dependency (for example XlsxWriter, imported by the server at start-up) must not hide behind a READY status.
+    listed = {name.lower() for name in LIBRARIES}
+    names = list(LIBRARIES) + [r.name for key, r in wanted.items() if key not in listed]
+    for name in names:
         requirement = wanted.get(name.lower())
         try:
             version = metadata.version(name)

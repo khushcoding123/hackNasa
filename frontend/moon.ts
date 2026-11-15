@@ -1,7 +1,7 @@
 import {
  ArcType,
  BoundingSphere, CallbackPositionProperty, CallbackProperty, Cartesian2, Cartesian3, Cartographic, Color, ColorMaterialProperty, ConstantPositionProperty, ConstantProperty, DirectionalLight, Ellipsoid, GeographicProjection,
- Globe, HeadingPitchRange, HeightReference, LabelStyle, Math as CesiumMath, Matrix3, Matrix4, Quaternion, PolylineDashMaterialProperty, Ion,
+ Globe, HeadingPitchRange, HeightReference, LabelStyle, Math as CesiumMath, Matrix3, Matrix4, Quaternion, PolylineDashMaterialProperty, PolylineGlowMaterialProperty, Ion,
  ScreenSpaceEventHandler, ScreenSpaceEventType, SceneMode, SceneTransforms, ShadowMode, VerticalOrigin, Viewer, type Entity,
 } from "cesium";
 import {LANDMARKS, coordinate, type Landmark} from "./landmarks.js";
@@ -10,7 +10,7 @@ import {MoonTerrainProvider, loadTerrainInfo} from "./terrain.js";
 import {SiteView} from "./site3d.js";
 import {icon} from "./icons.js";
 import type {AreaResult, Candidate, Result} from "./types.js";
-import {ORBIT_PERIOD, satelliteAccess, satellitePosition, surfacePosition} from "./orbital-preview.js";
+import {boresightHit, orbitPeriod, satelliteAccess, satellitePosition, satelliteState, surfacePosition} from "./orbital-preview.js";
 
 const MOON = Ellipsoid.MOON, R = MOON.maximumRadius;
 Ion.defaultAccessToken = "";               // no Cesium ion: all data comes from this app or the public WMS
@@ -22,6 +22,22 @@ const FULL_EXTENT = 2 * R * 1.06, MIN_EXTENT = 2000, MAX_EXTENT = FULL_EXTENT * 
 const MISSION_REGIONS: Record<string, string> = {haworth: "haworth", nobile: "nobile-rim-1", malapert: "malapert"};
 const RESEARCH = new Set(Object.keys(MISSION_REGIONS));
 const deg = CesiumMath.toDegrees, rad = CesiumMath.toRadians;
+const SATELLITE_MODEL = "/assets/cassini-satellite.glb", SATELLITE_PIXELS = 220;
+/** The supplied Cassini model is about 700 units across; scaled so the spacecraft body is roughly 7 m, its real size. */
+const CASSINI_SCALE = 0.0135;
+const ORBIT_COLOR = Color.fromCssColorString("#ffd479"), SATELLITE_LINK_COLOR = Color.fromCssColorString("#ff5ad0");
+const satelliteModel = () => ({uri: SATELLITE_MODEL, minimumPixelSize: SATELLITE_PIXELS, scale: CASSINI_SCALE, lightColor: new Color(1.8, 1.8, 1.8, 1), maximumScale: 4_000_000, shadows: ShadowMode.DISABLED});
+/** Cassini in Cesium's entity frame (+x forward, +y left, +z up): the high-gain dish looks along the model's +x and its long magnetometer boom
+ * runs along +z. The dish is aimed straight down at the Moon and the boom is laid along the flight direction. ``radial`` is straight up from the Moon. */
+function satelliteAttitude(radial: Cartesian3, tangent: Cartesian3, result = new Quaternion(), look?: Cartesian3) {
+ // ``look`` is where the dish points; by default straight down. The boom stays as close to the flight direction as the dish axis allows.
+ const aim = look ? Cartesian3.normalize(look, new Cartesian3()) : Cartesian3.negate(radial, new Cartesian3());
+ const boom = Cartesian3.subtract(tangent, Cartesian3.multiplyByScalar(aim, Cartesian3.dot(tangent, aim), new Cartesian3()), new Cartesian3());
+ Cartesian3.normalize(boom, boom);
+ const side = Cartesian3.cross(boom, aim, new Cartesian3()), rotation = new Matrix3();
+ Matrix3.setColumn(rotation, 0, aim, rotation); Matrix3.setColumn(rotation, 1, side, rotation); Matrix3.setColumn(rotation, 2, boom, rotation);
+ return Quaternion.fromRotationMatrix(rotation, result);
+}
 const wrap180 = (lon: number) => ((lon + 540) % 360) - 180;
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]!));
 const metres = (m: number) => m >= 1000 ? `${(m / 1000).toFixed(m >= 10000 ? 0 : 1)} km` : `${Math.round(m)} m`;
@@ -68,6 +84,31 @@ export interface MoonHooks {
 }
 
 /** CesiumJS Moon workspace. Visual and geographic only: all mission values come from the mission API. */
+/** Circular navigation dial: the outer ring is split into four pan wedges, the inner disc into zoom in (top) and zoom out (bottom),
+ * and the centre button resets the view. Every active part carries data-nav, handled by MoonView.navigate. */
+function navigationDial() {
+ const C = 66, OUTER = 64, RING = 41, HUB = 15, GAP = 1.6;
+ const at = (r: number, deg: number) => { const t = rad(deg); return [(C + r * Math.sin(t)).toFixed(2), (C - r * Math.cos(t)).toFixed(2)]; };
+ const wedge = (centre: number) => {
+  const a0 = centre - 45 + GAP, a1 = centre + 45 - GAP, [x0, y0] = at(OUTER, a0), [x1, y1] = at(OUTER, a1), [x2, y2] = at(RING + 2, a1), [x3, y3] = at(RING + 2, a0);
+  return `M${x0} ${y0}A${OUTER} ${OUTER} 0 0 1 ${x1} ${y1}L${x2} ${y2}A${RING + 2} ${RING + 2} 0 0 0 ${x3} ${y3}Z`;
+ };
+ const half = (centre: number) => {
+  const a0 = centre - 90 + GAP, a1 = centre + 90 - GAP, [x0, y0] = at(RING - 2, a0), [x1, y1] = at(RING - 2, a1), [x2, y2] = at(HUB + 3, a1), [x3, y3] = at(HUB + 3, a0);
+  return `M${x0} ${y0}A${RING - 2} ${RING - 2} 0 0 1 ${x1} ${y1}L${x2} ${y2}A${HUB + 3} ${HUB + 3} 0 0 0 ${x3} ${y3}Z`;
+ };
+ const part = (nav: string, label: string, path: string, glyph: string, x: number, y: number, size = 15) =>
+  `<g class="vw-dial-part" data-nav="${nav}" role="button" tabindex="0" aria-label="${label}"><title>${label}</title><path d="${path}"/><text x="${x}" y="${y}" font-size="${size}" text-anchor="middle" dominant-baseline="central">${glyph}</text></g>`;
+ const g = (deg: number) => at(52, deg).map(Number) as [number, number];
+ const [ux, uy] = g(0), [rx, ry] = g(90), [dx, dy] = g(180), [lx, ly] = g(270);
+ return `<div class="vw-dial-wrap"><svg class="vw-dial" viewBox="0 0 ${2 * C} ${2 * C}" width="${2 * C}" height="${2 * C}" role="group" aria-label="Navigation">
+  ${part("up", "Pan north", wedge(0), "▲", ux, uy, 13)}${part("right", "Pan east", wedge(90), "▶", rx, ry, 13)}${part("down", "Pan south", wedge(180), "▼", dx, dy, 13)}${part("left", "Pan west", wedge(270), "◀", lx, ly, 13)}
+  ${part("in", "Zoom in", half(0), "+", C, C - 26, 20)}${part("out", "Zoom out", half(180), "−", C, C + 26, 20)}
+  <g class="vw-dial-part vw-dial-hub" data-nav="north" role="button" tabindex="0" aria-label="Reset north and view"><title>Reset view</title><circle cx="${C}" cy="${C}" r="${HUB}"/><circle class="vw-dial-dot" cx="${C}" cy="${C}" r="3.2"/></g>
+ </svg>
+ <div class="vw-tilt vw-3d" hidden><button data-nav="tilt-up" aria-label="Tilt up" title="Tilt up">▲</button><button data-nav="tilt-down" aria-label="Tilt down" title="Tilt down">▼</button></div></div>`;
+}
+
 export class MoonView {
  private viewer: Viewer | undefined;
  private terrain: MoonTerrainProvider | undefined;
@@ -125,16 +166,12 @@ export class MoonView {
      <label>Imagery <select data-imagery><option value="auto">LROC WAC (live)</option><option value="bundled">Bundled (lower detail)</option></select></label>
      <p class="vw-note">Terrain is shown at true 1× scale.</p><p class="vw-note">Click the Moon to drop a pin, then open its 3D site view.</p>
     </div></div>
-   <div class="vw-draw" role="group" aria-label="Draw an area to analyse"><span class="vw-tool-label">PLAN AN AREA</span><button class="vw-chip" data-draw="rect" aria-pressed="false" title="Drag across the Moon to draw a square or rectangle">${icon("rectangle")} Rectangle</button><button class="vw-chip" data-draw="free" aria-pressed="false" title="Press and drag to draw any shape">${icon("pen")} Freeform</button><button class="vw-chip" data-draw="clear" hidden>Clear area</button><button class="vw-chip" data-pole title="Zoom to the south polar cap, where terrain detail is sharpest">${icon("target")} South pole</button></div>
+   <div class="vw-draw" role="group" aria-label="Draw an area to analyse"><span class="vw-tool-label">PLAN AN AREA</span><button class="vw-chip" data-draw="rect" aria-pressed="false" title="Drag across the Moon to draw a square or rectangle">${icon("rectangle")} Rectangle</button><button class="vw-chip" data-draw="free" aria-pressed="false" title="Press and drag to draw any shape">${icon("pen")} Freeform</button><button class="vw-chip" data-draw="clear" hidden>Clear area</button><button class="vw-chip" data-clear-pins hidden title="Remove every pin from the Moon">Clear pins</button><button class="vw-chip" data-pole title="Zoom to the south polar cap, where terrain detail is sharpest">${icon("target")} South pole</button></div>
   </div>
   <div class="vw-right" role="group" aria-label="Map controls">
+   ${navigationDial()}
    <div class="vw-modes" role="group" aria-label="View mode"><button data-mode="map" aria-pressed="true">Map</button><button data-mode="3d" aria-pressed="false">3D</button></div>
    <button class="vw-site-btn" data-site3d title="Open the selected pin or current Moon location in three dimensions">${icon("terrain")} Site view</button>
-   <div class="vw-stack">
-    <button data-nav="in" aria-label="Zoom in">+</button><button data-nav="out" aria-label="Zoom out">−</button>
-    <button data-nav="north" aria-label="Reset north and view" title="Reset view">⌖</button>
-    <button data-nav="tilt-up" class="vw-3d" aria-label="Tilt up" title="Tilt up" hidden>▲</button><button data-nav="tilt-down" class="vw-3d" aria-label="Tilt down" title="Tilt down" hidden>▼</button>
-   </div>
   </div>
   <div class="vw-inspector" role="region" aria-label="Location inspector" aria-live="polite" hidden></div>
   <div class="vw-toast" role="status" aria-live="polite"></div>
@@ -198,47 +235,36 @@ export class MoonView {
   // The first frames lay out the canvas; re-apply the initial view once it has a real size, then trust the camera.
   requestAnimationFrame(() => requestAnimationFrame(() => { if (this.viewer && !this.disposed) { this.apply(this.view); this.settled = true; this.refreshReadouts(); } }));
  }
- /** Illustrative orbiter, exaggerated in size for visibility at whole-Moon scale. */
+ /** NASA's Cassini spacecraft (glTF, as supplied). It is drawn at least SATELLITE_PIXELS wide so it stays visible at whole-Moon scale. */
+
  private setupSatellite() {
   const viewer = this.viewer!;
   const radius = R * 1.28, inclination = rad(32), started = performance.now();
   const normal = new Cartesian3(0, -Math.sin(inclination), Math.cos(inclination));
   const radial = new Cartesian3(), tangent = new Cartesian3(), center = new Cartesian3();
-  const rotation = new Matrix3(), orientation = new Quaternion();
+  const orientation = new Quaternion();
+  const around = (angle: number, result = new Cartesian3()) => Cartesian3.fromElements(Math.cos(angle), Math.sin(angle) * Math.cos(inclination), Math.sin(angle) * Math.sin(inclination), result);
+  // The orbit ring is fixed; the bright arc is the stretch the satellite is about to fly.
+  const ring = Array.from({length: 181}, (_, i) => Cartesian3.multiplyByScalar(around(i / 180 * 2 * Math.PI), radius, new Cartesian3()));
+  const ahead = Array.from({length: 49}, () => new Cartesian3());
   const update = () => {
    const angle = (performance.now() - started) / 1000 * (2 * Math.PI / 75) + rad(65);
-   Cartesian3.fromElements(Math.cos(angle), Math.sin(angle) * Math.cos(inclination), Math.sin(angle) * Math.sin(inclination), radial);
+   around(angle, radial);
    Cartesian3.fromElements(-Math.sin(angle), Math.cos(angle) * Math.cos(inclination), Math.cos(angle) * Math.sin(inclination), tangent);
    Cartesian3.multiplyByScalar(radial, radius, center);
-   Matrix3.setColumn(rotation, 0, tangent, rotation);
-   Matrix3.setColumn(rotation, 1, normal, rotation);
-   Matrix3.setColumn(rotation, 2, radial, rotation);
-   Quaternion.fromRotationMatrix(rotation, orientation);
+   satelliteAttitude(radial, tangent, orientation);
+   ahead.forEach((point, i) => Cartesian3.multiplyByScalar(around(angle + i / 48 * rad(100), point), radius, point));
   };
   update();
   viewer.scene.preUpdate.addEventListener(update);
-  const position = (x: number, y: number, z: number) => new CallbackPositionProperty((_time, result) => {
-   result = Cartesian3.clone(center, result);
-   result.x += tangent.x * x + normal.x * y + radial.x * z;
-   result.y += tangent.y * x + normal.y * y + radial.y * z;
-   result.z += tangent.z * x + normal.z * y + radial.z * z;
-   return result;
-  }, false);
-  const attitude = new CallbackProperty((_time, result) => Quaternion.clone(orientation, result), false);
-  let part = 0;
-  const box = (name: string, offset: number[], dimensions: number[], color: string) => viewer.entities.add({
-   id: `satellite:${part++}`, name, position: position(offset[0], offset[1], offset[2]), orientation: attitude,
-   box: {dimensions: new Cartesian3(...dimensions as [number, number, number]), material: Color.fromCssColorString(color), outline: true, outlineColor: Color.fromCssColorString("#8192a6")},
-  });
-  box("Satellite · illustrative orbiter", [0, 0, 0], [65000, 52000, 52000], "#d8b96c");
-  for (const side of [-1, 1]) {
-   box("Solar array support", [0, side * 55000, 0], [7000, 65000, 7000], "#bcc6ce");
-   box("Solar array", [0, side * 108000, 0], [100000, 105000, 5000], "#153e77");
-   for (const stripe of [-1, 0, 1]) box("Solar cell divider", [stripe * 26000, side * 108000, 3500], [1500, 102000, 1500], "#7395bd");
-  }
-  box("Antenna mast", [0, 0, 51000], [5000, 5000, 50000], "#e3e8ec");
-  viewer.entities.add({id: `satellite:${part++}`, name: "Satellite antenna", position: position(0, 0, 79000), orientation: attitude,
-   ellipsoid: {radii: new Cartesian3(25000, 25000, 7000), material: Color.fromCssColorString("#e3e8ec")}});
+  viewer.entities.add({id: "satellite:orbit", name: "Satellite orbit", polyline: {positions: ring, arcType: ArcType.NONE, width: 2,
+   material: new PolylineDashMaterialProperty({color: ORBIT_COLOR.withAlpha(0.55), dashLength: 14})}});
+  viewer.entities.add({id: "satellite:ahead", name: "Satellite path ahead", polyline: {positions: new CallbackProperty(() => ahead, false), arcType: ArcType.NONE, width: 6,
+   material: new PolylineGlowMaterialProperty({color: ORBIT_COLOR, glowPower: 0.25})}});
+  viewer.entities.add({id: "satellite:model", name: "Satellite · Cassini spacecraft model (orbit illustrative)",
+   position: new CallbackPositionProperty((_time, result) => Cartesian3.clone(center, result), false),
+   orientation: new CallbackProperty((_time, result) => Quaternion.clone(orientation, result), false),
+   model: satelliteModel()});
   this.satelliteTimer = window.setInterval(() => { if (!document.hidden && this.root.dataset.site !== "open" && !viewer.isDestroyed()) viewer.scene.requestRender(); }, 33);
  }
  private fallback() {
@@ -311,7 +337,7 @@ export class MoonView {
  }
  private defaultPitch(extent: number) { return -Math.PI / 2 + rad(42) * smooth(1.8 * R, 0.35 * R, extent); }
  /** Smoothly move to a view without discarding mission state; imagery and terrain continue to stream meanwhile. */
- flyTo(target: Partial<View>, ms = 1100) {
+ flyTo(target: Partial<View>, ms = 1100, arcOut = false) {
   if (!this.viewer) return;
   cancelAnimationFrame(this.animation);
   const from = this.readView(), to: View = {...from, ...target};
@@ -328,8 +354,8 @@ export class MoonView {
    const t = Math.min(1, (now - started) / ms), e = t * t * (3 - 2 * t);
    const sin = Math.sin(angle), position = angle < 1e-6 ? b : Cartesian3.add(Cartesian3.multiplyByScalar(a, Math.sin((1 - e) * angle) / sin, new Cartesian3()), Cartesian3.multiplyByScalar(b, Math.sin(e * angle) / sin, new Cartesian3()), new Cartesian3());
    const c = Cartographic.fromCartesian(position, MOON)!;
-   // A short arc outward keeps long hops legible: zoom out in the middle, then back in.
-   const arc = 1 + Math.min(2.2, angle * 1.6) * Math.sin(Math.PI * e);
+   // Only jumps to a named place zoom out in the middle and back in; panning, tilting and the dial never do.
+   const arc = arcOut ? 1 + Math.min(2.2, angle * 1.6) * Math.sin(Math.PI * e) : 1;
    this.apply({lat: deg(c.latitude), lon: wrap180(deg(c.longitude)), extent: Math.exp(Math.log(from.extent) * (1 - e) + Math.log(to.extent) * e) * arc,
     heading: from.heading + dh * e, pitch: from.pitch + (to.pitch - from.pitch) * e});
    if (t < 1) this.animation = requestAnimationFrame(step); else { this.apply(to); done(); }
@@ -338,7 +364,7 @@ export class MoonView {
  }
  flyToPlace(lat: number, lon: number, extent = 24_000) {
   const keep3d = this.mode === "3d";
-  this.flyTo({lat, lon, extent, heading: 0, pitch: keep3d ? this.defaultPitch(extent) : -Math.PI / 2});
+  this.flyTo({lat, lon, extent, heading: 0, pitch: keep3d ? this.defaultPitch(extent) : -Math.PI / 2}, 1100, true);
  }
  /** Move to a mission region after a successful calculation. */
  flyToSite(lat: number, lon: number, extent = 16_000) { this.flyToPlace(lat, lon, extent); }
@@ -382,7 +408,10 @@ export class MoonView {
  private bindControls() {
   const q = <T extends HTMLElement>(s: string) => this.root.querySelector<T>(s)!;
   this.root.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach(b => b.onclick = () => this.setMode(b.dataset.mode as Mode));
-  this.root.querySelectorAll<HTMLButtonElement>("[data-nav]").forEach(b => b.onclick = () => this.navigate(b.dataset.nav!));
+  this.root.querySelectorAll<HTMLElement>("[data-nav]").forEach(b => {
+   b.onclick = () => this.navigate(b.dataset.nav!);
+   b.onkeydown = event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); this.navigate(b.dataset.nav!); } };
+  });
   q<HTMLButtonElement>("[data-site3d]").onclick = () => this.openSite();
   const layers = q<HTMLButtonElement>("[data-layers]"), menu = q("#vw-layer-menu");
   layers.onclick = () => { menu.hidden = !menu.hidden; layers.setAttribute("aria-expanded", String(!menu.hidden)); };
@@ -576,6 +605,12 @@ export class MoonView {
  private renderPinList() {
   const list = this.root.querySelector<HTMLElement>("[data-pinlist]"); if (!list) return;
   list.innerHTML = this.pins.size ? [...this.pins.values()].map(p => `<li class="${p.id === this.selectedPin ? "on" : ""}"><button data-pin="${p.id}" aria-pressed="${p.id === this.selectedPin}">${escapeHtml(p.name)}</button><button data-pin-x="${p.id}" aria-label="Remove ${escapeHtml(p.name)}">×</button></li>`).join("") : '<li class="vw-note">No pins yet.</li>';
+  const clear = this.root.querySelector<HTMLButtonElement>("[data-clear-pins]");
+  if (clear) {   // only offered while at least one pin exists
+   clear.hidden = this.pins.size === 0;
+   clear.textContent = this.pins.size > 1 ? `Clear pins (${this.pins.size})` : "Clear pins";
+   clear.onclick = () => { this.clearPin(); const n = this.root.querySelector<HTMLElement>(".vw-inspector"); if (n) n.hidden = true; this.toast("All pins removed."); };
+  }
   list.querySelectorAll<HTMLButtonElement>("[data-pin]").forEach(b => b.onclick = () => this.selectPin(Number(b.dataset.pin), true));
   list.querySelectorAll<HTMLButtonElement>("[data-pin-x]").forEach(b => b.onclick = () => { this.removePin(Number(b.dataset.pinX)); const n = this.root.querySelector<HTMLElement>(".vw-inspector"); if (n && !this.selectedPin) n.hidden = true; });
  }
@@ -707,7 +742,7 @@ export class MoonView {
    parts.entity.label!.text = new ConstantProperty(c.id + (off ? " · OFF" : ""));
    parts.entity.label!.fillColor = new ConstantProperty(color);
    if (parts.link) {
-    const material = () => available ? new ColorMaterialProperty(color) : new PolylineDashMaterialProperty({color, dashLength: 14});
+    const material = () => available || off ? new ColorMaterialProperty(color) : new PolylineDashMaterialProperty({color, dashLength: 14}); // red (disabled) links stay solid; amber (unavailable now) links are dashed
     parts.link.polyline!.material = material();
     parts.link.polyline!.depthFailMaterial = material();
    }
@@ -830,20 +865,27 @@ export class MoonView {
    if (String(e.id).startsWith("satellite:")) e.show = !result;
   }
   if (result) {
-   const satellite = satellitePosition(result.site.lat, result.site.lon, seconds);
-   const position = new Cartesian3(...satellite), cyan = Color.fromCssColorString("#84deff");
-   viewer.entities.add({id: "layout:orbital:satellite", position,
-    billboard: {image: "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 50"><path d="M8 14h20v24H8zM52 14h20v24H52z" fill="#164b86" stroke="#84deff" stroke-width="2"/><path d="M18 14v24m44-24v24M8 26h20m24 0h20M28 25h24" stroke="#84deff" stroke-width="2"/><rect x="30" y="15" width="20" height="22" rx="3" fill="#d8b96c" stroke="#fff" stroke-width="2"/><path d="M40 15V5m-8 0q8 12 16 0" fill="none" stroke="#fff" stroke-width="2"/></svg>'), width: 64, height: 40},
-    label: {text: "S1 · assumed relay satellite", font: "600 13px IBM Plex Mono, monospace", fillColor: cyan,
-     outlineColor: Color.BLACK, outlineWidth: 3, style: LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cartesian2(0, -24)}});
-   const orbit = Array.from({length: 181}, (_, i) => new Cartesian3(...satellitePosition(result.site.lat, result.site.lon, i * ORBIT_PERIOD / 180)));
-   viewer.entities.add({id: "layout:orbital:track", polyline: {positions: orbit, arcType: ArcType.NONE, width: 1.5,
-    material: new PolylineDashMaterialProperty({color: cyan.withAlpha(0.45), dashLength: 12})}});
+   const state = satelliteState(result.site.lat, result.site.lon, seconds);
+   const satellite = state.position, position = new Cartesian3(...satellite);
+   const vec = (v: number[]) => new Cartesian3(v[0], v[1], v[2]);
+   viewer.entities.add({id: "layout:orbital:satellite", position, orientation: satelliteAttitude(vec(state.radial), vec(state.tangent), new Quaternion(), vec(state.boresight)), model: satelliteModel(),
+    label: {text: "S1 · assumed relay satellite", font: "600 13px IBM Plex Mono, monospace", fillColor: ORBIT_COLOR,
+     outlineColor: Color.BLACK, outlineWidth: 3, style: LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cartesian2(0, -(SATELLITE_PIXELS / 2 + 12)), disableDepthTestDistance: Number.POSITIVE_INFINITY}});
+   const period = orbitPeriod();
+   const orbit = Array.from({length: 181}, (_, i) => new Cartesian3(...satellitePosition(result.site.lat, result.site.lon, i * period / 180)));
+   viewer.entities.add({id: "layout:orbital:track", polyline: {positions: orbit, arcType: ArcType.NONE, width: 4,
+    material: new PolylineGlowMaterialProperty({color: ORBIT_COLOR.withAlpha(0.8), glowPower: 0.2})}});
+   // The antenna axis: where the satellite is facing. It ends on the Moon, or just past the limb when it points away.
+   const hit = boresightHit(state), reach = Math.hypot(...satellite) - R;
+   const aimEnd = hit ? vec(hit) : Cartesian3.add(position, Cartesian3.multiplyByScalar(vec(state.boresight), reach * 1.5, new Cartesian3()), new Cartesian3());
+   viewer.entities.add({id: "layout:orbital:boresight", name: "Antenna pointing", polyline: {positions: [position, aimEnd], arcType: ArcType.NONE, width: 2,
+    material: new PolylineDashMaterialProperty({color: Color.fromCssColorString("#6ee7a8"), dashLength: 10})}});
+   const dotted = () => new PolylineDashMaterialProperty({color: SATELLITE_LINK_COLOR, gapColor: Color.TRANSPARENT, dashLength: 12, dashPattern: 0b0011001100110011});
    for (const node of result.nodes) {
-    if (!satelliteAccess(node, satellite).visible) continue;
+    if (!satelliteAccess(node, satellite, state.boresight).visible) continue;
     viewer.entities.add({id: `layout:orbital:link:${node.id}`, polyline: {
      positions: [new Cartesian3(...surfacePosition(node.lat, node.lon, node.elevation + 10)), position],
-     arcType: ArcType.NONE, width: 2, material: cyan.withAlpha(0.8)}});
+     arcType: ArcType.NONE, width: 3, material: dotted(), depthFailMaterial: dotted()}});
    }
   }
   viewer.scene.requestRender();
