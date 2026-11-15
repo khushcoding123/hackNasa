@@ -1,7 +1,8 @@
 import {
- Credit, Ellipsoid, GeographicTilingScheme, ImageryLayer, Rectangle, SingleTileImageryProvider,
- WebMapServiceImageryProvider, type Request, type Viewer,
+ Credit, Ellipsoid, GeographicTilingScheme, ImageryLayer, Rectangle, RequestState, SingleTileImageryProvider,
+ WebMapServiceImageryProvider, type Request, type TileProviderError, type Viewer,
 } from "cesium";
+import {LayerStatus, trackRequests, type LayerState} from "./imagery-status.js";
 
 /** LROC WAC layers on the public, CORS-enabled Lunaserv WMS (EPSG:4326 here means selenographic lon/lat). */
 export const WMS_URL = "https://wms.im-ldi.com/";
@@ -9,76 +10,77 @@ export const MAP_LAYER = "luna_wac_global";
 export const SHADING_LAYER = "luna_wac_normalized_reflectance";
 /** Advertised ground sampling of luna_wac_global. Deeper zoom reuses these tiles and adds no detail. */
 export const WAC_RESOLUTION_M = 100;
-/** 8192-px bundled colour map: about 1.3 km per pixel at the equator, coarser near the poles. */
-export const BUNDLED_RESOLUTION_M = 1330;
+/** The bundled colour map is 4096 × 2048 px: about 2.7 km per pixel at the equator (finer east–west toward the poles). */
+export const BUNDLED_RESOLUTION_M = 2665;
 const MOON = Ellipsoid.MOON;
 
-export type ImageryState = "loading" | "live" | "fallback";
+export type ImageryState = LayerState;
 export type ImageryChoice = "auto" | "bundled";
+type Mode = "map" | "3d";
 export interface ImageryHandle {
- setMode(mode: "map" | "3d"): void;
+ setMode(mode: Mode): void;
  setChoice(choice: ImageryChoice): void;
+ /** Rebuild the live layers so tiles that failed earlier are requested again. */
  retry(): void;
+ /** State of the live layer for the current mode. */
  readonly state: ImageryState;
- readonly counts: {ok: number; failed: number};
+ readonly counts: {ok: number; failed: number; cancelled: number; deferred: number};
  /** Name of the imagery currently contributing to the display. */
- describe(mode: "map" | "3d"): string;
+ describe(mode: Mode): string;
 }
 
 const scheme = () => new GeographicTilingScheme({ellipsoid: MOON});
 
-/** Adds the bundled fallback (bottom) and both live WMS layers. Failure of the live service hides those layers
- * and reports a state change; the camera and all other scene state are untouched. */
+/** Adds the bundled fallback (bottom) and both live WMS layers. Each live layer tracks its own health: a sustained
+ * outage hides that layer (the bundled map shows through) and reports a state change; the camera and all other scene
+ * state are untouched. Tiles that fail individually fall back to Cesium's coarser ancestor tile or the bundled map. */
 export function addImagery(viewer: Viewer, onState: (state: ImageryState) => void): ImageryHandle {
  const layers = viewer.imageryLayers;
  const bundled = layers.addImageryProvider(new SingleTileImageryProvider({
   url: "/assets/moon-color-4k.jpg", rectangle: Rectangle.MAX_VALUE, tileWidth: 4096, tileHeight: 2048, ellipsoid: MOON,
   credit: new Credit("Bundled colour map · NASA SVS CGI Moon Kit", false),
  }));
- const live = (layer: string, title: string) => {
+ let mode: Mode = "map", choice: ImageryChoice = "auto", reported: ImageryState | undefined;
+ const report = () => { const s = live[mode].status.state; if (s !== reported) { reported = s; onState(s); } apply(); };
+ const make = (layer: string, title: string, index: number) => {
+  const status = new LayerStatus(() => report());
   const provider = new WebMapServiceImageryProvider({
    url: WMS_URL, layers: layer, parameters: {format: "image/jpeg", transparent: false, version: "1.1.1"},
    tilingScheme: scheme(), ellipsoid: MOON, tileWidth: 256, tileHeight: 256, maximumLevel: 8,
    credit: new Credit(`${title} · NASA / GSFC / ASU via LROC QuickMap`, false),
   });
-  return {provider, layer: layers.addImageryProvider(provider)};
+  const original = provider.requestImage.bind(provider);
+  (provider as {requestImage: unknown}).requestImage = trackRequests<Request, unknown>(original as never, status, RequestState.CANCELLED);
+  provider.errorEvent.addEventListener((error: TileProviderError) => { error.retry = status.shouldRetry(error.timesRetried); });
+  return {status, layer: layers.addImageryProvider(provider, index), name: layer, title};
  };
- const map = live(MAP_LAYER, "LROC WAC"), shading = live(SHADING_LAYER, "LROC WAC normalized reflectance");
- const counts = {ok: 0, failed: 0};
- let state: ImageryState = "loading", mode: "map" | "3d" = "map", choice: ImageryChoice = "auto";
- const set = (next: ImageryState) => { if (next !== state) { state = next; onState(next); } apply(); };
+ const live = {map: make(MAP_LAYER, "LROC WAC", 1), "3d": make(SHADING_LAYER, "LROC WAC normalized reflectance", 2)};
  const apply = () => {
-  const showLive = state !== "fallback" && choice === "auto";
-  map.layer.show = showLive && mode === "map";
-  shading.layer.show = showLive && mode === "3d";
+  for (const m of ["map", "3d"] as const) live[m].layer.show = choice === "auto" && m === mode && live[m].status.state !== "fallback";
   bundled.show = true;
   viewer.scene.requestRender();
  };
- for (const {provider} of [map, shading]) {
-  const original = provider.requestImage.bind(provider);
-  (provider as {requestImage: unknown}).requestImage = async (x: number, y: number, level: number, request?: Request) => {
-   try {
-    const image = await original(x, y, level, request);
-    if (image) { counts.ok++; if (state === "loading") set("live"); }
-    return image;
-   } catch (error) {
-    if (request?.state === 3 /* CANCELLED */) throw error;
-    counts.failed++;
-    if (choice === "auto" && counts.failed >= 4 && counts.failed > counts.ok) set("fallback");
-    throw error;
-   }
-  };
-  provider.errorEvent.addEventListener(error => { error.retry = false; });
- }
- apply();
+ report();
  return {
-  setMode(next) { mode = next; apply(); },
-  setChoice(next) { choice = next; apply(); onState(state); },
-  retry() { counts.ok = 0; counts.failed = 0; state = "loading"; onState(state); apply(); },
-  get state() { return state; }, counts,
+  setMode(next) { mode = next; report(); },
+  setChoice(next) { choice = next; apply(); reported = undefined; report(); },
+  retry() {
+   for (const m of ["map", "3d"] as const) {
+    const old = live[m], index = layers.indexOf(old.layer);
+    layers.remove(old.layer, true);
+    live[m] = make(old.name, old.title, index);
+   }
+   reported = undefined; report();
+  },
+  get state() { return live[mode].status.state; },
+  get counts() { return live[mode].status.counts; },
   describe(current) {
-   if (choice === "bundled" || state === "fallback") return `Bundled color map · lower detail (about ${(BUNDLED_RESOLUTION_M / 1000).toFixed(1)} km/px)`;
-   return current === "3d" ? `LROC WAC normalized reflectance · ${WAC_RESOLUTION_M} m/px` : `LROC WAC global mosaic · ${WAC_RESOLUTION_M} m/px`;
+   const status = live[current].status;
+   const bundledText = `Bundled color map · lower detail (about ${(BUNDLED_RESOLUTION_M / 1000).toFixed(1)} km/px)`;
+   if (choice === "bundled" || status.state === "fallback") return bundledText;
+   if (status.state === "loading") return `${bundledText} · LROC WAC loading`;
+   const name = current === "3d" ? "LROC WAC normalized reflectance" : "LROC WAC global mosaic";
+   return `${name} · ${WAC_RESOLUTION_M} m/px source`;
   },
  };
 }

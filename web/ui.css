@@ -537,3 +537,12 @@ button.primary { box-shadow: none !important; }
   .planner .panel-head h1 { font-size: 36px; }
   .ora-app main>header h1 { font-size: 46px; }
 }
+
+/* Site view layout follows the view's own width, not the window's. Below 860 px the HUD sits above the collapsed
+   controls instead of overlapping them, and gives way while the controls are open. */
+.site3d { container: site / inline-size; }
+@container site (max-width: 860px) {
+  .site3d .site3d-hud { top: auto; bottom: 92px; left: 14px; right: 14px; max-width: none; justify-items: start; text-align: left; gap: 4px; }
+  .site3d .site3d-hud span:first-child { white-space: normal; }
+  .site3d:has(.site3d-panel[open]) .site3d-hud { display: none; }
+}
