@@ -10,7 +10,75 @@ from lunar_core.terrain import TerrainGrid
 from moonmesh.environment import CASES, node_states, optimize_environment
 from moonmesh.models import Mission
 from moonmesh.science import scenario
-from ora.thermal import NodeDesign, simulate
+from ora.thermal import NodeDesign, simulate, step_temp
+
+
+def reference_simulate(design, lit, dt_h, T_env_lit=250.0, T_env_dark=100.0, beam_w=None, soc0=1.0, T0=273.15,
+                       solar_factor=None, known=None):
+    """The direct per-step loop that ``simulate`` replaced; its results must match bit for bit."""
+    lit = np.asarray(lit, float)
+    valid = np.isfinite(lit) if known is None else np.asarray(known, bool) & np.isfinite(lit)
+    sun = np.where(valid, np.clip(np.nan_to_num(lit), 0, 1), 0)
+    beam = np.zeros(len(sun)) if beam_w is None else np.broadcast_to(np.asarray(beam_w, float), sun.shape)
+    factor = np.ones(len(sun)) if solar_factor is None else np.broadcast_to(np.asarray(solar_factor, float), sun.shape)
+    dark = np.broadcast_to(np.asarray(T_env_dark, float), sun.shape)
+    sink = dark + (np.broadcast_to(np.asarray(T_env_lit, float), sun.shape) - dark) * sun
+    soc, temp, mode, heat = (np.zeros(len(sun)) for _ in range(4))
+    reasons, energy, T, frozen = [], design.battery_wh * soc0, T0, -1
+    sub = max(1, int(np.ceil(dt_h * 3600 / 60)))
+    dt = dt_h * 3600 / sub
+    for i, illumination in enumerate(sun):
+        supply = design.solar_w * illumination * factor[i] + beam[i]
+        full_service, used, lowest = True, 0.0, T
+        asleep = design.hibernate and illumination <= 0 and beam[i] <= 0
+        desired = design.survival_w + design.duty * (design.active_w - design.survival_w) if asleep else design.active_w
+        for _ in range(sub):
+            available = supply + energy * 3600 / dt
+            electronics = min(desired, available) if frozen < 0 else 0.0
+            heater = min(design.heater_w, max(0, available - electronics)) if frozen < 0 and T < design.heater_on_k else 0.0
+            if electronics < desired - 1e-9 or frozen >= 0:
+                full_service = False
+            emissivity = design.radiator_emissivity if T > design.radiator_on_k else design.emissivity
+            T = step_temp(T, electronics + design.rhu_w, heater, dt, design.heat_capacity, emissivity,
+                          design.area, design.k_loss, sink[i])
+            lowest = min(lowest, T)
+            used += heater * dt / 3600
+            energy = float(min(design.battery_wh, max(0, energy + (supply - electronics - heater) * dt / 3600)))
+            if frozen < 0 and T < design.kill_k:
+                frozen, full_service = i, False
+        reason = "Unknown environment" if not valid[i] else "Frozen" if frozen >= 0 else "Insufficient power" if not full_service else "Available"
+        state = (1 if asleep else 2) if valid[i] and full_service and frozen < 0 else 0
+        soc[i], temp[i], mode[i], heat[i] = energy / max(design.battery_wh, 1e-9), lowest, state, used / dt_h
+        reasons.append(reason)
+    return dict(soc=soc, temp_k=temp, mode=mode, heater_w=heat, frozen_step=frozen, reason=reasons, sink_k=sink)
+
+
+class ThermalEquivalenceTests(TestCase):
+    def test_fast_integrator_matches_the_direct_loop_bit_for_bit(self):
+        rng = np.random.default_rng(7)
+        pick = lambda *options: options[rng.integers(len(options))]
+        for _ in range(150):
+            n = int(rng.integers(1, 60))
+            design = NodeDesign(
+                battery_wh=pick(0, 1, 30.0, 600.0, rng.uniform(0, 100)), solar_w=pick(0, 18.0, rng.uniform(0, 50)),
+                active_w=pick(0.0, 6, rng.uniform(0, 20)), survival_w=pick(0.5, rng.uniform(0, 3)),
+                heater_w=pick(0, 4.0, rng.uniform(0, 30)), rhu_w=pick(0.0, rng.uniform(0, 3)),
+                heat_capacity=pick(3000.0, 50.0, rng.uniform(20, 5000)), emissivity=pick(0.03, 1, 0.0, rng.uniform(0, 1)),
+                area=pick(0.15, 100, rng.uniform(0.01, 2)), k_loss=pick(0.004, 0.0, rng.uniform(0, 1)),
+                heater_on_k=pick(243.15, 290.0, rng.uniform(150, 320)), kill_k=pick(213.15, 250.0, rng.uniform(50, 280)),
+                radiator_on_k=pick(303.15, 250.0, rng.uniform(200, 350)), radiator_emissivity=pick(0.6, 0.0, 1.0),
+                duty=pick(1.0, 0.0, rng.uniform(0, 1)), hibernate=bool(rng.integers(2)))
+            lit = pick(np.zeros(n), np.ones(n), rng.uniform(0, 1, n), rng.uniform(-0.5, 1.5, n))
+            options = dict(T_env_lit=pick(250.0, rng.uniform(150, 400, n)), T_env_dark=pick(100.0, 20.0, rng.uniform(10, 200, n)),
+                           soc0=pick(1.0, 0.0, rng.uniform(0, 1)), T0=pick(273.15, 100.0, rng.uniform(60, 400)),
+                           beam_w=pick(None, 20.0, rng.uniform(0, 30, n)), solar_factor=pick(None, rng.uniform(0, 1, n)),
+                           known=pick(None, rng.random(n) > 0.2))
+            dt_h = pick(0.5, 1.0, 0.25, 2.0, 0.1)
+            want, got = reference_simulate(design, lit, dt_h, **options), simulate(design, lit, dt_h, **options)
+            for key in ('soc', 'temp_k', 'mode', 'heater_w', 'sink_k'):
+                np.testing.assert_array_equal(got[key], want[key], err_msg=f'{key} for {design}')
+            self.assertEqual(got['reason'], want['reason'])
+            self.assertEqual(got['frozen_step'], want['frozen_step'])
 
 
 class ThermalServiceTests(TestCase):
