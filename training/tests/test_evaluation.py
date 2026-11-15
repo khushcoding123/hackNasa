@@ -1,5 +1,6 @@
 """Scientific evaluation checks: area correction, boundaries, split safety."""
 import importlib.util
+import json
 from pathlib import Path
 
 import numpy as np
@@ -25,6 +26,8 @@ def test_stratified_selection_keeps_all_heights_and_final_keeps_all():
     assert len(select_scenarios(frame,split='test'))==40
     with pytest.raises(ValueError,match='every scenario'):
         select_scenarios(frame,['t0_5'],split='test')
+    allowed=select_scenarios(frame,['t0_5'],split='test',allow_final_subset=True)
+    assert allowed.scenario_id.tolist()==['t0_5']
     with pytest.raises(ValueError):
         select_scenarios(frame,['foreign'])
 
@@ -36,6 +39,50 @@ def test_test_cli_requires_final_before_reading_data():
     with pytest.raises(SystemExit) as e:
         module.main(['--split','test'])
     assert e.value.code==2
+
+
+def test_final_subset_cli_requires_explicit_opt_in(monkeypatch):
+    script=Path(__file__).parents[1]/'scripts/10_evaluate.py'
+    spec=importlib.util.spec_from_file_location('eval_subset_cli',script)
+    module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    frame=pd.DataFrame([dict(transmitter_id='t0',stratum='floor',tx_height_agl_m=5,scenario_id='t0_5')])
+    selected=[]
+    def run(args):
+        selected.append(select_scenarios(frame,args.scenarios,args.split,args.allow_final_subset))
+    monkeypatch.setattr(module,'run',run)
+    argv=['--split','test','--final','--scenarios','t0_5']
+    with pytest.raises(ValueError,match='Final test evaluates every scenario'):
+        module.main(argv)
+    module.main(argv+['--allow-final-subset'])
+    assert selected[0].scenario_id.tolist()==['t0_5']
+
+
+def test_final_subset_report_records_selection_and_all_predictor_decisions(tmp_path,monkeypatch):
+    from moonmesh_train import evaluation
+    monkeypatch.setattr(evaluation,'sha256_file',lambda path:'test-sha256')
+    monkeypatch.setattr(evaluation,'commit',lambda:'test-commit')
+    mask=np.array([[True,False],[True,False]])
+    valid=np.ones_like(mask)
+    values=score(mask,mask,valid,np.ones_like(mask,float),valid,
+        np.zeros_like(mask,float),np.zeros_like(mask,float),0,np.array([0.]))
+    rows=[dict(scenario_id='s0',predictor=p,dead_zone=k,group=g,level='all',label_origin='simulated',**values)
+        for p in ('deterministic','distance','lightgbm') for k in ('terrain','rf') for g in ('all','stratum')]
+    pd.DataFrame(rows).to_csv(tmp_path/'s0_metrics.csv',index=False)
+    for i in range(5):
+        pd.DataFrame([dict(scenario_id='s0',predictor=p,warm_ms=t,cold_ms=t,label_origin='simulated')
+            for p,t in [('deterministic',100.),('distance',1.),('lightgbm',5.)]]).to_csv(tmp_path/f'runtime_{i}.csv',index=False)
+    cfg=dict(_final_subset=True,_selection_rule='Test fixture selection rule',_split='test',_signature='test',
+        acceptance='acceptance.yaml',dataset='unused',seed=42)
+    evaluation.report(cfg,pd.DataFrame({'scenario_id':['s0']}),tmp_path)
+    metrics=json.loads((tmp_path/'metrics.json').read_text())
+    assert metrics['final_subset'] is True
+    assert metrics['scenario_ids']==['s0']
+    assert metrics['selection_rule']==cfg['_selection_rule']
+    assert set(metrics['acceptance_by_predictor'])=={'deterministic','distance','lightgbm'}
+    assert metrics['acceptance_by_predictor']['lightgbm']['min_speedup']['passed']
+    summary=(tmp_path/'summary.md').read_text()
+    assert cfg['_selection_rule'] in summary and 's0' in summary and 'final_subset: true' in summary
+    assert json.loads((tmp_path/'decision.json').read_text())['ship']=='model'
 
 
 def test_lunar_polar_pixel_area_uses_scale_squared():

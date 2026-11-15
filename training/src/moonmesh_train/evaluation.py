@@ -38,17 +38,15 @@ def register_predictor(name, function):
     EXTRA_PREDICTORS[name] = function
 
 
-def select_scenarios(frame, requested=None, split='val'):
+def select_scenarios(frame, requested=None, split='val', allow_final_subset=False):
     frame = frame.sort_values(['transmitter_id', 'tx_height_agl_m'])
-    if split == 'test' and requested:
+    if split == 'test' and requested and not allow_final_subset:
         raise ValueError('Final test evaluates every scenario')
     if requested and not (len(requested) == 1 and requested[0].isdigit()):
         if not set(requested) <= set(frame.scenario_id):
             raise ValueError('Scenario IDs must belong to the selected split')
         return frame[frame.scenario_id.isin(requested)]
-    if split == 'test':
-        if requested:
-            raise ValueError('Final test evaluates every scenario')
+    if split == 'test' and not requested:
         return frame
     n = int(requested[0]) if requested else 24
     tx = frame.drop_duplicates('transmitter_id')
@@ -368,7 +366,8 @@ def report(cfg,selected,out):
     rows.to_csv(out/'raw_metrics.csv',index=False)
     runtimes=pd.concat([pd.read_csv(out/f'runtime_{i}.csv') for i in range(5)],ignore_index=True)
     runtimes.to_csv(out/'runtime.csv',index=False)
-    cross_plan=json.loads((out/'cross_source_plan.json').read_text())
+    final_subset=cfg.get('_final_subset',False)
+    cross_plan={'scenario_ids':[]} if final_subset else json.loads((out/'cross_source_plan.json').read_text())
     cross=[json.loads((out/('cross_'+sid+'.json')).read_text()) for sid in cross_plan['scenario_ids']]
     pd.DataFrame(cross).to_csv(out/'cross_source.csv',index=False)
     main=rows[rows.group=='all']
@@ -413,6 +412,19 @@ def report(cfg,selected,out):
             native5m_dem_sha256=sha256_file(paths.data_root()/'derived/terrain/haworth/pgda78_native_5m.tif'),
             acceptance_sha256=sha256_file(configs_dir()/cfg['acceptance']),
             evaluation_implementation_sha256=sha256_file(Path(__file__))))
+    if final_subset:
+        result.update(final_subset=True,selection_rule=cfg['_selection_rule'])
+        by_predictor={}
+        for predictor in ('deterministic','distance','lightgbm'):
+            values={k:None if any(aggregate[predictor+'_'+kind][k] is None for kind in ('terrain','rf')) else
+                max(aggregate[predictor+'_'+kind][k] for kind in ('terrain','rf'))
+                for k in ('false_covered_frac','boundary_p95_m','near_threshold_margin_mae_db')}
+            values['min_speedup']=times['deterministic']/times[predictor]
+            by_predictor[predictor]={k:dict(value=values[k],threshold=float(limit),
+                passed=False if values[k] is None else bool(values[k]>=limit if k=='min_speedup' else values[k]<=limit))
+                for k,limit in accept.items()}
+        result['acceptance_by_predictor']=by_predictor
+        warnings.append('Time-boxed final subset; cross-source checks remain the separate validation results and were not rerun on test.')
     atomic_json(out/'metrics.json',result)
     if cfg['_split']=='val':
         atomic_json(paths.reports_dir()/'eval/unet_decision.json',dict(recommended=recommended,
@@ -427,11 +439,37 @@ def report(cfg,selected,out):
         lines.append('| '+key+' | '+' | '.join('null' if g[k] is None else f'{g[k]:.6g}' for k in fields)+' |')
     lines += ['', '| Predictor | Warm mean ms/scenario | Speedup |', '|---|---:|---:|']
     lines += [f'| {k} | {v:.3f} | {times["deterministic"]/v:.3f} |' for k,v in times.items()]
-    lines += ['',f'One application-cold run and five warm scenarios are recorded per predictor in runtime.csv. Cross-source LOS flip fraction: {result["cross_source_flip_fraction"]:.8f} on five validation scenarios (jointly valid paths only).',
+    cross_fraction=result['cross_source_flip_fraction']
+    lines += ['',f'One application-cold run and five warm scenarios are recorded per predictor in runtime.csv. Cross-source LOS flip fraction: {cross_fraction} on five validation scenarios (jointly valid paths only).',
         '', 'Areas use projected pixel area divided by the spherical polar stereographic scale factor squared: k = 1 + rho²/(4R²), with CRS verified against the labeler projection. Boundary EDT distances use local 1/k correction.',
         '', 'False-covered fraction = false-covered area / true-dead area, separately for terrain and RF. Near threshold means absolute true margin minus required margin <= 3 dB. Full per-scenario and stratified metrics are in raw_metrics.csv; aggregate metrics in metrics.json.',
         '', '## Limitations','']+['- '+w for w in warnings]
     (out/'summary.md').write_text('\n'.join(lines)+'\n',encoding='utf-8')
+    if final_subset:
+        criteria=by_predictor['lightgbm']
+        ship=all(c['passed'] for c in criteria.values())
+        reasons=[f'LightGBM {k}: {"PASS" if c["passed"] else "FAIL"} (value {c["value"]}, threshold {c["threshold"]})'
+            for k,c in criteria.items()]
+        decision=dict(ship='model' if ship else 'deterministic',model='lightgbm' if ship else None,
+            scenarios_evaluated=len(selected),final_subset=True,reasons=reasons)
+        atomic_json(out/'decision.json',decision)
+        lines=['# Time-boxed final test (simulated)', '',
+            f'Time-boxed final test on {len(selected)} of 80 test scenarios; final_subset: true. Commit `{commit()}`; seed {cfg["seed"]}.',
+            '', 'Selection rule: '+cfg['_selection_rule'], '', 'Scenario IDs: '+', '.join(selected.scenario_id),
+            '', '| Predictor | Criterion | Value | Threshold | Result |','|---|---|---:|---:|---|']
+        for predictor,checks in by_predictor.items():
+            lines += [f'| {predictor} | {k} | {c["value"]} | {c["threshold"]} | {"PASS" if c["passed"] else "FAIL"} |'
+                for k,c in checks.items()]
+        lines += ['', '**Ship '+('the learned LightGBM model.' if ship else 'the deterministic map.')+'**', '']+reasons
+        lines += ['', 'Acceptance uses the worse of terrain and RF results; boundary p95 is the worst scenario. '
+            'The deterministic reference has speedup 1 and therefore fails the acceleration criterion by definition.',
+            '', 'Runtime includes raster reads, model construction, horizon/profile features, all three heads and post-processing. '
+            'One application-cold and five warm scenario measurements per predictor are in runtime.csv; Python startup is excluded and OS cache is uncontrolled.',
+            '', '| Predictor | Warm mean ms/scenario | Speedup |','|---|---:|---:|']
+        lines += [f'| {k} | {v:.3f} | {times["deterministic"]/v:.3f} |' for k,v in times.items()]
+        lines += ['', 'Full aggregate, scenario and stratified results are in metrics.json, raw_metrics.csv and stratified_metrics.csv. '
+            'No test tuning was performed. All labels and predictions are simulated.', '', 'Limitations:']+['- '+w for w in warnings]
+        (out/'summary.md').write_text('\n'.join(lines)+'\n',encoding='utf-8')
     if cfg['_split']!='val':
         return
     gates=[dict(name='Three predictors on all 24 validation scenarios',passed=len(selected)==24 and len(main)==144,value=len(main)),
@@ -454,11 +492,18 @@ def run(args):
     if shutil.disk_usage(root.anchor).free < 12*1024**3:
         raise OSError('Evaluation writes could leave less than 10 GB free')
     frame=pd.read_parquet(root/cfg['dataset']/'scenarios.parquet',filters=[('split','==',args.split)])
-    selected=select_scenarios(frame,args.scenarios,args.split)
+    selected=select_scenarios(frame,args.scenarios,args.split,getattr(args,'allow_final_subset',False))
+    if args.split=='test' and args.scenarios and getattr(args,'allow_final_subset',False):
+        cfg['_final_subset']=True
+        selection_path=paths.reports_dir()/'eval/final/selection.json'
+        selection=json.loads(selection_path.read_text()) if selection_path.exists() else {}
+        cfg['_selection_rule']=selection.get('selection_rule','Explicit scenario IDs supplied via --scenarios; sorted by transmitter ID then height.') if set(selection.get('scenario_ids',[]))==set(selected.scenario_id) else 'Explicit scenario IDs supplied via --scenarios; sorted by transmitter ID then height.'
     cfg['_split']=args.split
     cfg['_signature']=config_hash(dict(config=cfg,scenarios=selected.scenario_id.tolist(),
         implementation=sha256_file(Path(__file__)),models={n:sha256_file(root/cfg['models']/(n+'.txt')) for n in ('los','margin','clearance')}))
     out=paths.reports_dir()/'eval'/(cfg['run_id'] if args.split=='val' else cfg['run_id']+'_final_test')
+    if cfg.get('_final_subset'):
+        out=paths.reports_dir()/'eval/final'
     out.mkdir(parents=True,exist_ok=True)
     plan=out/'plan.json'
     if plan.exists() and json.loads(plan.read_text())['config_hash']!=cfg['_signature']:

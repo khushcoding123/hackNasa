@@ -10,6 +10,8 @@ def main(argv=None):
     p.add_argument('--config', type=Path, default=configs_dir()/'eval_haworth.yaml')
     p.add_argument('--split', choices=['val', 'test'], default='val')
     p.add_argument('--final', action='store_true')
+    p.add_argument('--allow-final-subset', action='store_true',
+                   help='Explicitly permit a time-boxed final subset; record selection provenance')
     p.add_argument('--scenarios', nargs='+', help='Explicit scenario IDs, or a subset count (default 24 on val)')
     p.add_argument('--max-scenarios', type=int, default=1, help='Bounded resumable work per invocation')
     p.add_argument('--phase', choices=['maps', 'runtime', 'cross-source', 'report'], default='maps')
