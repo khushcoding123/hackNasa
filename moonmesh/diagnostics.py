@@ -1,7 +1,7 @@
 """Traceable, sampled communication evidence. These functions do not change physics."""
 import numpy as np
 
-from lunar_core.terrain import radial_points
+from lunar_core.terrain import polar_stereographic_south, radial_points
 from .costs import cost_report
 from .network import evaluate, metrics, spans
 
@@ -25,7 +25,8 @@ def horizon_evidence(point, horizon, azimuth):
     for bearing, height, distance in zip(horizon.azimuth_deg, horizon.elevation_deg, horizon.distance_m):
         valid = bool(np.isfinite(height) and np.isfinite(distance))
         lat, lon = radial_points(point.lat, point.lon, bearing, distance) if valid else (None, None)
-        rays.append(dict(azimuth_deg=float(bearing), elevation_deg=float(height) if valid else None,
+        map_x, map_y = polar_stereographic_south(lat, lon) if valid else (None, None)
+        rays.append(dict(map_x_m=float(map_x) if valid else None, map_y_m=float(map_y) if valid else None, azimuth_deg=float(bearing), elevation_deg=float(height) if valid else None,
             distance_m=float(distance) if valid else None, lat=float(lat) if valid else None,
             lon=float(lon) if valid else None, approximate=True,
             todo=None if valid else "TODO: terrain coverage is incomplete on this sampled ray."))

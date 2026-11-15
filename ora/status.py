@@ -155,14 +155,15 @@ def loaded(name):
 def git_state():
     """Commit, branch and a hash of uncommitted changes (tracked diff plus untracked files), so a report can be tied to code."""
     def git(*args):
-        return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, check=True).stdout
+        return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, check=True, timeout=10).stdout
     try:
         commit = git("rev-parse", "HEAD").decode().strip()
         branch = git("rev-parse", "--abbrev-ref", "HEAD").decode().strip()
         diff = git("diff", "HEAD", "--binary")
         untracked = git("ls-files", "--others", "--exclude-standard", "-z").decode().split("\0")
-    except (OSError, subprocess.CalledProcessError) as error:
-        return dict(commit=None, error=f"git unavailable: {error}")
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        return dict(commit=locals().get("commit"), branch=locals().get("branch"),
+                    diff_sha256=None, error=f"git provenance incomplete: {error}")
     digest = hashlib.sha256(diff)
     for name in sorted(n for n in untracked if n):
         digest.update(name.encode())

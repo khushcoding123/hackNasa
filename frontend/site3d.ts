@@ -49,7 +49,7 @@ async function loadGrid(lat: number, lon: number, half: number, size: number, si
 
 export interface SiteOptions {
  lat: number; lon: number; name: string; detail: "near" | "far" | "global"; result?: Result; index?: number; disabled?: Set<string>;
- onClose: () => void;
+ onClose: () => void; onTime?: (index:number) => void;
 }
 
 export class SiteView {
@@ -152,7 +152,7 @@ export class SiteView {
   range("[data-scale]", "[data-scale-out]", v => `×${v}`, v => { this.scale = v; this.applyScale(); });
   range("[data-ex]", "[data-ex-out]", v => `×${v}`, v => { if (this.terrain) this.terrain.scale.y = v; if (this.innerTerrain) this.innerTerrain.scale.y = v; this.applyScale(); });
   const time = this.q<HTMLInputElement>("[data-time]");
-  time.oninput = () => this.setIndex(Number(time.value), true);
+  time.oninput = () => {const index=Number(time.value);if(this.options.onTime)this.options.onTime(index);else this.setIndex(index,true);};
   this.q<HTMLSelectElement>("[data-light-mode]").onchange = e => {
    this.lightMode = (e.target as HTMLSelectElement).value as "inspection" | "mission";
    if (this.lightMode === "mission") this.setIndex(this.index);

@@ -64,6 +64,7 @@ export interface MoonHooks {
  onUsePin?: (lat: number, lon: number, site: string) => void;
  onChooseRegion?: (siteId: string) => void;
  onSelectCandidate?: (candidate: Candidate) => void;
+ onTime?: (index:number) => void;
  /** A square or free-form area was drawn: vertices as [latitude, east longitude]. */
  onArea?: (polygon: [number, number][]) => void;
 }
@@ -779,7 +780,7 @@ export class MoonView {
   const detail = this.terrain?.detailAt(place.lat, place.lon) ?? "global";
   const mission = r && angular(r.site, place.lat, place.lon) < 500 ? r : undefined;
   this.root.dataset.site = "open";
-  this.site = new SiteView(this.root, {...place, detail, result: mission, index: this.index, disabled: this.disabled, onClose: () => this.closeSite()});
+  this.site = new SiteView(this.root, {...place, detail, result: mission, index: this.index, disabled: this.disabled, onClose: () => this.closeSite(), onTime: index=>this.hooks.onTime?.(index)});
   this.site.update(this.index,this.disabled,this.evidenceCase,this.evidenceScope,this.previewRelays);
  }
  closeSite() { this.site?.dispose(); this.site = undefined; delete this.root.dataset.site; this.viewer?.scene.requestRender(); }

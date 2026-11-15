@@ -119,8 +119,9 @@ def surface_path(grid, first, second, evidence=None):
         clearance = chord - MOON_RADIUS_M - samples
         index = int(np.argmin(clearance))
         lat, lon = radial_points(first.lat, first.lon, bearing, distance*fractions[index])
+        map_x, map_y = polar_stereographic_south(lat, lon)
         evidence.update(minimum_clearance_m=float(clearance[index]), todo=None,
-            location=dict(lat=float(lat), lon=float(lon), distance_m=float(distance*fractions[index]),
+            location=dict(map_x_m=float(map_x), map_y_m=float(map_y), lat=float(lat), lon=float(lon), distance_m=float(distance*fractions[index]),
                           approximate=True, basis='Minimum clearance at a sampled surface-path point.'))
     return bool(np.all(chord > MOON_RADIUS_M + samples)), distance/1000
 

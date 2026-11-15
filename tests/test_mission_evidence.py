@@ -152,6 +152,49 @@ class SearchEvidenceTests(unittest.TestCase):
         for config in evidence['configurations'].values():
             self.assertEqual(metrics(config['timeline'],.5),config['network'])
 
+    def test_case_specific_marginals_and_comparison_reasons(self):
+        mission = Mission(max_relays=2, resilient=False, availability=100, blackout_hours=0)
+        direct = {c: np.zeros(4, bool) for c in CASES}
+        relays = {c: [np.array([True, True, True, True]), np.array([True, False, False, False])] for c in CASES}
+        relays['cold_dust'][1] = np.array([True, True, True, False])
+        records = []
+        selected, _ = optimize_environment(direct, relays, [0, 1], mission, evidence=records)
+        e = optimization_evidence(records, selected, [dict(id='R1'), dict(id='R2')], direct, relays, mission, None)
+        marginal = e['marginal'][0]
+        for case, v in marginal['cases'].items():
+            without = e['configurations'][marginal['without']]['cases'][case]['network']
+            with_relay = e['configurations'][e['selected']]['cases'][case]['network']
+            self.assertEqual(v['availability_gain_pp'], with_relay['availability']-without['availability'])
+            self.assertEqual(v['recovered_hours'], without['total']-with_relay['total'])
+        self.assertEqual(marginal['availability_gain_pp'], marginal['cases']['cold_dust']['availability_gain_pp'])
+        self.assertIn('more relays', e['configurations']['R1,R2']['comparison_reason'])
+        self.assertIn('Does not meet', e['configurations']['R2']['comparison_reason'])
+
+    def test_marginals_change_by_case_without_double_counting(self):
+        mission = Mission(max_relays=2, resilient=False, availability=100, blackout_hours=0)
+        direct = {c: np.zeros(4, bool) for c in CASES}
+        relays = {c: [np.array([True, True, False, False]), np.array([False, False, True, True])] for c in CASES}
+        relays['nominal'][0] = np.ones(4, bool)
+        records = []
+        selected, _ = optimize_environment(direct, relays, [0, 1], mission, evidence=records)
+        e = optimization_evidence(records, selected, [dict(id='R1'), dict(id='R2')], direct, relays, mission, None)
+        r2 = next(m for m in e['marginal'] if m['relay_id']=='R2')
+        self.assertEqual(r2['cases']['nominal']['recovered_hours'], 0)
+        self.assertEqual(r2['cases']['cold_dust']['recovered_hours'], 1)
+
+    def test_empty_catalog_direct_only_and_infeasible(self):
+        for up in (True, False):
+            mission = Mission(availability=100, blackout_hours=0)
+            direct = {c: np.full(4, up, bool) for c in CASES}
+            relays = {c: [] for c in CASES}
+            records = []
+            selected, feasible = optimize_environment(direct, relays, [], mission, evidence=records)
+            self.assertEqual((selected, feasible), ((), up))
+            e = optimization_evidence(records, selected, [], direct, relays, mission, None)
+            self.assertEqual(e['selected'], 'none')
+            self.assertEqual(e['marginal'], [])
+            self.assertEqual(e['evaluated'], 1)
+
 
 DATA=Path(__file__).resolve().parents[1]/'.moonmesh-data'
 @unittest.skipUnless((DATA/'terrain/haworth_near20km.npz').is_file() and (DATA/'kernels/de440s.bsp').is_file(),
@@ -195,6 +238,24 @@ class IntegratedEvidenceTests(unittest.TestCase):
         sheets=archive.read('xl/workbook.xml').decode()
         for name in ('Network Outages','Outage Causes','Link Evidence','Node Evidence','Relay Alternatives','Marginal Gains'):
             self.assertIn(name,sheets)
+
+    def test_workbook_selected_case_and_marginal_values(self):
+        from moonmesh.excel import ExportRequest, export_workbook
+        from io import BytesIO
+        from zipfile import ZipFile
+        from xml.etree import ElementTree as ET
+        r = self.result
+        archive = ZipFile(BytesIO(export_workbook(ExportRequest(result=r, environment_case='nominal'))))
+        ns = {'s': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+        workbook = ET.fromstring(archive.read('xl/workbook.xml'))
+        names = [s.attrib['name'] for s in workbook.findall('s:sheets/s:sheet', ns)]
+        xml = archive.read(f"xl/worksheets/sheet{names.index('Marginal Gains')+1}.xml").decode()
+        self.assertIn('Case', xml)
+        if r['optimization_evidence']['marginal']:
+            self.assertIn('nominal', xml)
+            self.assertIn('cold_dust', xml)
+        with self.assertRaises(ValueError):
+            export_workbook(ExportRequest(result=r, outage_scope='not-a-selected-path'))
 
 
 if __name__=='__main__':

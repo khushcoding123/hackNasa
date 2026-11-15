@@ -635,7 +635,7 @@ function usePin(lat:number,lon:number,_site:string){
 function startMoon(attempt=0){
  const host=$("#moon"), box=host.getBoundingClientRect();
  if((box.width<2||box.height<2||document.hidden)&&attempt<50){setTimeout(()=>startMoon(attempt+1),200);return;}
- moon=new MoonView(host,{onUsePin:usePin,onChooseRegion:chooseRegion,onSelectCandidate:selectTower,onArea});
+ moon=new MoonView(host,{onUsePin:usePin,onChooseRegion:chooseRegion,onSelectCandidate:selectTower,onTime:move,onArea});
  (window as unknown as {__moonview?:MoonView}).__moonview=moon;   // diagnostics hook for browser tests
  if(host.querySelector(".vw-fallback")&&attempt<53){
   const failed=moon;setTimeout(()=>{if(moon!==failed)return;failed.dispose();host.replaceChildren();startMoon(Math.max(attempt,50)+1);},800);

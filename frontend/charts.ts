@@ -1,5 +1,4 @@
 import {candidateAvailable, earthHorizonNote, evidenceFocus} from "./mission-evidence.js";
-import {MOON_RADIUS_M} from "./terrain-mesh.js";
 import type {Result, Candidate} from "./types.js";
 
 export function powerTimeline(candidate:Candidate, capacity:number, index:number, target:string|HTMLCanvasElement="power-timeline") {
@@ -83,28 +82,15 @@ export function map(result:Result, layer:string, disabled:Set<string>, index:num
     if(disabled.has(c.id)){ctx.strokeStyle="#ff6b6b";ctx.beginPath();ctx.moveTo(x-5,y-5);ctx.lineTo(x+5,y+5);ctx.moveTo(x-5,y+5);ctx.lineTo(x+5,y-5);ctx.stroke();}
     if(active||c.id===selected){ctx.font="12px monospace";ctx.fillStyle="#ffffff";ctx.fillText(c.id,x+7,y-4);}
   });
+  ctx.fillStyle="#33adff";ctx.fillRect(cx-4,cy-4,8,8);
   if(scope){
     const focus=evidenceFocus(result,disabled,scope,caseName,index);
-    const positions=new Map<string,{x:number;y:number}>([['Lander',{x:cx,y:cy}],...points.map(p=>[p.c.id,{x:p.x,y:p.y}] as [string,{x:number;y:number}])]);
-    for(const [id,state] of focus.links){
-      const ends=result.diagnostics!.links[id].nodes.map(node=>positions.get(node));
-      if(ends.length!==2||!ends[0]||!ends[1])continue;
-      ctx.strokeStyle=state==='failed'?'#ff6b6b':'#f4ba72';ctx.lineWidth=3;ctx.setLineDash([5,4]);
-      ctx.beginPath();ctx.moveTo(ends[0].x,ends[0].y);ctx.lineTo(ends[1].x,ends[1].y);ctx.stroke();ctx.setLineDash([]);
-    }
-    for(const [id,state] of focus.nodes){const p=positions.get(id);if(!p)continue;
-      ctx.strokeStyle=state==='failed'?'#ff6b6b':'#f4ba72';ctx.lineWidth=3;ctx.beginPath();ctx.arc(p.x,p.y,14,0,2*Math.PI);ctx.stroke();
-    }
-    // The mission map uses south-polar stereographic coordinates at research sites.
-    // Do not place geodetic markers on an unspecified local projection elsewhere.
-    if(result.site.lat<=-85)for(const marker of focus.markers){
-      const rho=2*MOON_RADIUS_M*Math.tan((90+marker.lat)*Math.PI/360),lon=marker.lon*Math.PI/180;
-      const x=cx+(rho*Math.sin(lon)-result.map.x)*scale,y=cy-(rho*Math.cos(lon)-result.map.y)*scale;
-      ctx.strokeStyle=marker.status==='failed'?'#ff6b6b':'#f4ba72';ctx.lineWidth=2;
-      ctx.beginPath();ctx.moveTo(x-5,y-5);ctx.lineTo(x+5,y+5);ctx.moveTo(x-5,y+5);ctx.lineTo(x+5,y-5);ctx.stroke();
-    }
+
+    const locations=new Map<string,number[]>([['Lander',[cx,cy]],...points.map(p=>[p.c.id,[p.x,p.y]] as [string,number[]])]);
+    for(const [id,state] of focus.links){const endpoints=result.diagnostics!.links[id].nodes.map(n=>locations.get(n));if(endpoints.every(p=>p)){ctx.strokeStyle=state==='failed'?'#ff6b6b':'#f4ba72';ctx.lineWidth=4;ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(endpoints[0]![0],endpoints[0]![1]);ctx.lineTo(endpoints[1]![0],endpoints[1]![1]);ctx.stroke();ctx.setLineDash([]);}}
+    for(const [id,state] of focus.nodes){const p=locations.get(id);if(p){ctx.strokeStyle=state==='failed'?'#ff6b6b':'#f4ba72';ctx.lineWidth=3;ctx.beginPath();ctx.arc(p[0],p[1],14,0,Math.PI*2);ctx.stroke();}}
+    for(const marker of focus.markers){if(marker.map_x_m==null||marker.map_y_m==null)continue;const x=cx+(marker.map_x_m-result.map.x)*scale,y=cy-(marker.map_y_m-result.map.y)*scale;ctx.strokeStyle=marker.status==='failed'?'#ff6b6b':'#f4ba72';ctx.strokeRect(x-5,y-5,10,10);ctx.fillStyle=ctx.strokeStyle;ctx.fillText('Approx. terrain sample',x+8,y);}
   }
-  ctx.fillStyle="#33adff";ctx.fillRect(cx-4,cy-4,8,8);
   ctx.restore();
   ctx.fillStyle="#ffffff";ctx.font="12px monospace";ctx.fillText("GRID N ↑",x0+9,17);
   const bar=Math.min(5,Math.floor(side*.22/scale/1000));

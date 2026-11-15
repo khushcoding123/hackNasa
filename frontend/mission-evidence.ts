@@ -47,7 +47,7 @@ export function outageEvidence(r:Result,disabled:Set<string>,scope:string,caseNa
 export function evidenceFocus(r:Result,disabled:Set<string>,scope:string,caseName:string,index:number){
  const d=r.diagnostics;
  const nodes=new Map<string,'failed'|'unknown'>(),links=new Map<string,'failed'|'unknown'>();
- const markers:{id:string;lat:number;lon:number;status:'failed'|'unknown';approximate:boolean}[]=[];
+ const markers:{id:string;lat:number;lon:number;map_x_m?:number|null;map_y_m?:number|null;status:'failed'|'unknown';approximate:boolean}[]=[];
  if(!d)return {nodes,links,markers};
  const status=(gates:DiagnosticGate[])=>gates.some(g=>g.ok[index]===false)?'failed':gates.some(g=>g.ok[index]==null)?'unknown':undefined;
  const paths=participatingPaths(r).filter(p=>scope==='network'||p.id===scope);
@@ -59,7 +59,7 @@ export function evidenceFocus(r:Result,disabled:Set<string>,scope:string,caseNam
    if(!terrainIssue)continue;
    const h=link.horizon;
    const rays=h?[h.rays[h.left[index]],...(h.weight[index]===0?[]:[h.rays[h.right[index]]])]:link.location?[link.location]:[];
-   rays.forEach((ray,j)=>{if(ray.lat!=null&&ray.lon!=null)markers.push({id:`${id} terrain sample ${j+1}`,lat:ray.lat,lon:ray.lon,status:state,approximate:true});});
+   rays.forEach((ray,j)=>{if(ray.lat!=null&&ray.lon!=null)markers.push({id:`${id} terrain sample ${j+1}`,lat:ray.lat,lon:ray.lon,map_x_m:ray.map_x_m,map_y_m:ray.map_y_m,status:state,approximate:true});});
   }
  }
  return {nodes,links,markers};
