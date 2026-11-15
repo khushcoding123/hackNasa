@@ -71,20 +71,18 @@ class CostTests(unittest.TestCase):
 
 
 class ExportTests(unittest.TestCase):
-    def test_formulas_cached_totals_and_failure_cost(self):
+    def test_sparse_export_retains_flat_total_when_a_relay_is_disabled(self):
         content = export_workbook(ExportRequest(result=snapshot(), disabled=["R1"]))
-        costs = cells(content, 2)
-        self.assertEqual(costs["E2"], ("ROUND(C2*D2,2)", 40000))
-        self.assertEqual(costs["E10"], ("SUM(E2:E8)", 200000))
-        self.assertEqual(cells(content, 1)["B3"], ("'Cost Breakdown'!E10", 200000))
+        self.assertEqual(cells(content, 1)["B3"], (None, 200000))
         with ZipFile(BytesIO(content)) as archive:
             workbook = archive.read("xl/workbook.xml").decode()
-        for name in ("Summary", "Cost Breakdown", "Nodes", "Mission Results", "Assumptions", "Environment"):
+        self.assertNotIn('name="Cost Breakdown"', workbook)
+        for name in ("Summary", "Nodes", "Mission Results", "Assumptions", "Environment"):
             self.assertIn(f'name="{name}"', workbook)
 
-    def test_override_exports_one_bundled_line(self):
+    def test_override_updates_flat_total_in_summary(self):
         content = export_workbook(ExportRequest(result=snapshot(123.45)))
-        self.assertEqual(cells(content, 2)["E4"], ("SUM(E2:E2)", 246.9))
+        self.assertEqual(cells(content, 1)["B3"], (None, 246.9))
 
     def test_area_download_uses_area_count(self):
         area = dict(site=dict(name="Drawn area"), plan=dict(chosen=[1, 2, 3]),

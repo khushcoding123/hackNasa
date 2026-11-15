@@ -150,7 +150,7 @@ def export_workbook(request: ExportRequest) -> bytes:
     try:
         dynamic = costmodel.estimate(result, area, scope=request.scope, satellite=request.satellite, overrides=request.coefficients)
     except (KeyError, TypeError, IndexError, ZeroDivisionError):
-        dynamic = None   # a sparse snapshot: the flat breakdown below is still exported
+        dynamic = None   # a sparse snapshot may only have a flat estimate
     except ValueError as error:
         if "coefficient" in str(error):
             raise
@@ -199,11 +199,10 @@ def export_workbook(request: ExportRequest) -> bytes:
                 row += 1
             return row + 2
 
-        total_row = len(cost["items"]) + 2  # zero-based row on Cost Breakdown
         summary = sheet("Summary", [36, 85])
         summary.write(0, 0, "MOONMESH network installation", title)
         summary.write(2, 0, "Flat estimate (same price for every node)")
-        summary.write_formula(2, 1, f"='Cost Breakdown'!E{total_row + 1}", money, cost["total_usd"])
+        summary.write_number(2, 1, cost["total_usd"], money)
         if dynamic:
             dynamic_total_row = len(dynamic["items"]) + 3   # one-based row of the total on Dynamic Cost
             summary.write(3, 0, "Dynamic estimate (priced from this scenario)", title_small)
@@ -226,30 +225,14 @@ def export_workbook(request: ExportRequest) -> bytes:
             ["Simulated disabled mission relays", ", ".join(request.disabled) or "None"],
             ["Pricing basis", cost["pricing_basis"]],
             ["Scope and exclusions", cost["assumptions"]],
-            ["Editing prices", "Blue unit prices are editable. Workbook totals update; website recommendations do not."],
-            *([["Dynamic estimate vs flat", f"${dynamic['total_usd'] - cost['total_usd']:+,.2f} ({(dynamic['total_usd'] / cost['total_usd'] - 1) * 100:+.1f}%)"
+            *([["Editing prices", "Edit blue unit prices on Dynamic Cost to recalculate the dynamic total."],
+               ["Dynamic estimate vs flat at export", f"${dynamic['total_usd'] - cost['total_usd']:+,.2f} ({(dynamic['total_usd'] / cost['total_usd'] - 1) * 100:+.1f}%)"
                 if cost["total_usd"] else "No flat estimate to compare"],
                ["Relay satellite", (f"{dynamic['satellite']['count']} satellite(s) at {dynamic['satellite']['radius_km'] - costmodel.MOON_RADIUS_M / 1000:,.0f} km, "
                                     f"{dynamic['satellite']['speed_km_s']:.3f} km/s: ${dynamic['satellite_usd']:,.2f}")
                 if dynamic["satellite"] else "Not included. Add one from the Cost tab to price it."],
                ["Dynamic model", dynamic["assumptions"]]] if dynamic else []),
         ])
-
-        costs = sheet("Cost Breakdown", [22, 52, 14, 22, 24])
-        costs.write_row(0, 0, ["Category", "Item", "Quantity", "Unit cost (USD)", "Total (USD)"], heading)
-        costs.set_row(0, 30)
-        for row, item in enumerate(cost["items"], 1):
-            costs.write_string(row, 0, item["category"])
-            costs.write_string(row, 1, item["item"])
-            costs.write_number(row, 2, item["quantity"])
-            costs.write_number(row, 3, item["unit_cost_usd"], editable)
-            costs.write_formula(row, 4, f"=ROUND(C{row+1}*D{row+1},2)", money, item["total_usd"])
-        costs.autofilter(0, 0, len(cost["items"]), 4)
-        costs.write(total_row, 1, "Total installation cost", heading)
-        costs.write_formula(total_row, 4, f"=SUM(E2:E{len(cost['items'])+1})", money, cost["total_usd"])
-        costs.write(total_row + 2, 1, "Pricing basis")
-        costs.write(total_row + 2, 2, cost["pricing_basis"])
-        costs.write(total_row + 3, 1, "No launch or ongoing operations costs included.")
 
         if dynamic:
             write_dynamic_sheets(sheet, table, cell, heading, money, editable, wrapped, percent, total_format, title_small, dynamic, cost)
