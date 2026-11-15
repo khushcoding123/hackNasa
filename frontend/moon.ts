@@ -21,6 +21,8 @@ Ellipsoid.default = MOON;
 type Mode = "map" | "3d";
 interface View { lat: number; lon: number; extent: number; heading: number; pitch: number }
 const FULL_EXTENT = 2 * R * 1.06, MIN_EXTENT = 2000, MAX_EXTENT = FULL_EXTENT * 3, ORTHO_DISTANCE = 60 * R;
+const DEFAULT_VIEW: View = {lat: 8, lon: 12, extent: FULL_EXTENT, heading: 0, pitch: -Math.PI / 2};
+const LANDING_VIEW: View = {...DEFAULT_VIEW, extent: 4.4 * R};
 const MISSION_REGIONS: Record<string, string> = {haworth: "haworth", nobile: "nobile-rim-1", malapert: "malapert"};
 const RESEARCH = new Set(Object.keys(MISSION_REGIONS));
 const deg = CesiumMath.toDegrees, rad = CesiumMath.toRadians;
@@ -81,6 +83,7 @@ function pinImage() {
 }
 
 export interface MoonHooks {
+ onOpenExplorer?: () => void;
  /** The user chose to test a dropped pin as the mission location. `site` is the region whose terrain covers it. */
  onUsePin?: (lat: number, lon: number, site: string) => void;
  onChooseRegion?: (siteId: string) => void;
@@ -124,7 +127,7 @@ export class MoonView {
  private mode: Mode = "map";
  private disposed = false;
  private labelsOn = true;
- private view: View = {lat: 8, lon: 12, extent: FULL_EXTENT, heading: 0, pitch: -Math.PI / 2};
+ private view: View = DEFAULT_VIEW;
  private cameraOffset = 0;
  private animation = 0;
  private labelButtons: {feature: Landmark; button: HTMLButtonElement}[] = [];
@@ -253,8 +256,7 @@ export class MoonView {
   scene.globe.tileLoadProgressEvent.addEventListener(count => { this.root.dataset.loading = String(count); scene.requestRender(); if (count === 0) this.refreshReadouts(); });
   this.setupLabels();
   this.setupPicking();
-  if (this.landingOffset()) this.view.extent = 3 * R;
-  this.apply(this.view);
+  this.apply(this.isLanding() ? LANDING_VIEW : this.view);
   this.applyMode();
   // The first frames lay out the canvas; re-apply the initial view once it has a real size, then trust the camera.
   requestAnimationFrame(() => requestAnimationFrame(() => { if (this.viewer && !this.disposed) { this.apply(this.view); this.settled = true; this.refreshReadouts(); } }));
@@ -309,12 +311,8 @@ export class MoonView {
  }
 
  // ---------- camera ----------
- private landingOffset() {
-  const body = document.body;
-  if (!body.matches(".planner[data-step=landing].panel-collapsed:not(.exploring)")) return 0;
-  const split = parseFloat(getComputedStyle(body).getPropertyValue("--hero-split")) / 100;
-  // Put the Moon's rim just below the hero split at the initial zoom.
-  return split - 0.14;
+ private isLanding() {
+  return document.body.matches(".planner[data-step=landing].panel-collapsed:not(.exploring)");
  }
  private aspect() { const scene = this.viewer!.scene; return scene.drawingBufferWidth / Math.max(1, scene.drawingBufferHeight); }
  private canvasCenter() { const c = this.viewer!.scene.canvas; return new Cartesian2(c.clientWidth / 2, c.clientHeight / 2); }
@@ -342,7 +340,18 @@ export class MoonView {
   const camera = viewer.scene.camera;
   view = {...view, extent: Math.min(MAX_EXTENT, Math.max(MIN_EXTENT, view.extent))};
   const target = Cartesian3.fromDegrees(view.lon, view.lat, 0, MOON);
-  this.cameraOffset = this.landingOffset();
+  const wasLanding = this.cameraOffset !== 0;
+  const landing = this.isLanding();
+  this.cameraOffset = landing
+   ? Number(getComputedStyle(document.body).getPropertyValue("--hero-moon-offset"))
+   : 0;
+  if (landing !== wasLanding) {
+   for (const id of this.pins.keys()) {
+    const pin = viewer.entities.getById(`pin:${id}`);
+    if (pin) pin.show = !landing;
+   }
+   if (this.pinRing) this.pinRing.show = !landing;
+  }
   if (this.mode === "map") {
    camera.switchToOrthographicFrustum();
    viewer.resize();
@@ -363,6 +372,14 @@ export class MoonView {
   if (this.cameraOffset) camera.moveUp(view.extent * this.cameraOffset);
   this.view = view;
   viewer.scene.requestRender();
+ }
+ showLanding() {
+  if (!this.viewer) return;
+  cancelAnimationFrame(this.animation);
+  this.animation = 0;
+  this.mode = "map";
+  this.applyMode();
+  this.apply(LANDING_VIEW);
  }
  private clampZoom() {
   if (this.mode !== "map" || !this.viewer) return;
@@ -542,6 +559,13 @@ export class MoonView {
   this.handler.setInputAction((event: {position: Cartesian2}) => this.drawUp(event.position), ScreenSpaceEventType.LEFT_UP);
   this.handler.setInputAction((event: {position: Cartesian2}) => {
    if (this.drawKind || performance.now() < this.suppressClickUntil) return;
+   if (this.isLanding()) {
+    if (!this.surfacePoint(event.position)) return;
+    const view = this.readView();
+    this.hooks.onOpenExplorer?.();
+    this.apply({...view, extent: FULL_EXTENT / Math.min(1, this.aspect())});
+    return;
+   }
    const picked = scene.pick(event.position);
    const id = picked?.id && typeof picked.id === "object" && "id" in picked.id ? String((picked.id as Entity).id) : "";
    if (id.startsWith("pin:")) { this.selectPin(Number(id.slice(4))); return; }
@@ -590,6 +614,7 @@ export class MoonView {
 
  /** Drop a new pin anywhere on the Moon. */
  private dropPin(point: Cartesian3) {
+  if (this.isLanding()) return;
   if (this.pins.size >= MAX_PINS) { this.toast(`You can keep up to ${MAX_PINS} pins. Remove one to add another.`, true); return; }
   const c = Cartographic.fromCartesian(point, MOON)!;
   const id = ++this.pinSeq;

@@ -78,8 +78,12 @@ function updateNavigation(){
  $<HTMLButtonElement>('button[type="submit"]').disabled=busy||!configured||!area;
 }
 $("#start-mission").onclick=()=>navigate("configure");
-$("#explore-surface").onclick=()=>{
+function openMoonExplorer(){
  document.body.classList.add("exploring");
+ status("Exploring the Moon. Draw an area to start planning your network.");
+}
+$("#explore-surface").onclick=()=>{
+ openMoonExplorer();
  moon?.flyToSite(-89.6,0,160_000);
  status("Explore the south pole. Draw an area to start planning your network.");
 };
@@ -96,6 +100,7 @@ document.querySelectorAll<HTMLButtonElement>("[data-region]").forEach(button=>bu
 });
 function navigate(view:string,focus=true){
  if(!independentViews.includes(view)&&(!result||stale))view="configure";
+ const returningHome=view==="landing"&&(active!=="landing"||document.body.classList.contains("exploring"));
  if(active==="reference"&&view!=="reference"){
   moon?.setReferenceMission();
   moon?.setMission(stale?undefined:result);
@@ -117,7 +122,9 @@ function navigate(view:string,focus=true){
  form.hidden=view!=="configure";updateNavigation();
  $("#panel-tab-label").textContent=view==="landing"?"Guide":"Mission";
  setPanel(view!=="landing");
- render();if(focus&&view!=="landing")$("#title").focus();
+ render();
+ if(returningHome)moon?.showLanding();
+ if(focus&&view!=="landing")$("#title").focus();
 }
 function flow(){
  const index=steps.indexOf(active);
@@ -873,7 +880,7 @@ function usePin(lat:number,lon:number,_site:string){
 function startMoon(attempt=0){
  const host=$("#moon"), box=host.getBoundingClientRect();
  if((box.width<2||box.height<2||document.hidden)&&attempt<50){setTimeout(()=>startMoon(attempt+1),200);return;}
- moon=new MoonView(host,{onUsePin:usePin,onChooseRegion:chooseRegion,onSelectCandidate:selectTower,onArea,onSatelliteTime});
+ moon=new MoonView(host,{onOpenExplorer:openMoonExplorer,onUsePin:usePin,onChooseRegion:chooseRegion,onSelectCandidate:selectTower,onArea,onSatelliteTime});
  (window as unknown as {__moonview?:MoonView}).__moonview=moon;   // diagnostics hook for browser tests
  if(host.querySelector(".vw-fallback")&&attempt<53){
   const failed=moon;setTimeout(()=>{if(moon!==failed)return;failed.dispose();host.replaceChildren();startMoon(Math.max(attempt,50)+1);},800);
@@ -895,7 +902,9 @@ async function initialize(){
    }
   }
   $<HTMLButtonElement>('button[type="submit"]').disabled=false;
-  configured=true;dirty();status("Ready. Explore the Moon, then continue to mission setup.");navigate(active,false);
+  configured=true;dirty();
+  if(active==="landing"&&document.body.classList.contains("exploring"))return;
+  status("Ready. Explore the Moon, then continue to mission setup.");navigate(active,false);
  }catch(error){status((error as Error).message,true);$("#retry").hidden=false;$("#dirty").textContent="Settings unavailable — retry setup";}
 }
 $("#retry").onclick=()=>{$("#retry").hidden=true;void initialize();};
