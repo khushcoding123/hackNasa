@@ -351,5 +351,118 @@
   "limits": [
    "Needs no line-of-sight matrix at use time; the final set is still re-checked exactly."
   ]
+ },
+ "view_estimator": {
+  "task": "8 km viewshed share from a 24-ray sweep and cheap terrain features, Moon",
+  "labels": "dense line of sight to 6,000 random ground points per cell (ora.accuracy)",
+  "inputs": [
+   "sweep24_1km",
+   "sweep24_2km",
+   "sweep24_4km",
+   "sweep24_8km",
+   "slope",
+   "tpi_300",
+   "tpi_1000",
+   "tpi_3000",
+   "relief_500",
+   "rel_elev_3000",
+   "ridge_dist"
+  ],
+  "training_cells": 8550,
+  "dev_cross_validation": {
+   "r2_pct": 99.07883845474102,
+   "spearman_pct": 99.59529112975032,
+   "mae_points": 0.9744644386212933,
+   "bias_points": 0.03629943799609594,
+   "within_5_points_pct": 99.48538011695906,
+   "within_10_points_pct": 99.9766081871345,
+   "cells": 8550
+  },
+  "holdout": {
+   "r2_pct": 98.86171569490202,
+   "spearman_pct": 99.37939472114331,
+   "mae_points": 0.9329345061551407,
+   "bias_points": 0.05208156773331494,
+   "within_5_points_pct": 100.0,
+   "within_10_points_pct": 100.0,
+   "cells": 1200
+  },
+  "limits": [
+   "Trained on south-polar LOLA 20 m terrain, 10 m mast, 2 m receiver."
+  ]
+ },
+ "gain_selector": {
+  "task": "coverage a candidate adds given chosen sites, from 200 m view maps; no line-of-sight matrix",
+  "training_rows": 159372,
+  "windows": 57,
+  "holdout": {
+   "budget_4": {
+    "new_learned_selector": {
+     "mean_pct_of_exact": 94.28220808681283,
+     "worst_pct_of_exact": 92.04545454545455
+    },
+    "old_surrogate_shortlist": {
+     "mean_pct_of_exact": 98.04060214441859,
+     "worst_pct_of_exact": 89.99999999999999
+    },
+    "old_learned_gain": {
+     "mean_pct_of_exact": 79.64192619876474,
+     "worst_pct_of_exact": 55.49999999999999
+    },
+    "view_shortlist_60": {
+     "mean_pct_of_exact": 99.82765151515152,
+     "worst_pct_of_exact": 99.0
+    }
+   },
+   "budget_8": {
+    "new_learned_selector": {
+     "mean_pct_of_exact": 95.71321484744044,
+     "worst_pct_of_exact": 92.13197969543147
+    },
+    "old_surrogate_shortlist": {
+     "mean_pct_of_exact": 94.6150386578478,
+     "worst_pct_of_exact": 89.04109589041097
+    },
+    "old_learned_gain": {
+     "mean_pct_of_exact": 85.42674095430058,
+     "worst_pct_of_exact": 77.73972602739727
+    },
+    "view_shortlist_60": {
+     "mean_pct_of_exact": 97.4328679200313,
+     "worst_pct_of_exact": 92.98245614035086
+    }
+   },
+   "budget_12": {
+    "new_learned_selector": {
+     "mean_pct_of_exact": 95.29797011524197,
+     "worst_pct_of_exact": 93.42723004694837
+    },
+    "old_surrogate_shortlist": {
+     "mean_pct_of_exact": 92.37933667858675,
+     "worst_pct_of_exact": 86.21553884711778
+    },
+    "old_learned_gain": {
+     "mean_pct_of_exact": 90.3064993199347,
+     "worst_pct_of_exact": 79.53216374269006
+    },
+    "view_shortlist_60": {
+     "mean_pct_of_exact": 95.84950668258423,
+     "worst_pct_of_exact": 92.48120300751879
+    }
+   }
+  },
+  "limits": [
+   "Window-scale study (120 candidates, 500 targets). The app selects by exact greedy."
+  ]
+ },
+ "artifacts": {
+  "ora_view_estimator": {
+   "sha256": "bf7cf974863c94f3c9b172ed825c6d675f3f2b9e992156c6a5d6f8504e19b3dd",
+   "bytes": 1046848
+  },
+  "ora_gain_selector": {
+   "sha256": "5f8566feba794b6bb18bde14f4dd97717f17de817b5b0c957dba6607f3ce2437",
+   "bytes": 1104136
+  }
  }
 }

@@ -85,13 +85,16 @@ def horizon_features(dem, px_m, cells, radius_m=VIEW_RADIUS_M, azimuths=72, R=MO
     return np.array(out, np.float32).reshape(-1, len(HORIZON))
 
 
-def view_rings(dem, px_m, cells, radii_m=RINGS_M + (VIEW_RADIUS_M,), h_tx=TX_HEIGHT_M, h_rx=RX_HEIGHT_M, R=MOON_R, azimuths=120):
+def view_rings(dem, px_m, cells, radii_m=RINGS_M + (VIEW_RADIUS_M,), h_tx=TX_HEIGHT_M, h_rx=RX_HEIGHT_M, R=MOON_R, azimuths=120,
+               step_px=2):
     """Share of the disc visible out to each radius in ``radii_m``; columns follow ``radii_m``.
 
-    The last radius is the same exact viewshed as ``viewshed_fraction`` (the training label); the
-    shorter ones come from the same sweep, so they cost nothing extra.
+    The last radius is the same sweep as ``viewshed_fraction`` (the training label); the shorter ones come
+    from the same sweep, so they cost nothing extra. ``step_px`` is the radial sample spacing in pixels:
+    2 (the training label) steps over ridges narrower than two pixels and reads a few percent high; 1 matches
+    dense line of sight closely (see docs/ACCURACY.md).
     """
-    step_m = 2 * px_m
+    step_m = step_px * px_m
     radii = np.arange(step_m, max(radii_m) + 1e-9, step_m)
     theta = np.arange(azimuths) * 2 * np.pi / azimuths
     rows, cols = dem.shape

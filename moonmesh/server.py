@@ -29,6 +29,13 @@ def config():
     return dict(defaults=Mission(), sites={k: v for k, v in SITES.items() if k not in LOCAL})
 
 
+@app.get("/api/status")
+def status():
+    """Preflight inventory: code revision, data present, models actually loaded, library versions."""
+    from ora.status import inventory
+    return inventory(hash_large=False)
+
+
 @app.post("/api/mission")
 def mission(body: Mission):
     return compute(body)
@@ -39,7 +46,7 @@ def compare(body: Mission):
     output = []
     for site in [s for s in SITES if s not in LOCAL]:
         result = compute(body.model_copy(update=dict(site=site, latitude=None, longitude=None)), include_map=False)
-        output.append({key: result[key] for key in ("site", "direct", "solar", "network", "worst", "recommended", "feasible")})
+        output.append({key: result[key] for key in ("site", "direct", "solar", "network", "worst", "recommended", "feasible", "assessment")})
     return output
 
 
@@ -65,7 +72,7 @@ def sensitivity(body: Mission):
     for label, changes in variants:
         try:
             result = compute(body.model_copy(update=changes), include_map=False)
-            rows.append(dict(label=label, direct=result["direct"], network=result["network"],
+            rows.append(dict(label=label, direct=result["direct"], network=result["network"], status=result["assessment"]["status"],
                              feasible=result["feasible"], count=len(result["recommended"]), eligible=result["eligible"]))
         except HTTPException as error:
             if not changes:

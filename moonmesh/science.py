@@ -16,6 +16,7 @@ from lunar_core.terrain import (
 
 from .environment import CASES, node_states, public_state, optimize_environment
 from .data import DATA, LOLA, PRODUCTS, SITES, activate
+from .evidence import NOT_MODELLED, assess, check, gap
 from .network import battery, evaluate, link_margin, metrics, optimize, passes, spans
 
 
@@ -183,6 +184,7 @@ def scenario(mission, include_map=True):
     slope = slopes(mission.site)
     options = candidates(grid, slope, x, y, mission)
     geometric_direct = direct.copy()
+    quality = np.array(sample["status"])  # data quality per sample, before environment reasons are written in
     lander_states = node_states(mission, solar, sample['solar_known'], lander=True)
     direct_cases = {case: geometric_direct & lander_states[case]['available'] for case in CASES}
     relay_cases = {case: [] for case in CASES}
@@ -194,18 +196,24 @@ def scenario(mission, include_map=True):
             sample['status'][i] = 'uncertain' if not sample['solar_known'][i] else 'unavailable'
     relays = []
     geometric_relays = []
+    relays_low, relays_high = {case: [] for case in CASES}, {case: [] for case in CASES}
     eligible = []
     for idx, candidate in enumerate(options):
         relay = Observer(candidate["lat"], candidate["lon"], candidate["elevation"], mission.mast_m)
         los, distance = surface_path(grid, lander, relay)
         local_margin = float(link_margin(mission.surface_radio, distance))
         rf, sunlight, _, relay_sample = visibility(mission.site, relay, times, mission)
+        surface_ok = bool(los and local_margin >= mission.surface_radio.margin)
         legacy_power, _ = battery(sunlight, mission.battery_hours, mission.charge_ratio, hours, mission.initial_charge_pct)
-        geometric_relays.append(rf & legacy_power & bool(los and local_margin >= mission.surface_radio.margin))
+        geometric_relays.append(rf & legacy_power & surface_ok)
         states = node_states(mission, sunlight, relay_sample['solar_known'], distance)
+        relay_quality = np.array(relay_sample["status"])
         for case in CASES:
-            relay_cases[case].append(rf & states[case]['available'] & lander_states[case]['available']
-                                     & bool(los and local_margin >= mission.surface_radio.margin))
+            path = rf & states[case]['available'] & lander_states[case]['available'] & surface_ok
+            relay_cases[case].append(path)
+            relays_low[case].append(path & (relay_quality == "reliable"))
+            relays_high[case].append(path | ((relay_quality == "uncertain") & states[case]['available']
+                                             & lander_states[case]['available'] & surface_ok))
         powered = states['cold_dust']['available']
         reserve = (states['cold_dust']['soc'] * mission.battery_hours).tolist()
         link = relay_cases['cold_dust'][-1]
@@ -229,6 +237,12 @@ def scenario(mission, include_map=True):
         environment_cases[case] = dict(network=values, worst=failure,
                                        meets=passes(failure if mission.resilient else values, mission))
     combined, network, worst, redundant = evaluate(direct, relays, selection, mission)
+    bands = {}
+    for case in CASES:
+        lander_ok = lander_states[case]['available']
+        _, low, worst_low, _ = evaluate(direct_cases[case] & (quality == "reliable"), relays_low[case], selection, mission)
+        _, high, worst_high, _ = evaluate(direct_cases[case] | ((quality == "uncertain") & lander_ok), relays_high[case], selection, mission)
+        bands[case] = dict(low=low, high=high, worst_low=worst_low, worst_high=worst_high)
     _, base, _, _ = evaluate(direct, relays, (), mission)
     def all_cases_pass(active):
         return all(passes(evaluate(direct_cases[c], relay_cases[c], active, mission)[1], mission) for c in CASES)
@@ -270,9 +284,83 @@ def scenario(mission, include_map=True):
                                        recommended=[options[i]['id'] for i in baseline_selection]),
                                    assumptions='Effective sink envelopes and dust deposition are user assumptions. No Diviner data or hardware calibration; Earth receiver power is external.'),
                   provenance=PROVENANCE)
+    result["assessment"] = mission_assessment(mission, environment_cases, bands, sun_metrics, details, selection)
     if include_map:
         result["map"] = map_data(grid, slope, x, y)
     return result
+
+
+def bounded(name, target, nominal, low, high, better_high, unit, basis):
+    """Requirement check decided only if it holds with marginal samples lost, or fails even with unknown samples kept."""
+    ok = (lambda v: v >= target) if better_high else (lambda v: v <= target)
+    met = True if ok(low) else False if not ok(high) else None
+    value = dict(nominal=nominal, if_marginal_samples_lost=low, if_unknown_samples_available=high, unit=unit)
+    return check(name, f"{'≥' if better_high else '≤'} {target:g} {unit}", value, met, basis)
+
+
+CASE_NAMES = {"nominal": "nominal", "cold": "cold sink", "dust": "dust event", "cold_dust": "cold sink with dust"}
+
+
+def mission_assessment(mission, cases, bands, solar, details, selection):
+    """Requirements status for the selected plan, taking the worst of the four assumed environment cases.
+
+    Each check is decided under the stated assumptions (radio budgets, battery, thermal sinks, dust), which are
+    listed with the result. It is undecided only when marginal or missing samples could change the answer.
+    """
+    basis = ("Worst of the four assumed environment cases. Decided only when the answer is the same with marginal samples "
+             "(within 3 dB of the RF threshold or 0.25° of the horizon) counted as lost and with samples lacking terrain counted as available.")
+    worst_case = lambda key, metric, pick: pick(cases, key=lambda c: cases[c][key][metric])
+
+    def across(key, low_key, high_key, metric, better_high):
+        pick = min if better_high else max
+        nominal = pick(cases[c][key][metric] for c in cases)
+        low = pick(bands[c][low_key][metric] for c in cases)
+        high = pick(bands[c][high_key][metric] for c in cases)
+        if len({round(cases[c][key][metric], 9) for c in cases}) == 1:
+            return nominal, low, high, "all four cases agree"
+        limiting = worst_case(key, metric, pick)
+        return nominal, low, high, f"limiting case: {CASE_NAMES.get(limiting, limiting)}"
+
+    checks = []
+    for label, metric, target, better, unit in (("Network availability", "availability", mission.availability, True, "%"),
+                                                ("Longest communication blackout", "longest", mission.blackout_hours, False, "h")):
+        nominal, low, high, limiting = across("network", "low", "high", metric, better)
+        checks.append(bounded(f"{label} ({limiting})", target, nominal, low, high, better, unit, basis))
+    checks.append(check("Longest darkness at the landing point", f"≤ {mission.darkness_hours:g} h", solar["longest"],
+                        solar["longest"] <= mission.darkness_hours, "Sun geometry against the terrain horizon; no band applied."))
+    if mission.resilient and selection:
+        for label, metric, target, better, unit in (("Availability after the worst single relay loss", "availability", mission.availability, True, "%"),
+                                                    ("Blackout after the worst single relay loss", "longest", mission.blackout_hours, False, "h")):
+            nominal, low, high, limiting = across("worst", "worst_low", "worst_high", metric, better)
+            checks.append(bounded(f"{label} ({limiting})", target, nominal, low, high, better, unit, basis))
+    gaps = [gap("Assumed environment (version 1)", "Thermal sinks, insulation, heater, freeze limit and dust deposition are planning "
+                "assumptions with no Diviner data or hardware calibration. The status holds under these values only.", False)]
+    if details.get("terrain_coverage", 100) < 100:
+        gaps.append(gap("Terrain coverage at the landing point", f"{details['terrain_coverage']:.0f}% of the 220 m patch has elevation data.", False))
+    if mission.dem_bias_m:
+        gaps.append(gap("Terrain bias applied", f"Horizon terrain raised by {mission.dem_bias_m:g} m as a sensitivity case.", False))
+    gaps.append(gap("Sampling interval", f"Samples every {mission.minutes} min; changes between samples are unresolved.", False))
+    modelled = ("Equipment temperature", "Dust accumulation")
+    return assess(
+        checks, gaps, kind="scenario outcome", subject="mission communication under the assumed environment envelopes",
+        architecture=PROVENANCE["network"],
+        evaluated=["Terrain obstruction of Earth (LOLA 20 m near field, 240 m far field)", "Earth and Sun position (NAIF SPICE, DE440)",
+                   "Free-space RF margin to Earth and between surface nodes", "Darkness at each node from terrain shadowing",
+                   "Battery, heater and node temperature through darkness (lumped model, assumed sinks, four cases)",
+                   "Local dust deposition reducing solar output (assumed event)", "Loss of any one selected relay (what-if)"],
+        not_evaluated=["Calibrated thermal and dust behaviour (current values are assumptions)"]
+                      + [h for h in NOT_MODELLED if not h.startswith(modelled)],
+        assumptions=[f"Earth link: {mission.earth_radio.ghz:g} GHz, {mission.earth_radio.watts:g} W, receiver gain {mission.earth_radio.rx_gain:g} dBi, "
+                     f"required margin {mission.earth_radio.margin:g} dB",
+                     f"Surface link: {mission.surface_radio.ghz:g} GHz, {mission.surface_radio.watts:g} W, required margin {mission.surface_radio.margin:g} dB",
+                     f"Relay battery {mission.battery_hours:g} h at {mission.node_load_w:g} W, charge ratio {mission.charge_ratio:g}, starting at {mission.initial_charge_pct:g}%; "
+                     f"lander {mission.lander_battery_hours:g} h starting at {mission.lander_initial_charge_pct:g}%",
+                     f"Thermal sinks: dark {mission.dark_sink_k:g} K, cold case {mission.cold_sink_k:g} K, lit {mission.lit_sink_k:g} K; "
+                     f"heater on below {mission.heater_on_k:g} K, freeze at {mission.freeze_k:g} K",
+                     f"Dust event from hour {mission.dust_start_h:g} for {mission.dust_duration_h:g} h within {mission.dust_radius_km:g} km, "
+                     f"{mission.dust_deposition_per_day:g}/day deposition, {mission.dust_solar_loss:g} solar loss at full load",
+                     f"Lander antenna {mission.observer_m:g} m, relay mast {mission.mast_m:g} m, clearance {mission.clearance:g}°",
+                     PROVENANCE["power"], PROVENANCE["rf"]])
 
 
 @lru_cache(maxsize=3)

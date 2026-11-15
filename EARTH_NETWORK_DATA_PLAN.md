@@ -4,7 +4,9 @@
 
 MOONMESH explains why a lunar landing point loses communication and compares four responses: choose a better site, move a short distance, raise the antenna, or deploy a surface relay. The November 2026 lunar study found that a relay helped at the tested Haworth point, while other sites needed no relay or had no reachable single-hop relay candidate. The study therefore supports a decision process for **site-specific mitigation**, not a general claim that the Moon needs a multi-relay mesh. See [`analysis/moonmesh_relay_gate.json`](analysis/moonmesh_relay_gate.json) and [`analysis/moonmesh_haworth_refinement.json`](analysis/moonmesh_haworth_refinement.json).
 
-This document selects three Earth datasets for the **next validation phase**. They have been identified, but no Earth data has been imported into the application yet. Earth examples will help test terrain line of sight, endpoint placement, and network-path reasoning. They will not be used to calculate lunar availability percentages or to train a model that overrides lunar geometry.
+> **Status, 14 November 2026.** The three-source case study below (ULS microwave paths, 3DEP, FunkFeuer) has not been implemented. Separately, ORA now uses different Earth data: the FCC *Antenna Structure Registration* and SRTM-derived elevation tiles train the siting prior (`ora/data.py`, `ora/train.py`, `ora/model_card.json`), and `scenarios/earth_cascades_validation.yaml` runs the terrain graph engine on one Earth tile. Neither substitutes for the path-level check proposed here. See `docs/BASELINE_STATUS.md`.
+
+This document selects three Earth datasets for the **next validation phase**. They have been identified, but none of these three has been imported into the application yet. Earth examples will help test terrain line of sight, endpoint placement, and network-path reasoning. They will not be used to calculate lunar availability percentages or to train a model that overrides lunar geometry.
 
 ## The three sources and their roles
 
