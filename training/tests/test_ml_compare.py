@@ -46,6 +46,9 @@ def terrain(tmp_path, monkeypatch):
                numba_threads=2, cache_entries=2,
                sites={'haworth': dict(dem='dem.tif', slope='slope.tif', grid='grid.json', source='analytic fixture')})
     monkeypatch.setattr(c, 'settings', lambda: cfg)
+    # The 800 m analytic DEM cannot hold the real 8 km model domain; apply the same rule at 300 m.
+    real_rule = c.full_range_on_terrain
+    monkeypatch.setattr(c, 'full_range_on_terrain', lambda src, tx, radius_m: real_rule(src, tx, 300))
     c.CACHE.clear()
     yield TestClient(app), monkeypatch
     c.CACHE.clear()
@@ -102,7 +105,7 @@ def test_outside_training_domain_is_refused(terrain):
     use_model(monkeypatch, model)
     response = client.post('/api/coverage/ml-compare', json=dict(range_m=300, h_tx=3))
     assert response.status_code == 422
-    assert 'only covers what it was trained on' in response.json()['detail']
+    assert 'only covers what it was trained and tested on' in response.json()['detail']
     assert model.rows == []
 
 

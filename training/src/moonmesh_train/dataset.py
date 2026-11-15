@@ -16,7 +16,7 @@ import yaml
 from numba import njit, set_num_threads
 
 from . import paths, rf
-from .config import configs_dir, load_experiment
+from .config import configs_dir, load_experiment, numba_threads
 from .downloads import atomic_json, sha256_file
 from .los import R, sample, unit
 from .sampling import commit
@@ -148,7 +148,7 @@ class Builder:
         saved = self.completed(p)
         if saved:
             return saved
-        set_num_threads(getattr(self, 'thread_limit', self.cfg['numba_threads']))
+        set_num_threads(numba_threads(getattr(self, 'thread_limit', self.cfg['numba_threads'])))
         # Conservative per-scenario headroom, checked before each write batch.
         if shutil.disk_usage(self.root.anchor).free < 11*1024**3:
             raise OSError('Insufficient disk: less than 10 GB would remain')
