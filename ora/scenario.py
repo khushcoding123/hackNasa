@@ -161,19 +161,22 @@ def _build(scenario):
     name, lat0, lon0 = ALL_SITES[scenario.site]
     x0, y0 = polar_stereographic_south(lat0, lon0)
     center = (float((x0 - grid.x_left) / px - 0.5), float((grid.y_top - y0) / px - 0.5))
-    mask = None
+    mask, spacing = None, 300
     if scenario.polygon:
         from .area import polygon_mask
         mask = polygon_mask(grid, scenario.polygon)
+        spacing = min(300, max(px, scenario.radius_km * 1000 / 8)) if scenario.radius_km < 3 else max(300, min(2_000, scenario.radius_km * 25))
     relays = candidate_sites(dem, px, scenario.candidates, center, scenario.radius_km * 1000, scenario.slope_limit,
-                             seed=scenario.seed, mask=mask)
+                             seed=scenario.seed, mask=mask, min_spacing_m=spacing)
     inside = len(relays)
     if mask is not None:
         # A drawn area may have no ground that sees Earth. Allow gateway-only sites in a ring just outside it.
         yy, xx = np.ogrid[:dem.shape[0], :dem.shape[1]]
-        ring = (np.hypot(xx - center[0], yy - center[1]) * px <= scenario.radius_km * 1000 + 6_000) & ~mask
-        outside = candidate_sites(dem, px, max(30, scenario.candidates // 3), center, scenario.radius_km * 1000 + 6_000,
-                                  scenario.slope_limit, seed=scenario.seed + 1, mask=ring)
+        from .area import ring_for
+        reach = scenario.radius_km * 1000 + ring_for(scenario.radius_km * 1000)
+        ring = (np.hypot(xx - center[0], yy - center[1]) * px <= reach) & ~mask
+        outside = candidate_sites(dem, px, max(30, scenario.candidates // 3), center, reach, scenario.slope_limit,
+                                  seed=scenario.seed + 1, mask=ring, min_spacing_m=spacing)
         if len(outside):
             relays = np.vstack([relays, outside])
     if scenario.demand:
@@ -181,7 +184,14 @@ def _build(scenario):
         demand_xy = np.column_stack([(dx - grid.x_left) / px - 0.5, (grid.y_top - dy) / px - 0.5])
     else:
         demand_xy = floor_sites(dem, px, center, scenario.mining_sites, search_m=scenario.radius_km * 1000 if mask is not None else 3_500,
-                                spacing_m=min(1_500, scenario.radius_km * 400) if mask is not None else 1_500, mask=mask)
+                                spacing_m=(min(1_500, scenario.radius_km * 400) if scenario.radius_km < 4 else min(6_000, scenario.radius_km * 100)) if mask is not None else 1_500, mask=mask)
+    if mask is not None and len(demand_xy) and scenario.radius_km >= 3:
+        # In a big area the mines sit on low ground that a thin scatter of candidates can miss entirely,
+        # so add sites on the high ground within reach of each one.
+        local = [candidate_sites(dem, px, 40, tuple(m), 8_000.0, scenario.slope_limit, seed=scenario.seed + 2 + i, min_spacing_m=spacing)
+                 for i, m in enumerate(demand_xy)]
+        relays = np.vstack([relays, *[c for c in local if len(c)]])
+    outside_flag = np.zeros(len(relays), bool) if mask is None else ~mask[np.rint(relays[:, 1]).astype(int), np.rint(relays[:, 0]).astype(int)]
     sites = np.vstack([relays, demand_xy])
     n_relays = len(relays)
     demand = list(range(n_relays, len(sites)))
@@ -206,14 +216,14 @@ def _build(scenario):
             gateways.append(int(i))
     candidates = [i for i in range(n_relays) if i not in gateways]
     # Ground just outside a drawn area may be used when nothing inside links up, but is deliberately less attractive.
-    prior = {i: float(score[i]) * (1.0 if i < inside else 0.5) for i in range(n_relays)}
+    prior = {i: float(score[i]) * (0.5 if outside_flag[i] else 1.0) for i in range(n_relays)}
     # A relay that sits in shadow has to be kept alive through it, so chains pay heavily for shade.
     shade = {i: 4.0 * (1.0 - float(sun_frac[i])) for i in range(n_relays)}
     plan = place(G, demand, gateways, candidates, prior, scenario.extra_relays, shade_penalty=shade)
     return dict(scenario=scenario, grid=grid, center=center, sites=sites, heights=heights, lat=lat, lon=lon, ground=ground,
                 n_relays=n_relays, demand=demand, gateways=gateways, candidates=candidates, G=G, times=times, lit=lit,
                 earth=earth, sun_frac=sun_frac, earth_frac=earth_frac, score=score, features=features,
-                score_method=method, plan=plan, site_name=name, inside=inside)
+                score_method=method, plan=plan, site_name=name, inside=inside, outside=outside_flag)
 
 
 def build(scenario):

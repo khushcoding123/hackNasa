@@ -175,14 +175,23 @@ def test_drawn_area_info_reports_size_and_centre():
     assert meta["lat"] == pytest.approx(-89.67, abs=0.01)
 
 
-def test_drawn_area_rejects_bad_shapes():
+def test_drawn_area_rejects_only_impossible_shapes():
     from ora.area import AreaError, info
     for bad in ([(-89.0, 0.0), (-89.1, 10.0)],                       # too few corners
-                [(-60.0, 0.0), (-60.0, 10.0), (-61.0, 5.0)],         # outside the polar cap
-                square(half=200.0),                                  # too small
-                square(half=20_000.0)):                              # too large for exact line of sight
+                [(-60.0, 0.0), (-60.0, 10.0), (-61.0, 5.0)],         # north of the polar terrain data
+                square(half=20.0)):                                  # a few metres across
         with pytest.raises(AreaError):
             info(bad)
+
+
+def test_drawn_area_accepts_any_size_and_thins_terrain():
+    from ora.area import MAX_GRID_PX, info
+    small, big = info(square(half=250.0)), info(square(half=3000.0))
+    large, huge = info(square(half=50_000.0, lat=-88.5, lon=100.0)), info(square(half=100_000.0, lat=-83.0, lon=200.0))
+    assert small["resolution_m"] == big["resolution_m"] == 20.0
+    assert large["resolution_m"] > 20.0 and huge["product"] == "LDEM_75S_240M"
+    for meta in (small, big, large, huge):
+        assert 2 * meta["extent_m"] / meta["resolution_m"] <= MAX_GRID_PX + 1
 
 
 def test_polygon_mask_covers_the_shape():

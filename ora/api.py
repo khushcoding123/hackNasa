@@ -51,8 +51,12 @@ class NetworkBody(BaseModel):
                 raise HTTPException(422, str(error)) from error
             except FileNotFoundError as error:
                 raise HTTPException(503, "LOLA terrain is missing. Run python -m moonmesh.data.") from error
-            changes.update(site=key, polygon=tuple(tuple(p) for p in self.polygon), radius_km=meta["radius_m"] / 1000 + 0.3,
-                           name=f"drawn_{key}")
+            radius_km = meta["radius_m"] / 1000
+            # Sized to the shape: longer links and more candidates for big areas.
+            scaled = dict(max_range_km=float(np.clip(radius_km * 0.6, 12.0, 25.0)), candidates=int(np.clip(120 + 20 * radius_km, 220, 500)))
+            for name, value in scaled.items():
+                changes.setdefault(name, value)
+            changes.update(site=key, polygon=tuple(tuple(p) for p in self.polygon), radius_km=radius_km + 0.3, name=f"drawn_{key}")
         elif self.site:
             changes["site"] = self.site
         return replace(base, **changes)
