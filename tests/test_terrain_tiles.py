@@ -8,6 +8,12 @@ from moonmesh import tiles
 
 
 class TileTests(unittest.TestCase):
+    def require_regional_terrain(self):
+        grid = tiles.region_grid("haworth", "near20km")
+        if grid is None:
+            self.skipTest("Regional LOLA terrain is missing; run python -m moonmesh.data")
+        return grid
+
     def test_shape_padding_and_units(self):
         data = tiles.tile(-180, -90, 0, 90, 33)
         self.assertEqual(data["heights"].shape, (35, 35))
@@ -33,6 +39,7 @@ class TileTests(unittest.TestCase):
         self.assertEqual(float(np.ptp(south[-2, 1:-1])), 0.0)
 
     def test_regional_dem_is_used_only_where_it_exists(self):
+        self.require_regional_terrain()
         regional = tiles.tile(-23.0, -86.85, -22.6, -86.75, 33)
         self.assertEqual(regional["resolution_m"], 20.0)
         self.assertEqual(regional["sources"], ["near20km"])
@@ -47,7 +54,7 @@ class TileTests(unittest.TestCase):
         self.assertTrue(np.isfinite(data["heights"]).all())
 
     def test_nodata_inside_a_region_is_not_returned(self):
-        grid = tiles.region_grid("haworth", "near20km")
+        grid = self.require_regional_terrain()
         broken = type(grid)(np.full_like(grid.heights, np.nan), grid.x_left, grid.y_top, grid.pixel_size_m)
         with patch.object(tiles, "region_grid", side_effect=lambda site, suffix: broken if suffix == "near20km" else None):
             data = tiles.tile(-23.0, -86.85, -22.6, -86.75, 9)
@@ -87,6 +94,7 @@ class TileTests(unittest.TestCase):
                 tiles.site_patch(lat, lon, 7000, 129)
 
     def test_endpoint_headers(self):
+        self.require_regional_terrain()
         try:
             from fastapi.testclient import TestClient
             from moonmesh.server import app
