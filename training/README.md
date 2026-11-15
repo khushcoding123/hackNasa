@@ -99,3 +99,39 @@ PGDA90 checks HTTP Range support, transforms reference bounds into the DEM's pro
 12. Integrate validated maps into the app, then prepare the demo and final report (Prompts 15-16).
 
 Every future script in `training/scripts/` must provide an argparse CLI with `--help`, read configuration from `training/configs/`, use the path helpers, seed stochastic work, log the git commit, and write reports under `reports_dir()`. Outputs and reports must identify simulated labels. Model features must exclude LunarRF output layers, IDs and full-trace LOS diagnostics. Never tune on the test split. No pipeline script or dataset download is run by this workspace setup.
+
+### Terrain-only transmitter sampling and spatial splits (step 08)
+
+Run with the training Python and `MOONMESH_DATA_ROOT` set:
+
+```powershell
+C:/moonmesh-data/venv/Scripts/python.exe training/scripts/06_sample_transmitters.py --help
+C:/moonmesh-data/venv/Scripts/python.exe training/scripts/06_sample_transmitters.py
+C:/moonmesh-data/venv/Scripts/python.exe training/scripts/07_make_splits.py --help
+C:/moonmesh-data/venv/Scripts/python.exe training/scripts/07_make_splits.py
+```
+
+The exp_b config fixes disjoint terrain strata: steep wall first (slope >=20
+ degrees), then crest (relative elevation >=15 m), shoulder (>=0 m), floor
+(<=-15 m), and plain otherwise. These are sampling rules chosen from the
+observed terrain distribution, not reviewed semantic landform labels. Each
+stratum contributes 30 placements, with global 500 m spacing. A conservative
+Euclidean distance transform excludes raster edges and nodata holes within
+8 km plus half a pixel diagonal. Deployability uses the app's slope limit and
+the configured 8 km research-point radius; it does not restrict sampling.
+
+Occupied blocks use a global 5 km lattice anchored at projected (0,0).
+Seeded contiguous block slabs approximate 70/15/15 before buffering. Among
+256 seeded orientations, select the one retaining most placements while
+meeting minimum counts, using coordinates only. Ties keep the first layout.
+The validation/test block allocations adjoin to reduce the training boundary.
+No coverage labels or model scores inform sampling or split selection.
+Dropped training placements remain in the manifest for audit, and must not
+be used for training. Scenario variants inherit their transmitter's split.
+
+Outputs: `training/splits.json`, and data-root `reports/splits/` containing
+`transmitters.json`, `counts.json`, `split_map.png`, and `report.md`.
+The report estimates residual disk-union overlap at 100 m resolution: an
+8 km transmitter buffer does not imply disjoint 8 km receiver disks.
+Cross-site manifests stay empty until step 14. Reruns are deterministic and
+small, so interrupted output generation can be safely repeated.

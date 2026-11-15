@@ -13,3 +13,17 @@ seed: 42
 pilot_transmitters: 150
 min_spacing_m: 500
 block_size_m: 5000
+# Terrain-only sampling rules, fixed before any coverage-label inspection.
+# Observed terrain percentiles: relative elevation p20=-14.74m/p80=15.77m;
+# slope p90=19.77deg. Rounded sampling strata, not semantic ground truth.
+terrain_strata:
+  relative_elevation_radius_m: 1000
+  crest_min_m: 15
+  shoulder_min_m: 0
+  floor_max_m: -15
+  steep_min_deg: 20
+buffer_m: 8000
+deployment_radius_m: 8000
+split_fractions: [0.70, 0.15, 0.15]
+split_layout_trials: 256
+footprint_report_resolution_m: 100
