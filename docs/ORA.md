@@ -2,6 +2,8 @@
 
 ORA is the relay-placement and resilience lab inside MOONMESH. It decides where to put repeaters on real lunar terrain, tests the network against node failures and the lunar night, and extends the same graph engine underground.
 
+MOONMESH’s product target is **lander → surface relay → lunar communications satellite → Earth**; see [Communication architecture](COMMUNICATION_ARCHITECTURE.md). ORA currently uses surface-network paths to Earth-visible gateways. Satellite backhaul is planned, and the measured results below retain their existing gateway/Earth-visibility assumptions.
+
 Open it at `/ora.html` in the running app, or use the command line (`python -m ora --help`).
 
 This page maps every idea in `ORA_Implementation_Plan.md` to what was built, what was measured, and what is still open.
@@ -52,7 +54,7 @@ python -m pytest tests -q
 
 ## Measured results
 
-All numbers come from the commands above with seed 0. They describe these scenarios, not lunar networks in general.
+These recorded measurements predate the energy-conserving thermal solver and dust-to-solar coupling. Thermal/twin/night numbers require a new data-backed run before use as current benchmarks. All numbers come from the commands above with seed 0. They describe these scenarios, not lunar networks in general.
 
 ### Terrain changes how networks break (Shackleton, 223 sites, 12 km range, 200 repeats)
 
@@ -132,5 +134,5 @@ The main MOONMESH app no longer starts from fixed landing regions. Draw a square
 | Real Earth mine or cave map | The loader exists; no survey file has been loaded. Candidate datasets are in `docs/ORA_TRAINING.md`. |
 | Tall Lunar Towers benchmark | Run on a 36 km window at its centre: 2.9% / 10.4% against the paper's 14.7% / 25.9% at 10 m / 50 m. The full-region numbers need the whole Connecting Ridge tile. |
 | Licence, Zenodo release, LunaNet terminology review | Team decisions. |
-| Items marked "verify" in the plan | Night temperatures, ISS optical terminal dates and rates, beam efficiency range, lava-tube temperatures. None are used as inputs. |
+| Items marked "verify" in the plan | Measured site-specific night temperatures, ISS optical terminal dates and rates, beam efficiency range, lava-tube temperatures. The thermal solver uses configurable assumed sink temperatures, not measured site temperatures. |
 | The blank bullet, the challenge statement, the Earth customer | Questions for the team. |

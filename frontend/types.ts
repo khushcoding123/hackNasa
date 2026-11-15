@@ -1,10 +1,12 @@
+export interface EnvironmentState {temperature_c:number[]; sink_k:number[]; heater_w:number[]; dust_load:number[]; solar_factor:number[]; soc:number[]; available:boolean[]; reason:string[]; minimum_temperature_c:number; minimum_soc:number; heater_energy_wh:number; frozen_hour:number|null}
+export interface EnvironmentReport {version:number; status:string; validated:boolean; primary_case:string; cases:Record<string,{network:Metrics; worst:Metrics; meets:boolean}>; lander:Record<string,EnvironmentState>; geometric_direct:Metrics; assumptions:string}
 export interface Metrics { availability:number; longest:number; total:number; intervals:number; average:number }
 export interface Site {name:string; lat:number; lon:number; elevation:number; mean_slope:number|null; max_slope:number|null; terrain_coverage:number; resolution:number}
-export interface Candidate {id:string; x:number; y:number; lat:number; lon:number; distance:number; slope:number; elevation:number; los:boolean|null; surface_margin:number; earth:Metrics; solar:Metrics; power:Metrics; coverage:Metrics; recovered:number; temporal_coverage:boolean[]; unknown_samples:number; minimum_reserve:number; sunlight:boolean[]; powered:boolean[]; reserve:number[]; minimum_earth_margin:number}
+export interface Candidate {environment:Record<string,EnvironmentState>; id:string; x:number; y:number; lat:number; lon:number; distance:number; slope:number; elevation:number; los:boolean|null; surface_margin:number; earth:Metrics; solar:Metrics; power:Metrics; coverage:Metrics; recovered:number; temporal_coverage:boolean[]; unknown_samples:number; minimum_reserve:number; sunlight:boolean[]; powered:boolean[]; reserve:number[]; minimum_earth_margin:number}
 export interface Outage {start:string; end:string; first:number; last:number; hours:number; causes:string[]}
 export interface Comparison {site:Site; direct:Metrics; solar:Metrics; network:Metrics; worst:Metrics; recommended:string[]; feasible:boolean}
 export interface Result extends Comparison {
- config:Record<string, unknown>; times:string[]; redundant:number; darkness_meets:boolean; eligible:number;
+ environment:EnvironmentReport; config:Record<string, unknown>; times:string[]; redundant:number; darkness_meets:boolean; eligible:number;
  outages:Outage[]; darkness:Outage[]; candidates:Candidate[];
  failures:{id:string; metrics:Metrics; meets:boolean; windows_lost:number; availability_lost:number; blackout_increase:number}[];
  failure_states:Record<string,{combined:boolean[]; assisted:boolean[]; metrics:Metrics; meets:boolean}>;

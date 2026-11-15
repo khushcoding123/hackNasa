@@ -112,6 +112,9 @@ class TwinBody(NetworkBody):
     dust_rate_per_day: float = Field(default=0, ge=0, le=1)
     dust_hazard_per_h: float = Field(default=0, ge=0, le=0.1)
     dust_seed: int = Field(default=0, ge=0, le=9999)
+    dark_sink_k: float = Field(default=100, ge=20, le=350)
+    lit_sink_k: float = Field(default=250, ge=20, le=400)
+    dust_solar_loss: float = Field(default=0.8, ge=0, le=1)
 
     def options(self, network):
         disk = None
@@ -127,7 +130,8 @@ class TwinBody(NetworkBody):
         return dict(kill=[(k.node, k.hour) for k in self.kill], disk=disk, blast=blast, dust=dust,
                     night=None if self.night_start_h is None else (self.night_start_h, self.night_hours),
                     beam=self.beam, beam_design=PowerBeam(electrical_in_w=self.beam_electrical_w), optical=self.optical,
-                    dust_db=self.dust_db, rf_backup=self.rf_backup)
+                    dust_db=self.dust_db, rf_backup=self.rf_backup, dark_sink_k=self.dark_sink_k,
+                    lit_sink_k=self.lit_sink_k, dust_solar_loss=self.dust_solar_loss)
 
 
 class ResilienceBody(NetworkBody):
@@ -237,7 +241,7 @@ def network(body: NetworkBody):
                   gateways=[int(v) for v in net["gateways"]], mines=[int(v) for v in net["demand"]],
                   unreachable=[int(v) for v in plan["unreachable"]], served=plan["served"],
                   mean_after_failure=plan["mean_after_failure"], worst_after_failure=plan["worst_after_failure"],
-                  feasible=plan["feasible"]),
+                  feasible=plan["feasible"], feasibility_scope="Static graph connectivity only; run the twin for thermal and dust service checks."),
         configs=twin.node_configs(net), structure=structure, full_structure=resilience.structural_report(G, connectivity=False), fragile=sorted(fragile, key=lambda f: f["served_if_lost"]))
 
 
@@ -268,7 +272,7 @@ def night(body: TwinBody):
     options = body.options(net)
     options.pop("night")
     rows = twin.night_design(net, design, batteries=(100, 200, 400, 700, 1000, 1500, 2200, 3200, 5000), **options)
-    return dict(budget=night_budget(design), hibernating=night_budget(replace(design, hibernate=True, duty=min(design.duty, 0.1))),
+    return dict(budget=night_budget(design, T_env=body.dark_sink_k), hibernating=night_budget(replace(design, hibernate=True, duty=min(design.duty, 0.1)), T_env=body.dark_sink_k),
                 design=rows, night_hours=LUNAR_NIGHT_H)
 
 

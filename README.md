@@ -1,6 +1,8 @@
 # MOONMESH
 
-MOONMESH evaluates landing-point sunlight, direct-to-Earth communication and solar-powered surface relay options using NASA LOLA elevation data and JPL DE440 SPICE ephemerides.
+MOONMESH is a lunar communication planning product targeting **lander → surface relay → lunar communications satellite → Earth**. It will place surface relays against terrain, satellite access, power, blackout, and resilience constraints. NASA LOLA elevation data and JPL DE440 SPICE ephemerides support the existing terrain and Earth/Sun geometry.
+
+**Current prototype:** the planner calculates direct-to-Earth service and lander → surface relay → Earth paths. Satellite orbits and satellite-assisted links are planned and are not included in current results. See [Communication architecture](docs/COMMUNICATION_ARCHITECTURE.md) for the target, modeling requirements, and implementation boundary.
 
 ## Run locally
 
@@ -42,12 +44,18 @@ python -m ora.train
 python -m ora --help
 ```
 
+## Night temperature and dust checks
+
+The main planner evaluates nominal, cold-night, dust-exposure and combined cases. Each relay and the lander must have power and thermal survival before a communication interval counts. All four cases feed relay selection and optional N−1 checks. The combined case drives the main timeline; the case table shows the other outcomes. Open **Expert settings → Night temperatures and dust exposure** to configure thermal sinks, hardware heat losses, heater power, lander battery and the local dust event. Dust accumulates during the event, persists until cleaned and reduces solar generation. RF propagation does not receive an unsupported dust penalty.
+
+These are assumed engineering envelopes: no Diviner temperature products or calibrated hardware measurements are loaded. The results identify modeled limits met under assumptions, rather than validated survival. JSON/CSV exports include case outcomes and per-node temperature, charge, heater, dust and availability histories. See [the implementation plan and status](NIGHT_TEMPERATURE_DUST_PLAN.md) for scope and remaining calibration work. Run `python -m unittest tests.test_environment -v` for the environmental regression tests.
+
 ## Model and validation
 
 - Terrain uses [LOLA PDS products](https://imbrium.mit.edu/DATA/LOLA_GDR/POLAR/IMG/) at 20 m locally and 240 m farther out. Horizon rays include lunar curvature, sample every 2° and extend up to 150 km. Missing terrain is treated as uncertain and excluded from credited availability.
 - [JPL NAIF kernels](https://naif.jpl.nasa.gov/naif/data_generic.html) provide Earth and Sun center geometry in a DE440 mean-Earth frame aligned to DE421. The test suite compares Earth and Sun azimuth, elevation and range with saved [JPL Horizons](https://ssd-api.jpl.nasa.gov/doc/horizons.html) observer ephemerides for all three sites every 6 h over November 2026 and March 2027 (1,452 samples in `tests/data/horizons`). Elevations agree within 0.001° and azimuths within 0.006°. The remaining differences are expected: Horizons reports apparent DE441 values, so Sun azimuth includes about 0.006° of stellar aberration and Earth range is about 36 km longer from light-time correction. Run `python -m moonmesh.validation` to print the comparison, or add `--refresh` to download the references again.
 - The sample locations are approximate points from the checked-in research, within regions discussed in [NASA's 2024 announcement](https://www.nasa.gov/news-release/nasa-provides-update-on-artemis-iii-moon-landing-regions/). The analysis uses the selected point and lets experts test shifts or enter custom coordinates within the local DEM window.
-- The relay model estimates free-space RF feasibility, straight-line deployment, sampled surface line of sight and charge/discharge at constant load. Each relay supplies its own two-hop path. Results depend on the assumed ground receiver, illumination and terrain sampling. N−1 removes one relay at a time and retains shared Earth receiver assumptions.
+- The relay model estimates free-space RF feasibility, straight-line deployment, sampled surface line of sight and coupled charge/discharge, heater demand and thermal survival under explicit environmental assumptions. In the current baseline, each relay supplies its own lander → relay → Earth two-hop path; the planned satellite architecture adds a relay → satellite → Earth backhaul. Results depend on the assumed ground receiver, illumination and terrain sampling. N−1 removes one relay at a time and retains shared Earth receiver assumptions.
 - [LunarRF](https://arxiv.org/abs/2610.34554) provides related work on pole-wide terrain-aware surface coverage. MOONMESH focuses on time-dependent DTE outages and site-specific relay planning.
 
 ```shell

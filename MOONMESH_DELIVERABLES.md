@@ -2,9 +2,18 @@
 
 ## Final product objective
 
-MOONMESH will compare lunar south-pole landing sites, identify terrain-induced direct-to-Earth communication blackouts, and find the smallest screened surface-relay configuration that satisfies mission availability and failure-resilience requirements under clearly stated assumptions.
+MOONMESH will compare lunar south-pole landing sites and plan **lander → surface relay → lunar communications satellite → Earth** connectivity. It will select the smallest feasible surface-relay configuration among screened candidates using terrain, satellite access over time, RF, power, availability, blackout, and resilience constraints. Direct-to-Earth service remains a comparison baseline.
+
+The satellite architecture is the product target, not an implemented capability. The current prototype evaluates direct and surface-relay-to-Earth paths. Satellite scenario selection remains open; the required work and acceptance flow are defined in [Communication architecture](docs/COMMUNICATION_ARCHITECTURE.md). Existing implementation tasks below describe the baseline unless identified as satellite work.
 
 The hackathon deliverable is a reliable planning prototype, not flight software. Every result must distinguish flat-horizon visibility, terrain-aware visibility, and estimated RF link feasibility.
+
+## Satellite architecture deliverables (planned)
+
+- **Khush:** specify satellite trajectory inputs, epochs and frames; validate time-dependent relay-to-satellite terrain clearance and satellite-to-Earth occultation alongside existing Sun/Earth geometry.
+- **Ayaan:** define the satellite scenario configuration and three link budgets; gate paths on node power/state; optimize complete paths; add satellite failure analysis and shared-dependency accounting; expose architecture and orbital provenance in the API and exports.
+- **Jeswanth:** add satellite scenario setup, satellite positions and active paths at the selected time, per-hop blackout explanations, satellite failure controls, and explicit baseline-versus-satellite result labels.
+- **All:** choose or explicitly assume the satellite constellation and its radio, pointing, handover, capacity, and power parameters before claiming satellite-assisted coverage. Validate a complete reference scenario before presenting orbital results.
 
 ## Ownership summary
 
@@ -136,7 +145,11 @@ Primary files: `moonmesh/network.py`, `moonmesh/models.py`, `moonmesh/server.py`
 - [ ] Flat-horizon, terrain-visible, RF-feasible, and uncertain states are distinct.
 - [ ] Blackout durations and causes are visible and exportable.
 - [ ] Relay candidates have documented screening reasons.
-- [ ] Both communication hops and relay power are required.
+- [ ] Current baseline results require both communication hops and relay power.
+- [ ] Satellite-mode results require all three links and participating node power/state at the same time.
+- [ ] Satellite orbital inputs, assumptions, and provenance are explicit.
+- [ ] Satellite failures and shared dependencies are evaluated separately from surface-relay failures.
+- [ ] UI and exports distinguish current baseline results from the planned satellite architecture.
 - [ ] The optimizer finds the minimum relay count only within the screened catalog.
 - [ ] N-1 mode evaluates every individual selected-relay failure.
 - [ ] Before/after and failure results use consistent metrics.

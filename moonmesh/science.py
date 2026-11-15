@@ -14,6 +14,7 @@ from lunar_core.terrain import (
     MOON_RADIUS_M, TerrainGrid, polar_stereographic_south, polar_stereographic_south_inverse, radial_points,
 )
 
+from .environment import CASES, node_states, public_state, optimize_environment
 from .data import DATA, LOLA, PRODUCTS, SITES, activate
 from .network import battery, evaluate, link_margin, metrics, optimize, passes, spans
 
@@ -151,7 +152,8 @@ PROVENANCE = {
     "terrain_resolution": "LOLA 20 m near field and 240 m far field. Grid spacings are distinct from effective observational resolution.",
     "time": "UTC, uniformly sampled at interval starts. Changes between samples are unresolved.",
     "rf": "Free-space link estimate. Receiver threshold scales by 10 log10(rate/128 kbps). Fixed Earth receiver gains and losses. No station scheduling or antenna patterns.",
-    "power": "Battery starts at the configured charge. In sunlight the load operates and charges at a configurable net rate. In darkness it draws at a constant load.",
+    "power": "Coupled battery/heater/thermal simulation at internal steps of at most 60 seconds. Endurance hours × node load gives nominal Wh; sunlight supplies (1 + charge ratio) × load before dust losses. Lander has its own endurance and initial charge. Earth receiver power is external.",
+    "environment": "Version 1: assumed effective thermal sinks, illustrative ORA insulation and freeze limit. No Diviner products ingested; no hardware calibration. Four bounded scenarios, not a weather forecast or flight qualification. Dust affects solar output; no unsupported RF attenuation or thermal-coating coefficients.",
     "network": "Direct Earth or one independent two-hop surface relay path. No inter-relay hops. Straight-line separation and chord LOS approximate deployability.",
     "scope": "Site coordinates are approximate research points from the repository. Candidate optima are restricted to the screened DEM peaks. Planning prototype.",
     "related_work": {"NASA's 2024 candidate-region announcement": "https://www.nasa.gov/news-release/nasa-provides-update-on-artemis-iii-moon-landing-regions/",
@@ -180,32 +182,61 @@ def scenario(mission, include_map=True):
     direct, solar, horizon, sample = visibility(mission.site, lander, times, mission)
     slope = slopes(mission.site)
     options = candidates(grid, slope, x, y, mission)
+    geometric_direct = direct.copy()
+    lander_states = node_states(mission, solar, sample['solar_known'], lander=True)
+    direct_cases = {case: geometric_direct & lander_states[case]['available'] for case in CASES}
+    relay_cases = {case: [] for case in CASES}
+    direct = direct_cases['cold_dust']
+    lander_state = lander_states['cold_dust']
+    for i in range(len(direct)):
+        if not lander_state['available'][i]:
+            sample['reason'][i] = 'Lander: ' + lander_state['reason'][i]
+            sample['status'][i] = 'uncertain' if not sample['solar_known'][i] else 'unavailable'
     relays = []
+    geometric_relays = []
     eligible = []
     for idx, candidate in enumerate(options):
         relay = Observer(candidate["lat"], candidate["lon"], candidate["elevation"], mission.mast_m)
         los, distance = surface_path(grid, lander, relay)
         local_margin = float(link_margin(mission.surface_radio, distance))
         rf, sunlight, _, relay_sample = visibility(mission.site, relay, times, mission)
-        powered, reserve = battery(sunlight, mission.battery_hours, mission.charge_ratio, hours, mission.initial_charge_pct)
-        link = rf & powered & bool(los and local_margin >= mission.surface_radio.margin)
+        legacy_power, _ = battery(sunlight, mission.battery_hours, mission.charge_ratio, hours, mission.initial_charge_pct)
+        geometric_relays.append(rf & legacy_power & bool(los and local_margin >= mission.surface_radio.margin))
+        states = node_states(mission, sunlight, relay_sample['solar_known'], distance)
+        for case in CASES:
+            relay_cases[case].append(rf & states[case]['available'] & lander_states[case]['available']
+                                     & bool(los and local_margin >= mission.surface_radio.margin))
+        powered = states['cold_dust']['available']
+        reserve = (states['cold_dust']['soc'] * mission.battery_hours).tolist()
+        link = relay_cases['cold_dust'][-1]
         relays.append(link)
-        if link.any():
+        if any(relay_cases[case][-1].any() for case in CASES):
             eligible.append(idx)
         candidate.update(los=los, surface_margin=local_margin, earth=metrics(rf, hours),
                          solar=metrics(sunlight, hours), power=metrics(powered, hours),
                          coverage=metrics(link, hours), recovered=float((link & ~direct).mean()*100),
                          temporal_coverage=link.tolist(), sunlight=sunlight.tolist(), powered=powered.tolist(),
                          reserve=reserve, minimum_reserve=min(reserve), minimum_earth_margin=min(relay_sample["rf_margin"]),
-                         unknown_samples=relay_sample["status"].count("uncertain"))
-    selection, feasible = optimize(direct, relays, eligible, mission, options)
+                         unknown_samples=relay_sample["status"].count("uncertain"),
+                         environment={case: public_state(states[case], mission) for case in CASES})
+    baseline_selection, baseline_feasible = optimize(geometric_direct, geometric_relays,
+        [i for i, path in enumerate(geometric_relays) if path.any()], mission, options)
+    baseline_metrics = evaluate(geometric_direct, geometric_relays, baseline_selection, mission)[1]
+    selection, feasible = optimize_environment(direct_cases, relay_cases, eligible, mission)
+    environment_cases = {}
+    for case in CASES:
+        _, values, failure, _ = evaluate(direct_cases[case], relay_cases[case], selection, mission)
+        environment_cases[case] = dict(network=values, worst=failure,
+                                       meets=passes(failure if mission.resilient else values, mission))
     combined, network, worst, redundant = evaluate(direct, relays, selection, mission)
     _, base, _, _ = evaluate(direct, relays, (), mission)
+    def all_cases_pass(active):
+        return all(passes(evaluate(direct_cases[c], relay_cases[c], active, mission)[1], mission) for c in CASES)
     failures = []
     for disabled in selection:
         active = tuple(idx for idx in selection if idx != disabled)
         remaining, result, _, _ = evaluate(direct, relays, active, mission)
-        failures.append(dict(id=options[disabled]["id"], metrics=result, meets=passes(result, mission),
+        failures.append(dict(id=options[disabled]["id"], metrics=result, meets=all_cases_pass(active),
                              windows_lost=int(len(spans(~(combined & ~remaining)))),
                              availability_lost=network["availability"]-result["availability"],
                              blackout_increase=result["longest"]-network["longest"]))
@@ -217,7 +248,7 @@ def scenario(mission, include_map=True):
             assisted = np.logical_or.reduce([relays[idx] for idx in active], axis=0) if active else np.zeros_like(direct)
             key = ",".join(sorted(options[idx]["id"] for idx in removed)) or "nominal"
             failure_states[key] = dict(
-                combined=online.tolist(), assisted=assisted.tolist(), metrics=values, meets=passes(values, mission))
+                combined=online.tolist(), assisted=assisted.tolist(), metrics=values, meets=all_cases_pass(active))
     sun_metrics = metrics(solar, hours)
     details = site_details(grid, slope, x, y)
     result = dict(site=dict(name=name, lat=lat, lon=lon, elevation=ground, **details),
@@ -231,6 +262,13 @@ def scenario(mission, include_map=True):
                   horizon=dict(azimuth=horizon.azimuth_deg.tolist(), elevation=nullable(horizon.elevation_deg),
                                distance=nullable(horizon.distance_m)),
                   samples=dict(**sample, direct=direct.tolist(), solar=solar.tolist(), network=combined.tolist()),
+                  environment=dict(version=1, status='assumed', validated=False,
+                                   primary_case='cold_dust', cases=environment_cases,
+                                   lander={case: public_state(lander_states[case], mission) for case in CASES},
+                                   geometric_direct=metrics(geometric_direct, hours),
+                                   simplified_baseline=dict(network=baseline_metrics, feasible=baseline_feasible,
+                                       recommended=[options[i]['id'] for i in baseline_selection]),
+                                   assumptions='Effective sink envelopes and dust deposition are user assumptions. No Diviner data or hardware calibration; Earth receiver power is external.'),
                   provenance=PROVENANCE)
     if include_map:
         result["map"] = map_data(grid, slope, x, y)

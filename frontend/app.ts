@@ -1,4 +1,5 @@
 import {MoonView} from "./moon.js";
+import {icon} from "./icons.js";
 import {map, timeline, horizon, powerTimeline} from "./charts.js";
 import type {Result, Comparison, Candidate, Sensitivity, Metrics, AreaResult} from "./types.js";
 
@@ -16,7 +17,7 @@ const MOON_R=1737400, DEG=Math.PI/180;
 const toXY=(lat:number,lon:number)=>{const rho=2*MOON_R*Math.tan((90+lat)*DEG/2);return [rho*Math.sin(lon*DEG),rho*Math.cos(lon*DEG)];};
 const toLatLon=(x:number,y:number):[number,number]=>[2*Math.atan(Math.hypot(x,y)/(2*MOON_R))/DEG-90,((Math.atan2(x,y)/DEG)%360+360)%360];
 let sites:Record<string,[string,number,number]>={};
-const views:Record<string,[string,string]>={landing:["Start with the Moon.","01 · Explore the surface. Then draw the area you want to analyse: a square or any shape."],configure:["Tell us about your mission.","02 · Draw an area, choose dates and communication goals, then calculate."],layout:["Plan the network.","03 · The best layout of towers and links inside the area you drew, compared with simpler formats."],overview:["Your mission, in three dimensions.","04 · Inspect the lander and calculated relay network. Explore the local terrain, or switch to Whole Moon for context."],sites:["Choose your horizon.","Compare landing regions over the same mission period and assumptions."],communication:["Understand the silence.","Trace each communication blackout to terrain, geometry, and RF conditions."],relays:["Bridge the distance.","Explore the smallest screened relay configuration and its physical constraints."],resilience:["Plan for the unexpected.","Disable a relay and inspect how the remaining paths perform."],sensitivity:["Question the assumptions.","Change one assumption at a time and compare the modeled outcome."],data:["The science behind the signal.","Inspect sources, model assumptions, and the limits of these planning estimates."]};
+const views:Record<string,[string,string]>={landing:["Start with the Moon.","01 · Explore the surface. Then draw the area you want to analyse: a square or any shape."],configure:["Define your mission.","Select an area, choose your dates, and set your communication goals."],layout:["Plan the network.","03 · The best layout of towers and links inside the area you drew, compared with simpler formats."],overview:["Your mission, in three dimensions.","04 · Inspect the lander and calculated relay network. Explore the local terrain, or switch to Whole Moon for context."],sites:["Choose your horizon.","Compare landing regions over the same mission period and assumptions."],communication:["Understand the silence.","Trace each communication blackout to terrain, geometry, and RF conditions."],relays:["Bridge the distance.","Explore the smallest screened relay configuration and its physical constraints."],resilience:["Plan for the unexpected.","Disable a relay and inspect how the remaining paths perform."],sensitivity:["Question the assumptions.","Change one assumption at a time and compare the modeled outcome."],data:["The science behind the signal.","Inspect sources, model assumptions, and the limits of these planning estimates."]};
 function dirty(){
  // Compare only editable fields; API configuration may include additional model defaults.
  const same=(a:unknown,b:unknown):boolean=>a!==null&&typeof a==="object"?Object.entries(a).every(([k,v])=>same(v,(b as Record<string,unknown>)?.[k])):a===b;
@@ -35,7 +36,16 @@ function setPanel(open:boolean){
 }
 $("#panel-tab").onclick=()=>setPanel(document.body.classList.contains("panel-collapsed"));
 $("#panel-close").onclick=()=>{setPanel(false);$("#panel-tab").focus();};
+$(".skip-link").onclick=e=>{e.preventDefault();setPanel(true);$("#title").focus();};
+function setNavigation(open:boolean){
+ document.body.classList.toggle("nav-open",open);
+ $("#workspace-menu").setAttribute("aria-expanded",String(open));
+}
+$("#workspace-menu").onclick=()=>setNavigation(!document.body.classList.contains("nav-open"));
+$("#nav-scrim").onclick=()=>setNavigation(false);
+$("#journey").addEventListener("click",e=>{if((e.target as HTMLElement).closest("button"))setNavigation(false);});
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!document.body.classList.contains("panel-collapsed")&&matchMedia("(max-width:767px)").matches&&(e.target as HTMLElement).closest?.("#panel"))setPanel(false);});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&document.body.classList.contains("nav-open"))setNavigation(false);});
 function updateNavigation(){
  document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(b=>{
   const available=["landing","configure"].includes(b.dataset.view!)||(!!result&&!stale);
@@ -49,9 +59,22 @@ function updateNavigation(){
  $<HTMLButtonElement>('button[type="submit"]').disabled=busy||!configured||!area;
 }
 $("#start-mission").onclick=()=>navigate("configure");
+$("#explore-surface").onclick=()=>{
+ document.body.classList.add("exploring");
+ moon?.flyToSite(-89.6,0,160_000);
+ status("Explore the south pole. Draw an area to start planning your network.");
+};
+const regionViews:Record<string,[number,number]>={haworth:[-86.8,337.2],nobile:[-85.4,37.3],malapert:[-85.964,357.681]};
+document.querySelectorAll<HTMLButtonElement>("[data-region]").forEach(button=>button.onclick=()=>{
+ const region=button.dataset.region!, position=regionViews[region]; if(!position)return;
+ document.body.classList.add("exploring");
+ moon?.flyToSite(position[0],position[1],40_000);
+ status(`Exploring ${button.textContent?.replace("↗", "").trim()}. Draw an area to plan a network.`);
+});
 function navigate(view:string,focus=true){
  if(!["landing","configure"].includes(view)&&(!result||stale))view="configure";
  active=view;
+ if(view==="landing")document.body.classList.remove("exploring");
  document.querySelectorAll("[data-view][aria-current]").forEach(b=>b.removeAttribute("aria-current"));
  document.querySelectorAll<HTMLButtonElement>(`[data-view="${view}"]`).forEach(b=>b.setAttribute("aria-current","step"));
 
@@ -99,6 +122,27 @@ const fields:[string,string,number,number,number,string][]=[
  ["latitude","Custom latitude (°)",-90,-85,.000001,"Optional latitude within the selected terrain crop."],
  ["longitude","Custom longitude (° E)",-180,360,.000001,"Optional longitude within the selected terrain crop."],
 ];
+const environmentalFields:typeof fields=[
+ ["dark_sink_k","Nominal dark sink (K)",20,350,1,"Assumed effective thermal sink, not air temperature or Diviner measurements."],
+ ["cold_sink_k","Cold case sink (K)",20,350,1,"Colder bounding case; must not exceed nominal dark sink."],
+ ["lit_sink_k","Sunlit sink (K)",20,400,1,"Assumed effective thermal sink in full sunlight."],
+ ["node_load_w","Electronics load (W)",.1,500,.1,"Applied to each relay and the lander; battery Wh = endurance hours × load."],
+ ["heater_w","Heater capacity (W)",0,500,.1,"Thermostat controlled heater; its energy comes from the node battery."],
+ ["heat_capacity","Box heat capacity (J/K)",100,1e7,100,"Illustrative hardware parameter; calibrate against a real design."],
+ ["emissivity","Insulated box emissivity",.001,1,.001,"Effective emissivity below radiator opening temperature."],
+ ["radiating_area_m2","Radiating area (m²)",.001,100,.001,"Hardware heat loss area."],
+ ["conductance_w_k","Ground conductance (W/K)",0,10,.001,"Assumed conductive heat path to the effective sink."],
+ ["heater_on_k","Heater set point (K)",100,350,.01,"Heater starts below this internal temperature."],
+ ["freeze_k","Irreversible freeze limit (K)",50,300,.01,"Assumed hardware survival limit; must be below the heater set point."],
+ ["lander_battery_hours","Lander endurance (h)",0,1440,1,"Lander battery capacity at configured electronics load."],
+ ["lander_initial_charge_pct","Lander initial charge (%)",0,100,1,"Relay initial charge is set separately above."],
+ ["dust_start_h","Dust event start (mission h)",0,1440,.5,"Local deposition event, not a lunar weather forecast."],
+ ["dust_duration_h","Dust event duration (h)",.1,1440,.1,"Duration of deposition; deposited dust remains until cleaned."],
+ ["dust_radius_km","Dust event radius (km)",0,20,.1,"Assumed affected radius centered on the lander."],
+ ["dust_deposition_per_day","Dust deposition / day",0,1,.05,"Normalized fouling added per day during exposure."],
+ ["dust_cleaning_per_day","Dust removal / day",0,1,.05,"Assumed cleaning effectiveness; zero means no cleaning."],
+ ["dust_solar_loss","Solar loss at full fouling",0,1,.05,"Fraction of solar output lost at dust load 1. RF propagation is unchanged."],
+];
 const rf:[string,string,number,number,number,string][]=[
  ["ghz","Frequency (GHz)",.001,100,.001,"Carrier frequency."],["watts","Transmitter (W)",.01,1e5,.01,"Radiated profile uses transmitter power and antenna gain."],
  ["tx_gain","TX gain (dBi)",-30,120,.1,"Assumed transmitting antenna gain."],["rx_gain","RX gain (dBi)",-30,120,.1,"Assumed receiving antenna gain."],
@@ -109,6 +153,8 @@ const rf:[string,string,number,number,number,string][]=[
 const input=([key,label,min,max,step,help]:typeof fields[number],prefix="")=>`<label title="${help}">${label}<input type="number" min="${min}" max="${max}" step="${step}" name="${prefix+key}" ${key==="latitude"||key==="longitude"?"":"required"}></label>`;
 $("#expert").innerHTML=`<fieldset><legend>Mission and deployment constraints</legend><div class="fields">${fields.filter(f=>!["availability","blackout_hours","max_relays","deployment_km"].includes(f[0])).map(f=>input(f)).join("")}<label title="Require compliance after any selected relay fails"><span><input type="checkbox" name="resilient"> Require N−1</span></label></div></fieldset>`+
  [["earth_radio","Direct Earth and relay-to-Earth RF"],["surface_radio","Lander-to-relay RF"]].map(([key,label])=>`<fieldset><legend>${label}</legend><div class="fields">${rf.map(f=>input(f,key+".")).join("")}</div></fieldset>`).join("");
+
+$("#expert").insertAdjacentHTML("beforeend",`<fieldset><legend>Night temperatures and dust exposure</legend><p>Four cases are checked: nominal, cold, dust, and cold with dust. Temperatures and deposition are assumed bounds; hardware constants are illustrative. The Moon has no wind driven dust storms.</p><div class="fields">${environmentalFields.map(f=>input(f)).join("")}</div></fieldset>`);
 
 $("#basic-constraints").innerHTML=fields.filter(f=>["availability","blackout_hours","max_relays","deployment_km"].includes(f[0])).map(f=>input(f)).join("");
 
@@ -199,7 +245,7 @@ function timelinePanel(){
  <div class="legend"><span style="--key:#779ebd">Flat horizon</span><span>Terrain visible</span><span style="--key:var(--green)">Direct RF / combined</span><span style="--key:var(--amber)">Sunlight</span><span style="--key:#bba9ff">Relay path</span><span style="--key:var(--red)">Blackout</span><span class="unknown">Uncertain</span></div><p class="caption">Use arrow keys on the time slider to inspect individual samples. Times are UTC.</p><div id="timeline-readout" class="timeline-readout"></div><details class="track-help"><summary>What the tracks mean</summary><dl>
  <dt>Flat horizon</dt><dd>Earth is above the horizon of a smooth Moon with no terrain.</dd>
  <dt>Terrain visible</dt><dd>Earth clears the real terrain horizon plus the clearance allowance. A site on high ground can see past the flat horizon, so this can be on while Flat horizon is off.</dd>
- <dt>Direct RF</dt><dd>Earth is terrain-visible and the estimated radio margin meets the requirement.</dd>
+ <dt>Direct RF</dt><dd>Earth is terrain-visible, radio margin meets the requirement, and the lander has power and thermal survival in the displayed cold + dust case.</dd>
  <dt>Sunlight</dt><dd>The Sun's center clears the terrain horizon plus the clearance allowance.</dd>
  <dt>Relay path</dt><dd>At least one active relay links the lander to Earth.</dd>
  <dt>Combined</dt><dd>Direct or relay communication is available.</dd>
@@ -209,7 +255,7 @@ function timelinePanel(){
 }
 
 const horizonPanel=()=>panel("360° terrain horizon",`<canvas id="horizon" class="horizon" aria-label="Horizon elevation versus azimuth"></canvas><p class="caption">Azimuth (°) horizontally · Elevation (°) vertically. Solid cyan: terrain; dashed: clearance allowance. Green Earth and amber Sun markers. The line beneath Earth shows its clearance (green clear, red blocked); gaps indicate unknown terrain.</p><div id="point"></div>`);
-const planState=()=>!result.feasible?"Best evaluated configuration · requirements unmet":result.recommended.length?"Minimum among screened candidates · requirements met":"Direct path meets the requirements · no relays needed";
+const planState=()=>!result.feasible?"Best evaluated configuration · requirements unmet":result.recommended.length?"Minimum among screened candidates · modeled limits met under assumptions":"Direct path meets modeled limits under assumptions · no relays needed";
 const bars=(label:string,value:number,after=false)=>`<div class="muted">${label} · ${pct(value)}</div><div class="chart-bar ${after?"after":""}"><span style="width:${value}%"></span></div>`;
 function outageTable(){
  const rows=result.outages.map(item=>row([`<button data-time="${item.first}" aria-label="Inspect blackout starting ${utc(item.start)}">${utc(item.start)}</button>`,utc(item.end),hours(item.hours),escape(item.causes.join(", "))]));
@@ -226,6 +272,7 @@ function relayDetail(c:Candidate,includeTimeline=true){
  ["Coordinates",`${n(c.lat,5)}°, ${n(c.lon,5)}° E`],["Deployment estimate",n(c.distance,2)+" km"],["Elevation",n(c.elevation)+" m"],
  ["Local slope",n(c.slope)+"°"],["Surface margin",n(c.surface_margin)+" dB"],["Relay-to-Earth feasibility",pct(c.earth.availability)],
  ["Sunlight",pct(c.solar.availability)],["Powered",pct(c.power.availability)],["Full relay path",pct(c.coverage.availability)],["Uncertain Earth samples",String(c.unknown_samples)],
+ ["Minimum temperature",n(c.environment.cold_dust.minimum_temperature_c)+" °C"],["Heater energy",n(c.environment.cold_dust.heater_energy_wh)+" Wh"],["Final dust load",n(c.environment.cold_dust.dust_load.at(-1),2)],
  ["Minimum Earth-link margin",n(c.minimum_earth_margin)+" dB"],["Power outages",String(c.power.intervals)],["Battery capacity",hours(Number(result.config.battery_hours))],["Minimum battery reserve",hours(c.minimum_reserve)],
  ])+(includeTimeline?`<p class="muted">Sunlight and usable power over the mission</p><div id="power-readout"></div><canvas id="power-timeline" class="power-timeline" aria-label="Relay sunlight, power and battery reserve"></canvas>`:`<img src="${powerImage(c)}" alt="Relay ${c.id} sunlight, power and battery reserve">`));
 }
@@ -243,31 +290,37 @@ function siteRows(){
  if(!compared)return '<p class="muted">Compare all three regions over the current period and assumptions.</p>';
  return table(["Region","Sunlight","Longest darkness","Direct to Earth","Longest direct blackout","With relays","Relays","Limits met","DEM coverage"],
  compared.map(c=>row([`<button data-site="${Object.entries(sites).find(([,v])=>v[0]===c.site.name)?.[0]??""}">${escape(c.site.name)}${c.site.name===result.site.name?" · current":""}</button><small class="coords">${n(c.site.lat,3)}°, ${n(c.site.lon,3)}° E</small>`,pct(c.solar.availability),hours(c.solar.longest),pct(c.direct.availability),hours(c.direct.longest),
- `<strong>${pct(c.network.availability)}</strong>`,escape(c.recommended.join(", ")||"None"),c.feasible?'<span class="green">Met</span>':'<span class="amber">Unmet</span>',pct(c.site.terrain_coverage)])),"compare");
+ `<strong>${pct(c.network.availability)}</strong>`,escape(c.recommended.join(", ")||"None"),c.feasible?'<span class="amber">Met under assumptions</span>':'<span class="amber">Unmet</span>',pct(c.site.terrain_coverage)])),"compare");
 }
 function configuration(){
  const names:Record<string,string>={site:"Landing region",start:"Start (UTC)",end:"End (UTC)",minutes:"Sampling (min)",resilient:"Require N−1",dem_bias_m:"Terrain bias (m)",
-  earth_radio:"Direct Earth and relay-to-Earth RF",surface_radio:"Lander-to-relay RF",...Object.fromEntries(fields.map(([key,label])=>[key,label]))};
+  earth_radio:"Direct Earth and relay-to-Earth RF",surface_radio:"Lander-to-relay RF",...Object.fromEntries([...fields,...environmentalFields].map(([key,label])=>[key,label]))};
  const radio=(r:Record<string,number>)=>`${r.ghz} GHz · ${r.watts} W · TX ${r.tx_gain} dBi · RX ${r.rx_gain} dBi · ${r.sensitivity} dBm sensitivity · ${r.loss} dB losses · ${r.margin} dB required margin · ${r.rate_kbps} kbps`;
  return readout(Object.entries(result.config).filter(([,v])=>v!==null).map(([key,v])=>[names[key]??key.replaceAll("_"," "),
   escape(key==="site"?result.site.name:typeof v==="boolean"?(v?"Yes":"No"):v&&typeof v==="object"?radio(v as Record<string,number>):String(v))]));
 }
+function environmentPanel(){
+ const e=result.environment, state=e.lander[e.primary_case];
+ return panel("Night temperature and dust checks",`<p class="callout amber">Assumed environmental cases · hardware survival is unvalidated.</p><p>${escape(e.assumptions)}</p>`+
+ table(["Case","Network coverage","Longest blackout","Worst single failure","Modeled limits"],Object.entries(e.cases).map(([name,c])=>row([escape(name.replaceAll("_"," + ")),pct(c.network.availability),hours(c.network.longest),pct(c.worst.availability),c.meets?"Pass under assumptions":"Unmet"])))+
+ readout([["Displayed timeline",e.primary_case.replaceAll("_"," + ")],["Lander minimum temperature",n(state.minimum_temperature_c)+" °C"],["Lander minimum charge",pct(state.minimum_soc*100)],["Lander heater energy",n(state.heater_energy_wh)+" Wh"],["Geometric/RF direct availability",pct(e.geometric_direct.availability)]]));
+}
 function render(){
- document.body.dataset.step=active;flow();form.hidden=active!=="configure";
+ document.body.dataset.step=active;flow();form.hidden=active!=="configure";$("#area-setup").hidden=active!=="configure";
  if(active==="landing"){
-  outlet.innerHTML=`<section class="panel introduction"><p class="eyebrow">A CONNECTION STARTS HERE</p><h2>From the surface to a working plan.</h2><p>Search, zoom and click the Moon to read coordinates, elevation and nearby features. Then <strong>draw the area you care about</strong>, a square or any shape of any size anywhere on the Moon, and MOONMESH plans the towers and links inside it.</p><div class="draw-actions"><button class="primary" data-draw-start="rect">▭ Draw a square</button><button data-draw-start="free">✎ Draw freeform</button><button data-pole-go>⌖ Go to the pole</button></div><p>Terrain can hide Earth from a lunar lander. Relay towers may help restore contact. MOONMESH shows when, where, and under which assumptions.</p><ol class="journey-list"><li><strong>Draw an area</strong><span>Any size, anywhere on the Moon.</span></li><li><strong>Plan the layout</strong><span>Towers, gateways and links, with tree, loop and mesh compared.</span></li><li><strong>Understand and test it</strong><span>The Earth link, blackouts and relay failures.</span></li></ol><button class="primary" data-go="configure">Set up my mission →</button><p class="caption">${result&&!stale?"Your applied mission is ready in Step 3.":"No towers are placed before you calculate a mission."}</p></section>`;
+  outlet.innerHTML=`<section class="panel introduction"><p class="eyebrow">A CONNECTION STARTS HERE</p><h2>From the surface to a working plan.</h2><p>Search, zoom and click the Moon to read coordinates, elevation and nearby features. Then <strong>draw the area you care about</strong>, a square or any shape of any size anywhere on the Moon, and MOONMESH plans the towers and links inside it.</p><div class="draw-actions"><button class="primary" data-draw-start="rect">${icon("rectangle")} Draw a square</button><button data-draw-start="free">${icon("pen")} Draw freeform</button><button data-pole-go>${icon("target")} Go to the pole</button></div><p>Terrain can hide Earth from a lunar lander. Relay towers may help restore contact. MOONMESH shows when, where, and under which assumptions.</p><ol class="journey-list"><li><strong>Draw an area</strong><span>Any size, anywhere on the Moon.</span></li><li><strong>Plan the layout</strong><span>Towers, gateways and links, with tree, loop and mesh compared.</span></li><li><strong>Understand and test it</strong><span>The Earth link, blackouts and relay failures.</span></li></ol><button class="primary" data-go="configure">Set up my mission →</button><p class="caption">${result&&!stale?"Your applied mission is ready in Step 3.":"No towers are placed before you calculate a mission."}</p></section>`;
   connect();return;
  }
  if(active==="configure"){
-  outlet.innerHTML=panel("Your area",area?`<p class="callout">${area.length} corner${area.length===1?"":"s"} drawn. Calculate to plan the network inside it.</p><div class="draw-actions"><button data-draw-start="rect">Redraw as a square</button><button data-draw-start="free">Redraw freeform</button></div>`:`<p class="callout amber">Draw the area to analyse first. Click a button below, then drag on the Moon.</p><div class="draw-actions"><button class="primary" data-draw-start="rect">▭ Draw a square</button><button data-draw-start="free">✎ Draw freeform</button><button data-pole-go>⌖ Go to the pole</button></div>`)+panel("What happens next?",`<p>Choose <strong>Calculate network</strong> above. We plan towers and links inside your area, then evaluate terrain, sunlight and direct communication for your mission period. Step 03 opens with the layout.</p><p class="muted">${stale?"You changed the mission parameters. Calculate again to update the network; analysis steps are locked until then.":"Start with the provided research scenario, or change the parameters. No mission runs automatically."}</p>`);connect();return;
+  $("#area-setup").innerHTML=panel("01 / Mission area",area?`<p class="callout">${area.length} corner${area.length===1?"":"s"} drawn. Calculate to plan the network inside it.</p><div class="draw-actions"><button data-draw-start="rect">Redraw as a square</button><button data-draw-start="free">Redraw freeform</button></div>`:`<p class="callout amber">Draw the area to analyse first. Click a button below, then drag on the Moon.</p><div class="draw-actions"><button class="primary" data-draw-start="rect">${icon("rectangle")} Draw a square</button><button data-draw-start="free">${icon("pen")} Draw freeform</button><button data-pole-go>${icon("target")} Go to the pole</button></div>`);outlet.innerHTML=panel("What happens next?",`<p>Choose <strong>Calculate network</strong> above. We plan towers and links inside your area, then evaluate terrain, sunlight and direct communication for your mission period. Step 03 opens with the layout.</p><p class="muted">${stale?"You changed the mission parameters. Calculate again to update the network; analysis steps are locked until then.":"Start with the provided research scenario, or change the parameters. No mission runs automatically."}</p>`);connect();return;
  }
  if(!result)return;
  const net=live(), r=result;
  const charts=`<div class="split">${mapPanel()}${horizonPanel()}</div>`;
  const context=readout([["Position",`${n(r.site.lat,5)}°, ${n(r.site.lon,5)}° E`],["Elevation",n(r.site.elevation)+" m"],
  ["Mean / max slope",n(r.site.mean_slope)+"° / "+n(r.site.max_slope)+"°"],["DEM grid spacing",n(r.site.resolution,0)+" m"],["Local DEM coverage",pct(r.site.terrain_coverage)]]);
- const kpis=`<div class="metrics">${metric("DIRECT TO EARTH",pct(r.direct.availability),`${r.direct.intervals} blackout intervals`)}${metric("SUNLIGHT",pct(r.solar.availability),hours(r.solar.longest)+" longest darkness")}${metric("LONGEST DIRECT BLACKOUT",hours(r.direct.longest),hours(r.direct.total)+" offline in total")}${metric("WITH ACTIVE RELAYS",pct(net.metrics.availability),hours(net.metrics.longest)+" longest blackout",net.meets?"green":"amber")}${metric("WORST SINGLE FAILURE",pct(r.worst.availability),hours(r.worst.longest)+" longest blackout",meets(r.worst)?"green":"amber")}</div>`;
- const comparison=bars("Direct-to-Earth",r.direct.availability)+bars("Active network",net.metrics.availability,true)+`<p class="callout ${net.meets?"":"amber"}">${net.meets?"Active network meets communication requirements.":"Active network falls short of communication requirements."}</p>`;
+ const kpis=`<div class="metrics">${metric("DIRECT TO EARTH",pct(r.direct.availability),`${r.direct.intervals} blackout intervals`)}${metric("SUNLIGHT",pct(r.solar.availability),hours(r.solar.longest)+" longest darkness")}${metric("LONGEST DIRECT BLACKOUT",hours(r.direct.longest),hours(r.direct.total)+" offline in total")}${metric("WITH ACTIVE RELAYS",pct(net.metrics.availability),hours(net.metrics.longest)+" longest blackout","amber")}${metric("WORST SINGLE FAILURE",pct(r.worst.availability),hours(r.worst.longest)+" longest blackout","amber")}</div>`;
+ const comparison=bars("Direct-to-Earth",r.direct.availability)+bars("Active network",net.metrics.availability,true)+`<p class="callout ${net.meets?"":"amber"}">${net.meets?"Active network meets modeled limits under assumptions.":"Active network falls short of communication requirements."}</p>`;
  const candidates=table(["Relay","Range","Slope","Surface LOS","Solar","Power","Path","Recovered"],
  [...r.candidates].sort((a,b)=>candidateSort==="distance"?a.distance-b.distance:b.recovered-a.recovered).map(c=>row([`<button aria-pressed="${c.id===selected}" data-candidate="${c.id}">${c.id}</button>`,n(c.distance,2)+" km",n(c.slope)+"°",c.los===null?"Uncertain":c.los?"Clear":"Blocked",pct(c.solar.availability),pct(c.power.availability),pct(c.coverage.availability),pct(c.recovered)])));
  const choice=r.candidates.find(c=>c.id===selected)??r.candidates[0];
@@ -277,14 +330,15 @@ function render(){
  r.failures.map(f=>row([f.id,pct(f.metrics.availability),hours(f.metrics.longest),n(f.availability_lost)+" pp",hours(f.blackout_increase),String(f.windows_lost),f.meets?"Yes":"No"])));
  switch(active){
  case "layout":outlet.innerHTML=layoutView();break;
- case "overview":outlet.innerHTML=`<div class="network-hero"><section class="panel mission-summary"><p class="eyebrow">MISSION / ${escape(r.site.name.toUpperCase())}</p><h2>${net.meets?"A path to connection.":"Every connection counts."}</h2><span class="verdict ${net.meets?"green":"amber"}">${net.meets?"✓ Active network meets communication limits":"△ Active network falls short of communication limits"}</span><div class="hero-value">${pct(net.metrics.availability)} <small>active coverage</small></div><p class="muted">${n(net.metrics.availability-r.direct.availability)} percentage points more of the mission covered than direct contact alone. ${escape(planState())}.</p><div class="hero-stats"><div><span class="muted">Longest active blackout</span><strong>${hours(net.metrics.longest)}</strong></div><div><span class="muted">Screened recommendation</span><strong>${r.recommended.length} relays</strong></div></div><button class="primary" data-go="communication">Next: understand blackouts →</button><button class="quiet" data-go="relays">Inspect individual tower details</button></section><section class="panel"><h2>Towers on the Moon</h2><div id="scene-selection" aria-live="polite"><p class="caption">Select a tower in the Moon view to inspect it. Green = available path, amber = unavailable, red = disabled. Dashed links are unavailable at the selected time.</p></div></section></div>`+kpis+timelinePanel()+`<details id="map-details" class="panel"><summary>See the 2D terrain map</summary>${mapPanel()}</details><div class="split">${panel("From direct to connected",comparison)}${panel("Independent surface paths",nodes+`<p class="caption">Each powered relay supplies a separate two-hop path. No relay-to-relay chain is modeled.</p>`+readout([["Mission length",hours(r.times.length*Number(r.config.minutes)/60)],["Darkness limit",r.darkness_meets?"Met":"Exceeded"]]))}</div>`;break;
+ case "overview":outlet.innerHTML=`<div class="network-hero"><section class="panel mission-summary"><p class="eyebrow">MISSION / ${escape(r.site.name.toUpperCase())}</p><h2>${net.meets?"A path to connection.":"Every connection counts."}</h2><span class="verdict amber">${net.meets?"✓ Active network meets modeled limits under assumptions":"△ Active network falls short of communication limits"}</span><div class="hero-value">${pct(net.metrics.availability)} <small>active coverage</small></div><p class="muted">${n(net.metrics.availability-r.direct.availability)} percentage points more of the mission covered than direct contact alone. ${escape(planState())}.</p><div class="hero-stats"><div><span class="muted">Longest active blackout</span><strong>${hours(net.metrics.longest)}</strong></div><div><span class="muted">Screened recommendation</span><strong>${r.recommended.length} relays</strong></div></div><button class="primary" data-go="communication">Next: understand blackouts →</button><button class="quiet" data-go="relays">Inspect individual tower details</button></section><section class="panel"><h2>Towers on the Moon</h2><div id="scene-selection" aria-live="polite"><p class="caption">Select a tower in the Moon view to inspect it. Green = available path, amber = unavailable, red = disabled. Dashed links are unavailable at the selected time.</p></div></section></div>`+kpis+timelinePanel()+`<details id="map-details" class="panel"><summary>See the 2D terrain map</summary>${mapPanel()}</details><div class="split">${panel("From direct to connected",comparison)}${panel("Independent surface paths",nodes+`<p class="caption">Each powered relay supplies a separate two-hop path. No relay-to-relay chain is modeled.</p>`+readout([["Mission length",hours(r.times.length*Number(r.config.minutes)/60)],["Darkness limit",r.darkness_meets?"Met":"Exceeded"]]))}</div>`;break;
  case "sites":outlet.innerHTML=panel("Find the right horizon",`<p class="muted table-note">Approximate research points, evaluated over the applied mission period. Select a region, then Run mission to apply it.</p><button id="compare" class="primary" ${pending==="compare"?"disabled":""}>${pending==="compare"?"Comparing regions…":"Compare all regions"}</button><div id="comparison">${siteRows()}</div>`)+`<div class="split">${mapPanel()}${panel("Applied landing point",context)}</div>`;break;
- case "communication":outlet.innerHTML=timelinePanel()+outageTable()+`<p class="callout">${r.outages.length?"Select a blackout above to see its cause in the charts below.":"No direct blackouts were found in this sampled period."} Continue to Step 05 to test the network.</p>`+charts+panel("Applied landing terrain",context)+panel("Darkness intervals",r.darkness.length?table(["Start","End","Duration"],r.darkness.map(d=>row([utc(d.start),utc(d.end),hours(d.hours)]))):'<p class="muted">No darkness intervals in this sampled period.</p>');break;
+ case "communication":outlet.innerHTML=timelinePanel()+outageTable()+`<p class="callout">${r.outages.length?"Select a blackout above to see its cause in the charts below.":"No direct blackouts were found in this sampled period."} Continue to Resilience to test the network.</p>`+charts+panel("Applied landing terrain",context)+panel("Darkness intervals",r.darkness.length?table(["Start","End","Duration"],r.darkness.map(d=>row([utc(d.start),utc(d.end),hours(d.hours)]))):'<p class="muted">No darkness intervals in this sampled period.</p>');break;
  case "relays":outlet.innerHTML=`<div class="split">${mapPanel()}${planPanel()}</div>`+panel("Screened relay candidates",`<div class="controls"><label>Sort by <select id="candidate-sort"><option value="recovered" ${candidateSort==="recovered"?"selected":""}>Recovered coverage ↓</option><option value="distance" ${candidateSort==="distance"?"selected":""}>Deployment range ↑</option></select></label></div>`+(r.candidates.length?candidates:'<p class="muted">No screened candidates for these constraints. Review deployment and terrain settings.</p>'))+(choice?relayDetail(choice):"")+timelinePanel()+`<button class="primary" data-go="resilience">Test network resilience <span aria-hidden="true">↗</span></button>`;break;
  case "resilience":outlet.innerHTML=panel("Test the remaining paths",`<div class="controls">${switchers||'<p class="muted">This scenario uses the direct path only; there are no selected relays to disable.</p>'}</div>`+nodes+`<div class="metrics">${metric("NOMINAL COVERAGE",pct(r.network.availability),"All recommended relays")}${metric("SIMULATED COVERAGE",pct(net.metrics.availability),disabled.size+" disabled relays")}${metric("COVERAGE CHANGE",n(net.metrics.availability-r.network.availability)+" pp","Against nominal")}${metric("NOMINAL BLACKOUT",hours(r.network.longest),"Longest continuous outage")}${metric("BLACKOUT CHANGE",hours(net.metrics.longest-r.network.longest),"Against nominal")}</div>`+comparison)+timelinePanel()+panel("Single-relay criticality",`<p class="muted">Worst individual failure: ${pct(r.worst.availability)} availability · ${hours(r.worst.longest)} longest blackout. Nominal time with at least two independent paths: ${pct(r.redundant)}. The table below tests individual failures; toggles above may simulate multiple failures.</p>`+(r.failures.length?failures:'<p class="muted">No selected relays to evaluate.</p>'));break;
  case "sensitivity":outlet.innerHTML=panel("Assumption sweep",`<p class="muted">Re-run the current mission with one changed assumption at a time.</p><button id="sweep" class="primary" ${pending==="sensitivity"?"disabled":""}>${pending==="sensitivity"?"Computing sweep…":"Run sensitivity analysis"}</button><div id="sensitivity-results">${sensitivity?table(["Variant","Direct","Direct blackout","Direct outages","Network","Network blackout","Eligible relays","Selected relays","Feasible"],sensitivity.map(s=>s.error?`<tr><td>${escape(s.label)}</td><td colspan="8">${escape(s.error)}</td></tr>`:row([escape(s.label),pct(s.direct.availability),hours(s.direct.longest),String(s.direct.intervals),pct(s.network.availability),hours(s.network.longest),String(s.eligible),String(s.count),s.feasible?"Yes":"No"]))):""}</div>`)+(sensitivity?panel("Network availability by assumption",sensitivity.filter(s=>!s.error).map(s=>bars(escape(s.label),s.network.availability,true)).join("")):"");break;
- case "data":outlet.innerHTML=panel("Scenario configuration",configuration())+panel("Planning model, with limits",`<p>MOONMESH estimates communication for approximate lunar research points. It is a planning prototype; terrain sampling, RF assumptions, and a restricted relay catalog limit its results.</p><p class="muted">Flat-horizon visibility excludes local terrain. Terrain visibility adds the sampled horizon. Direct RF also requires adequate link margin. A relay path requires surface line of sight, both radio links, and usable power. Missing terrain is uncertain and excluded from credited availability. N−1 tests individual relay failures while retaining shared Earth receiver assumptions.</p>`)+panel("Data provenance",provenance())+panel("Power assumptions",readout([["Battery endurance",hours(Number(r.config.battery_hours))],["Initial charge",pct(Number(r.config.initial_charge_pct))],["Net charging rate",n(Number(r.config.charge_ratio))+" reserve hours / sunlight hour"]]))+[["earth_radio","Earth radio profile"],["surface_radio","Surface radio profile"]].map(([key,title])=>panel(title,readout(rf.map(([name,label])=>[label,n(Number((r.config[key] as Record<string,number>)[name]),3)])))).join("");break;
+ case "data":outlet.innerHTML=panel("Scenario configuration",configuration())+panel("Planning model, with limits",`<p>MOONMESH estimates communication for approximate lunar research points. It is a planning prototype; terrain sampling, RF assumptions, and a restricted relay catalog limit its results.</p><p class="muted">Flat-horizon visibility excludes local terrain. Terrain visibility adds the sampled horizon. Direct RF also requires adequate link margin. A relay path requires surface line of sight, both radio links, and usable power. Missing terrain is uncertain and excluded from credited availability. N−1 tests individual relay failures while retaining shared Earth receiver assumptions.</p>`)+panel("Data provenance",provenance())+panel("Power assumptions",readout([["Battery endurance",hours(Number(r.config.battery_hours))],["Initial charge",pct(Number(r.config.initial_charge_pct))],["Nominal net charging rate",n(Number(r.config.charge_ratio))+" reserve hours / sunlight hour before heater and dust losses"]]))+[["earth_radio","Earth radio profile"],["surface_radio","Surface radio profile"]].map(([key,title])=>panel(title,readout(rf.map(([name,label])=>[label,n(Number((r.config[key] as Record<string,number>)[name]),3)])))).join("");break;
  }
+ outlet.insertAdjacentHTML("beforeend",environmentPanel());
  connect();paint();
 }
 
@@ -360,8 +414,8 @@ function connect(){
  });
  outlet.querySelectorAll<HTMLButtonElement>("[data-go]").forEach(b=>b.onclick=()=>navigate(b.dataset.go!));
  outlet.querySelectorAll<HTMLButtonElement>("[data-format]").forEach(b=>b.onclick=()=>{layoutFormat=b.dataset.format!;moon?.setLayout(layout,layoutFormat);render();outlet.querySelector<HTMLButtonElement>(`[data-format="${layoutFormat}"]`)?.focus();});
- outlet.querySelectorAll<HTMLButtonElement>("[data-draw-start]").forEach(b=>b.onclick=()=>startDrawing(b.dataset.drawStart as "rect"|"free"));
- outlet.querySelectorAll<HTMLButtonElement>("[data-pole-go]").forEach(b=>b.onclick=()=>moon?.flyToPlace(-89.6,0,160000));
+ $("#panel").querySelectorAll<HTMLButtonElement>("[data-draw-start]").forEach(b=>b.onclick=()=>startDrawing(b.dataset.drawStart as "rect"|"free"));
+ $("#panel").querySelectorAll<HTMLButtonElement>("[data-pole-go]").forEach(b=>b.onclick=()=>moon?.flyToPlace(-89.6,0,160000));
  outlet.querySelectorAll<HTMLButtonElement>("[data-site]").forEach(b=>b.onclick=()=>{if(!b.dataset.site)return;$<HTMLSelectElement>('[name="site"]').value=b.dataset.site;for(const name of ["latitude","longitude"])$<HTMLInputElement>(`[name="${name}"]`).value="";dirty();navigate("configure");$<HTMLSelectElement>('[name="site"]').focus();});
  const sorter=document.querySelector<HTMLSelectElement>("#candidate-sort");if(sorter)sorter.onchange=()=>{candidateSort=sorter.value;render();$("#candidate-sort").focus();};
  const picker=document.querySelector<HTMLSelectElement>("#map-candidate");if(picker){picker.value=selected;picker.onchange=()=>{selected=picker.value;navigate("relays");};}
@@ -400,6 +454,8 @@ $("#csv").onclick=()=>{
  section("relay,latitude,longitude_east,distance_km,slope_deg,surface_los,surface_margin_db,powered_pct,coverage_pct,selected,disabled",result.candidates.map(c=>[c.id,c.lat,c.lon,c.distance,c.slope,c.los,c.surface_margin,c.power.availability,c.coverage.availability,result.recommended.includes(c.id),disabled.has(c.id)]));
  section("failed_relay,availability_pct,longest_blackout_h,meets",result.failures.map(f=>[f.id,f.metrics.availability,f.metrics.longest,f.meets]));
  section("optimization_feasible,eligible_relays,active_coverage_pct,active_longest_blackout_h",[[result.feasible,result.eligible,network.metrics.availability,network.metrics.longest]]);
+ section("environment_case,network_pct,longest_blackout_h,worst_single_failure_pct,meets_assumed_limits",Object.entries(result.environment.cases).map(([name,c])=>[name,c.network.availability,c.network.longest,c.worst.availability,c.meets]));
+ section("node,case,timestamp_utc,temperature_c,soc,heater_w,dust_load,solar_factor,available,reason",[{id:"lander",environment:result.environment.lander},...result.candidates].flatMap(c=>Object.entries(c.environment).flatMap(([name,state])=>result.times.map((t,i)=>[c.id,name,t,state.temperature_c[i],state.soc[i],state.heater_w[i],state.dust_load[i],state.solar_factor[i],state.available[i],state.reason[i]]))));
  section("provenance,description",Object.entries(result.provenance).map(([key,value])=>[key,JSON.stringify(value)]));
  if(compared)rows.push("", "site,latitude,longitude,solar_pct,direct_pct,blackout_h,darkness_h,network_pct",...compared.map(c=>[c.site.name,c.site.lat,c.site.lon,c.solar.availability,c.direct.availability,c.direct.longest,c.solar.longest,c.network.availability].map(quote).join(",")));
  if(sensitivity)rows.push("", "variant,direct_pct,direct_blackout_h,network_pct,relay_count,feasible,error",...sensitivity.map(s=>[s.label,s.direct?.availability,s.direct?.longest,s.network?.availability,s.count,s.feasible,s.error].map(quote).join(",")));
@@ -414,8 +470,8 @@ $("#report").onclick=async()=>{
  const article=document.createElement("article");article.id="printable";
  article.innerHTML=`<h1>MOONMESH mission report</h1><p>${escape(result.site.name)} · ${result.config.start} to ${result.config.end} UTC</p>`+
  readout([["Site",`${n(result.site.lat,5)}°, ${n(result.site.lon,5)}° E`],["Terrain",`${n(result.site.elevation)} m · ${n(result.site.mean_slope)}° average local slope`],["Sunlight",pct(result.solar.availability)],["Direct communication",pct(result.direct.availability)],["Active network",pct(net.metrics.availability)],["Worst single failure",pct(result.worst.availability)],["Selected relays",result.recommended.join(", ")||"Direct only"],["Selection",result.feasible?"Minimum among screened candidates":"Best evaluated configuration"],["Requirements",net.meets?"Met":"Unmet"],["Disabled",Array.from(disabled).join(", ")||"None"]])+
- chartImages+outageTable()+
- panel("Relay feasibility and single-relay failures",result.candidates.filter(c=>result.recommended.includes(c.id)).map(c=>relayDetail(c,false)).join("")+result.failures.map(f=>`<p>Disable ${f.id} · ${pct(f.metrics.availability)} availability · ${hours(f.metrics.longest)} longest blackout · ${f.meets?"requirements met":"requirements unmet"}</p>`).join(""))+
+ environmentPanel()+chartImages+outageTable()+
+ panel("Relay feasibility and single-relay failures",result.candidates.filter(c=>result.recommended.includes(c.id)).map(c=>relayDetail(c,false)).join("")+result.failures.map(f=>`<p>Disable ${f.id} · ${pct(f.metrics.availability)} availability · ${hours(f.metrics.longest)} longest blackout · ${f.meets?"modeled limits met under assumptions":"requirements unmet"}</p>`).join(""))+
  panel("Scenario configuration",configuration())+panel("Assumptions and provenance",provenance());
  document.body.append(article);
  await Promise.all(Array.from(article.querySelectorAll("img")).map(img=>img.decode().catch(()=>{})));

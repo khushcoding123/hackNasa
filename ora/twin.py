@@ -62,7 +62,7 @@ def _longest_false(flags, step_h):
 
 
 def run(network, design=NodeDesign(), kill=(), disk=None, night=None, beam=False, beam_design=PowerBeam(),
-        optical=False, optical_design=Optical(), dust_db=0.0, rf_backup=True, blast=None, dust=None):
+        optical=False, optical_design=Optical(), dust_db=0.0, rf_backup=True, blast=None, dust=None, dark_sink_k=100.0, lit_sink_k=250.0, dust_solar_loss=0.8):
     """Simulate the chosen network.
 
     kill: [(node, hour)] hardware deaths. disk: (col, row, radius_m, hour) regional failure such as
@@ -145,7 +145,8 @@ def run(network, design=NodeDesign(), kill=(), disk=None, night=None, beam=False
 
     state = {}
     for v in relays:
-        state[v] = simulate(design, lit[v], step_h, beam_w=beam_w[v])
+        state[v] = simulate(design, lit[v], step_h, beam_w=beam_w[v], T_env_dark=dark_sink_k,
+                            T_env_lit=lit_sink_k, solar_factor=1 - dust_load[v] * dust_solar_loss)
         state[v]["mode"][dead_at[v]:] = 0
     for v in demand:  # mining equipment brings its own power; it is a load on the network, not a relay
         state[v] = dict(soc=np.ones(steps), temp_k=np.full(steps, 273.15), mode=np.full(steps, 2.0), heater_w=np.zeros(steps),
@@ -203,10 +204,14 @@ def run(network, design=NodeDesign(), kill=(), disk=None, night=None, beam=False
                     frozen_h=None if state[v]["frozen_step"] < 0 else state[v]["frozen_step"] * step_h,
                     killed_h=None if dead_at[v] >= steps else dead_at[v] * step_h,
                     dust=float(dust_load[v][-1]) if v in dust_load else 0.0,
+                    dust_load=dust_load[v].tolist() if v in dust_load else [0.0] * steps,
+                    heater_energy_wh=float(state[v]['heater_w'].sum() * step_h),
                     earth=network["earth"][v].astype(int).tolist() if v in gateways else None) for v in members],
         edges=[dict(a=int(e["a"]), b=int(e["b"]), distance_m=e["dist"], kind=e["kind"],
                     up="".join("1" if flag else "0" for flag in e["up"])) for e in edges],
         beams=[{**b, "source": int(b["source"]), "target": int(b["target"])} for b in beams],
+        environment=dict(status='assumed', validated=False, dark_sink_k=dark_sink_k, lit_sink_k=lit_sink_k,
+                         dust_solar_loss=dust_solar_loss, assumptions='Effective thermal sinks and dust parameters are assumptions; no Diviner ingestion or hardware calibration.'),
         blast=blast_report, dust_failures=dust_failures, module_swaps=module_swaps,
         served_gateway=served_gateway.tolist(), served_earth=served_earth.tolist(),
         summary=dict(gateway_availability=float(served_gateway.mean() * 100), earth_availability=float(served_earth.mean() * 100),

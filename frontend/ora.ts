@@ -46,7 +46,7 @@ async function task<T>(label:string,work:()=>Promise<T>):Promise<T|undefined>{
  busy++;status(label);$("#state").textContent="Working";
  try{const out=await work();status("");return out;}
  catch(error){status((error as Error).message,true);return undefined;}
- finally{busy--;if(!busy)$("#state").textContent="Ready";}
+ finally{busy--;if(!busy){const failed=$("#status").classList.contains("error");$("#state").textContent=failed?"Needs attention":"Ready";$("#state").classList.toggle("stale",failed);}}
 }
 function scenarioBody(){
  const out:Record<string,unknown>={};
@@ -167,7 +167,7 @@ function networkView(){
  return kpis()+`<div class="split">${panel("Terrain, candidates and the chosen network",layers+`<canvas id="map" class="ora-map" aria-label="Terrain map with candidate sites, chosen relays, gateways and mining sites"></canvas>`+
   key([[C.cyan,"gateway (sees Earth)"],[C.green,"chosen relay"],[C.amber,"mining site"],["#7d8da3","candidate"],["rgba(242,132,140,.8)","dead zone (coverage layer)"]])+
   `<p class="caption">${esc(net.site)} · ${net.nodes.length} sites · ${net.all_edges.toLocaleString()} line-of-sight links within ${n(net.scenario.max_range_km,0)} km.</p>`)}
- ${panel("Placement",`<p class="callout ${p.feasible?"":"amber"}">${p.feasible?"Best evaluated relay set · every mining site linked":"Best evaluated relay set · some mining sites unreachable"}</p>`+readout([
+ ${panel("Placement",`<p class="callout ${p.feasible?"":"amber"}">${p.feasible?"Best evaluated relay set · every mining site linked in static graph":"Best evaluated relay set · some mining sites unreachable"}</p>`+readout([
   ["Siting scores",esc(net.score_method)],["Chain relays",p.chain.join(", ")||"none needed"],["Spare relays",p.added.join(", ")||"none added"],["Gateways",p.gateways.join(", ")],
   ["After any one failure","mean "+pct(p.mean_after_failure)+" · worst "+pct(p.worst_after_failure)],["Independent paths",paths||"—"]])+
   `<p class="note">Stage 1 connects each mining site to a gateway along the cheapest line-of-sight chain, steering toward sunlit, high-scoring ground. Stage 2 adds spare relays where they most improve what survives a single failure. This is a heuristic search over the screened candidates, not a proven optimum.</p>`)}</div>`+
@@ -219,12 +219,12 @@ function designFields(){
  return `<div class="ora-grid">${num("battery_wh","Battery (Wh)",1,100000,50)}${num("solar_w","Solar panel (W)",0,5000,5)}${num("active_w","Relaying power (W)",0.1,500,0.5)}${num("survival_w","Hibernating power (W)",0,100,0.1)}${num("heater_w","Heater (W)",0,500,0.5)}${num("rhu_w","Radioisotope heat (W)",0,50,0.5)}
  <label class="check"><input type="checkbox" data-design="hibernate" ${d.hibernate?"checked":""}> Hibernate when unlit</label>${num("duty","Wake share while hibernating",0,1,0.05)}</div>`;
 }
-const twinOptions:Record<string,number|boolean>={beam:false,optical:false,dust_db:0,rf_backup:true,night:false,disk_radius_m:0,blast_on:false,blast_kill_m:150,blast_damage_m:1500,blast_hour:0,dust_rate_per_day:0,dust_hazard_per_h:0};
+const twinOptions:Record<string,number|boolean>={beam:false,optical:false,dust_db:0,rf_backup:true,night:false,disk_radius_m:0,blast_on:false,blast_kill_m:150,blast_damage_m:1500,blast_hour:0,dark_sink_k:100,lit_sink_k:250,dust_rate_per_day:0,dust_hazard_per_h:0,dust_seed:0,dust_solar_loss:.8};
 function twinBody(){
  return {...scenarioBody(),design:design(),kill:kills,beam:twinOptions.beam,optical:twinOptions.optical,dust_db:twinOptions.dust_db,rf_backup:twinOptions.rf_backup,
   night_start_h:twinOptions.night?48:null,...(twinOptions.disk_radius_m&&kills.length?{disk_radius_m:twinOptions.disk_radius_m,disk_node:kills[0].node,disk_hour:kills[0].hour}:{}),
   ...(twinOptions.blast_on&&kills.length?{blast_node:kills[0].node,blast_hour:twinOptions.blast_hour,blast_kill_m:twinOptions.blast_kill_m,blast_damage_m:twinOptions.blast_damage_m}:{}),
-  dust_rate_per_day:twinOptions.dust_rate_per_day,dust_hazard_per_h:twinOptions.dust_hazard_per_h};
+  dark_sink_k:twinOptions.dark_sink_k,lit_sink_k:twinOptions.lit_sink_k,dust_rate_per_day:twinOptions.dust_rate_per_day,dust_hazard_per_h:twinOptions.dust_hazard_per_h,dust_seed:twinOptions.dust_seed,dust_solar_loss:twinOptions.dust_solar_loss};
 }
 function twinView(){
  const controls=panel("Node design and what-ifs",designFields()+`<div class="ora-grid" style="margin-top:14px">
@@ -238,10 +238,14 @@ function twinView(){
   <label>Blast: certain kill within (m)<input type="number" data-option="blast_kill_m" min="0" max="10000" step="50" value="${twinOptions.blast_kill_m}"></label>
   <label>Blast: damage reaches (m)<input type="number" data-option="blast_damage_m" min="0" max="20000" step="100" value="${twinOptions.blast_damage_m}"></label>
   <label>Blast hour<input type="number" data-option="blast_hour" min="0" step="1" value="${twinOptions.blast_hour}"></label>
-  <label>Dust: share of relays hit per day<input type="number" data-option="dust_rate_per_day" min="0" max="1" step="0.005" value="${twinOptions.dust_rate_per_day}"></label>
-  <label>Dust: extra failure rate per hour<input type="number" data-option="dust_hazard_per_h" min="0" max="0.1" step="0.0001" value="${twinOptions.dust_hazard_per_h}"></label>
+  <label>Dark sink (K, assumed)<input type="number" data-option="dark_sink_k" min="20" max="350" value="${twinOptions.dark_sink_k}"></label>
+  <label>Sunlit sink (K, assumed)<input type="number" data-option="lit_sink_k" min="20" max="400" value="${twinOptions.lit_sink_k}"></label>
+  <label>Dust deposition / day<input type="number" data-option="dust_rate_per_day" min="0" max="1" step=".01" value="${twinOptions.dust_rate_per_day}"></label>
+  <label>Dust failure hazard / h (assumed)<input type="number" data-option="dust_hazard_per_h" min="0" max=".1" step=".0001" value="${twinOptions.dust_hazard_per_h}"></label>
+  <label>Dust random seed<input type="number" data-option="dust_seed" min="0" max="9999" value="${twinOptions.dust_seed}"></label>
+  <label>Solar loss at full dust load<input type="number" data-option="dust_solar_loss" min="0" max="1" step=".05" value="${twinOptions.dust_solar_loss}"></label>
   <button id="run-twin" class="primary">Run the twin</button><button id="clear-kills" ${kills.length?"":"disabled"}>Clear ${kills.length} failure${kills.length===1?"":"s"}</button></div>
-  <p class="note">Click a relay or gateway on the map to kill it at the selected hour, then run again.</p>`);
+  <p class="note">Thermal sinks and dust coefficients are assumed bounds, without Diviner data or hardware calibration. Dust reduces solar output. Click a relay or gateway to schedule a failure.</p>`);
  if(!sim)return controls;
  const s=sim.summary;
  return `<div class="metrics">${metric("MINES LINKED TO A GATEWAY",n(s.gateway_availability,0)+"%","of the period",s.always_connected?"green":"amber")}${metric("LINKED TO EARTH",n(s.earth_availability,0)+"%","gateway must also see Earth")}
@@ -281,7 +285,7 @@ function nightView(){
  const b=nightResult.budget,hb=nightResult.hibernating;
  const row=(label:string,x:J)=>[label,n(x.electronics_w)+" W",n(x.heater_w)+" W",n(x.draw_w)+" W",n(x.energy_wh,0)+" Wh",n(x.endurance_h,0)+" h",pill(x.survives,"survives","runs out")];
  return `<div class="metrics">${metric("ENERGY FOR ONE NIGHT",n(b.energy_wh,0)+" Wh",`at ${n(b.draw_w)} W for ${n(b.hours,0)} h`,b.survives?"green":"amber")}${metric("BATTERY",n(b.battery_wh,0)+" Wh",b.margin_wh>=0?`${n(b.margin_wh,0)} Wh spare`:`${n(-b.margin_wh,0)} Wh short`,b.survives?"green":"red")}
- ${metric("HEAT TO STAY ABOVE −30 °C",n(b.heat_needed_w,2)+" W","through insulation, to a 100 K sink")}${metric("WITH 10% HIBERNATION",n(hb.energy_wh,0)+" Wh",hb.survives?"fits this battery":"still short",hb.survives?"green":"amber")}</div>`+
+ ${metric("HEAT TO STAY ABOVE −30 °C",n(b.heat_needed_w,2)+" W","through insulation, to the configured dark sink")}${metric("WITH 10% HIBERNATION",n(hb.energy_wh,0)+" Wh",hb.survives?"fits this battery":"still short",hb.survives?"green":"amber")}</div>`+
  panel("One node through the night",table(["Mode","Electronics","Heater","Total draw","Energy","Battery lasts","Outcome"],[row("Always relaying",b),row("Hibernating, awake 10%",hb)]))+
  panel("Smallest battery that keeps every mine linked all night",table(["Wake share","Smallest battery","Added wait for a sleeping relay","Outcome"],nightResult.design.map((r:J)=>[r.duty>=1?"Always on":pct(r.duty),r.battery_wh?r.battery_wh.toLocaleString()+" Wh":"none up to 5,000 Wh",r.wake_latency_min==null?"never wakes":n(r.wake_latency_min,0)+" min",pill(r.feasible,"mines stay linked","network drops")]))+
   `<p class="note">Each row forces a full night on the chosen network in the twin and scans battery sizes. Hibernation trades battery mass for delay: a sleeping relay only passes traffic in its wake window, so the network becomes time-varying. Relays in permanent shadow never recharge and need laser power or a different site.</p>`)+head;
@@ -386,12 +390,20 @@ async function loadAccess(){
 }
 async function loadStress(){stress=(await task("Loading stress results…",()=>api("stress")))??null;render();}
 async function buildNetwork(){
- if(!form.reportValidity())return;
- const out=await task("Tracing line of sight and choosing relays…",()=>api("network",scenarioBody()));
- if(!out)return;
- net=out;lab=sim=nightResult=cover=undefined;kills=[];hour=0;
- $("#subtitle").textContent=`${net.site} · ${net.scenario.start} · ${net.scenario.days} days at ${net.scenario.step_h} h steps`;
- render();
+ if(busy||!form.reportValidity())return;
+ const submit=$<HTMLButtonElement>('#scenario button[type="submit"]');
+ submit.disabled=true;view.setAttribute("aria-busy","true");
+ if(!net)view.innerHTML='<section class="panel initial-state loading-state"><span class="eyebrow">CALCULATING NETWORK</span><h2>Reading the terrain.</h2><p class="muted">Tracing line of sight and finding relay sites. This may take a few moments.</p></section>';
+ try{
+  const out=await task("Tracing line of sight and choosing relays…",()=>api("network",scenarioBody()));
+  if(!out){
+   if(!net){view.innerHTML=panel("Network unavailable",'<p class="callout amber">'+esc($("#status").textContent)+'</p><p class="muted">Choose another scenario above or rebuild when its terrain is available.</p>');$("#subtitle").textContent="No network calculated.";}
+   return;
+  }
+  net=out;lab=sim=nightResult=cover=undefined;kills=[];hour=0;
+  $("#subtitle").textContent=`${net.site} · ${net.scenario.start} · ${net.scenario.days} days at ${net.scenario.step_h} h steps`;
+  render();
+ }finally{submit.disabled=false;view.setAttribute("aria-busy","false");}
 }
 form.onsubmit=event=>{event.preventDefault();void buildNetwork();};
 $("#ora-nav").addEventListener("click",event=>{

@@ -32,6 +32,26 @@ class Mission(BaseModel):
     battery_hours: float = Field(default=48, ge=0, le=720)
     initial_charge_pct: float = Field(default=0, ge=0, le=100)
     charge_ratio: float = Field(default=2, gt=0, le=20)
+    # Explicit planning envelopes; these are assumed effective sinks, not measured air temperatures.
+    dark_sink_k: float = Field(default=100, ge=20, le=350)
+    cold_sink_k: float = Field(default=70, ge=20, le=350)
+    lit_sink_k: float = Field(default=250, ge=20, le=400)
+    node_load_w: float = Field(default=6, gt=0, le=500)
+    heater_w: float = Field(default=4, ge=0, le=500)
+    heat_capacity: float = Field(default=3000, ge=100, le=1e7)
+    emissivity: float = Field(default=0.03, ge=0.001, le=1)
+    radiating_area_m2: float = Field(default=0.15, ge=0.001, le=100)
+    conductance_w_k: float = Field(default=0.004, ge=0, le=10)
+    heater_on_k: float = Field(default=243.15, ge=100, le=350)
+    freeze_k: float = Field(default=213.15, ge=50, le=300)
+    lander_battery_hours: float = Field(default=720, ge=0, le=1440)
+    lander_initial_charge_pct: float = Field(default=100, ge=0, le=100)
+    dust_start_h: float = Field(default=48, ge=0, le=1440)
+    dust_duration_h: float = Field(default=24, gt=0, le=1440)
+    dust_radius_km: float = Field(default=8, ge=0, le=20)
+    dust_deposition_per_day: float = Field(default=0.5, ge=0, le=1)
+    dust_cleaning_per_day: float = Field(default=0, ge=0, le=1)
+    dust_solar_loss: float = Field(default=0.8, ge=0, le=1)
     resilient: bool = False
     latitude: float | None = Field(default=None, ge=-90, le=-85)
     longitude: float | None = Field(default=None, ge=-180, le=360)
@@ -41,6 +61,10 @@ class Mission(BaseModel):
 
     @model_validator(mode="after")
     def validate_mission(self):
+        if self.freeze_k >= self.heater_on_k:
+            raise ValueError("Heater set point must be above the irreversible freeze limit.")
+        if self.cold_sink_k > self.dark_sink_k:
+            raise ValueError("Cold-case sink must be no warmer than the nominal dark sink.")
         if not 1 <= (self.end - self.start).days <= 60:
             raise ValueError("Choose a mission lasting between 1 and 60 days.")
         if (self.latitude is None) != (self.longitude is None):
