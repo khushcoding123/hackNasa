@@ -12,11 +12,15 @@ MARKERS = ("Run python -m", "is missing", ".moonmesh-data", "No such file or dir
 REQUIRE_DATA = os.environ.get("MOONMESH_REQUIRE_DATA") == "1"
 
 
+def needs_data(error):
+    return isinstance(error, FileNotFoundError) and any(m in str(error) for m in MARKERS)
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_call(item):
     outcome = yield
     error = outcome.excinfo[1] if outcome.excinfo else None
-    if isinstance(error, FileNotFoundError) and any(m in str(error) for m in MARKERS) and not REQUIRE_DATA:
+    if needs_data(error) and not REQUIRE_DATA:
         outcome.force_exception(pytest.skip.Exception(f"needs downloaded data or trained models: {error}"))
 
 
@@ -27,3 +31,9 @@ def pytest_runtest_makereport(item, call):
     if REQUIRE_DATA and report.skipped and not hasattr(report, "wasxfail"):
         report.outcome = "failed"
         report.longrepr = f"skipped in release mode (MOONMESH_REQUIRE_DATA=1): {report.longrepr}"
+    elif not REQUIRE_DATA and report.failed and call.excinfo is not None and needs_data(call.excinfo.value):
+        # unittest.TestCase failures and setUpClass errors reach pytest here, not in pytest_runtest_call,
+        # so the missing-data skip above never sees them.
+        report.outcome = "skipped"
+        report.longrepr = (str(item.path), item.location[1] + 1,
+                           f"Skipped: needs downloaded data or trained models: {call.excinfo.value}")
