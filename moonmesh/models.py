@@ -24,6 +24,8 @@ class Mission(BaseModel):
     blackout_hours: float = Field(default=24, ge=0, le=1440)
     darkness_hours: float = Field(default=72, ge=0, le=1440)
     max_relays: int = Field(default=2, ge=0, le=4)
+    budget_usd: float | None = Field(default=None, ge=0, le=1e12, allow_inf_nan=False)
+    relay_cost_usd: float | None = Field(default=None, ge=0, le=1e12, allow_inf_nan=False)
     deployment_km: float = Field(default=8, ge=1, le=8)
     slope_limit: float = Field(default=15, gt=0, le=45)
     observer_m: float = Field(default=2, ge=0.1, le=100)

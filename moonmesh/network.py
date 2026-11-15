@@ -1,6 +1,8 @@
 """RF budgets, outage metrics, standalone relay power, and constrained search."""
 from itertools import combinations
 
+from .costs import relay_limit
+
 import numpy as np
 
 
@@ -50,7 +52,7 @@ def evaluate(direct, relays, selection, mission):
 
 def optimize(direct, relays, eligible, mission, candidates=None):
     best, best_key = (), None
-    for count in range(min(mission.max_relays, len(eligible)) + 1):
+    for count in range(relay_limit(min(mission.max_relays, len(eligible)), mission.budget_usd, mission.relay_cost_usd) + 1):
         winners = []
         for selection in combinations(eligible, count):
             _, combined, worst, _ = evaluate(direct, relays, selection, mission)
