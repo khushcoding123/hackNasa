@@ -173,15 +173,17 @@ class ExportAndEndpointTests(TestCase):
     def test_the_workbook_breaks_the_dynamic_cost_down(self):
         content = export_workbook(ExportRequest(result=self.result, satellite=costmodel.SatelliteSpec(altitude_km=500)))
         workbook = sheet_names(content)
+        self.assertNotIn('name="Cost Breakdown"', workbook)
         for name in ("Dynamic Cost", "Cost by Node", "Cost Drivers", "Cost Coefficients"):
             self.assertIn(f'name="{name}"', workbook)
         dynamic = costmodel.estimate(self.result, scope="mission", satellite=costmodel.SatelliteSpec(altitude_km=500))
         n = len(dynamic["items"])
-        formula, cached = cells(content, 3)[f"F{n + 3}"]
+        formula, cached = cells(content, 2)[f"F{n + 3}"]
         self.assertEqual(formula, f"SUM(F2:F{n + 1})")
         self.assertAlmostEqual(float(cached), dynamic["total_usd"], places=2)
         summary = cells(content, 1)
-        self.assertTrue(summary["B3"][0].startswith("'Cost Breakdown'!E"))
+        self.assertIsNone(summary["B3"][0])
+        self.assertAlmostEqual(float(summary["B3"][1]), dynamic["flat_reference_usd"], places=2)
         self.assertEqual(summary["B4"][0], f"'Dynamic Cost'!F{n + 3}")
         self.assertAlmostEqual(float(summary["B4"][1]), dynamic["total_usd"], places=2)
 
@@ -210,11 +212,11 @@ class AreaExportTests(TestCase):
         content = export_workbook(ExportRequest(result=snapshot(), area=area, scope="area", satellite=costmodel.SatelliteSpec(altitude_km=800)))
         self.assertIn('name="Cost by Node"', sheet_names(content))
         dynamic = costmodel.estimate(snapshot(), area, scope="area", satellite=costmodel.SatelliteSpec(altitude_km=800))
-        node_sheet = cells(content, 4)
+        node_sheet = cells(content, 3)
         self.assertEqual(node_sheet["N2"][0], "SUM(G2:M2)")                       # seven components, columns G to M
         self.assertAlmostEqual(float(node_sheet["N2"][1]), dynamic["nodes"][0]["total_usd"], places=2)
         self.assertEqual(node_sheet[f"N{len(dynamic['nodes']) + 3}"][0], f"SUM(N2:N{len(dynamic['nodes']) + 1})")
-        dyn = cells(content, 3)
+        dyn = cells(content, 2)
         n = len(dynamic["items"])
         self.assertEqual(dyn["F2"][0], "ROUND(D2*E2,2)")
         self.assertAlmostEqual(float(dyn[f"F{n + 3}"][1]), dynamic["total_usd"], places=2)
