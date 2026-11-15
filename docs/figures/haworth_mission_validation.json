@@ -1,0 +1,145 @@
+{
+  "checks": {
+    "orbiter_position_km": {
+      "error": 1.8497798171711298e-07,
+      "limit": 0.01,
+      "pass": true
+    },
+    "earth_receiver_position_km": {
+      "error": 0.0012578816743262131,
+      "limit": 0.1,
+      "pass": true
+    },
+    "range_km": {
+      "error": 0.001084574731066823,
+      "limit": 0.1,
+      "pass": true
+    },
+    "elevation_deg": {
+      "error": 1.031645604143705e-05,
+      "limit": 0.01,
+      "pass": true
+    },
+    "margin_db": {
+      "error": 0.0022168034917626755,
+      "limit": 0.02,
+      "pass": true
+    },
+    "event_seconds": {
+      "error": 210.0,
+      "limit": 300,
+      "pass": true
+    },
+    "availability_pp": {
+      "error": 0.1736111111111105,
+      "limit": 1,
+      "pass": true
+    },
+    "longest_blackout_seconds": {
+      "error": 180.0,
+      "limit": 300,
+      "pass": true
+    }
+  },
+  "expected_contacts": [
+    [
+      27720,
+      29310
+    ],
+    [
+      37200,
+      38790
+    ],
+    [
+      46710,
+      48300
+    ],
+    [
+      56190,
+      57780
+    ],
+    [
+      65700,
+      67290
+    ]
+  ],
+  "actual_contacts": [
+    [
+      27900,
+      29400
+    ],
+    [
+      37200,
+      39000
+    ],
+    [
+      46800,
+      48300
+    ],
+    [
+      56400,
+      57900
+    ],
+    [
+      65700,
+      67500
+    ]
+  ],
+  "expected_availability_pct": 9.20138888888889,
+  "actual_availability_pct": 9.375,
+  "expected_longest_blackout_seconds": 27720,
+  "actual_longest_blackout_seconds": 27900.0,
+  "status_mismatches": 0,
+  "blocker_disagreements": [],
+  "surface": {
+    "clearance_m": 1.5071959255770206,
+    "from_lander_m": 3945.2530202989674
+  },
+  "cross_source": {
+    "status": "compared",
+    "clearance_m": 1.5948346995686702,
+    "from_lander_m": 3922.698396258635,
+    "ground_elevation_m": [
+      1691.6401822243868,
+      1907.0327148437552
+    ]
+  },
+  "cross_check_pass": true,
+  "failure_checks": {
+    "relay": true,
+    "satellite": true
+  },
+  "result": "pass",
+  "evidence": "simulated benchmark",
+  "sources": {
+    "lunar_gm": "https://ssd.jpl.nasa.gov/astro_par.html",
+    "spice": "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/",
+    "earth_rotation": "https://aa.usno.navy.mil/faq/GAST",
+    "terrain": "https://imbrium.mit.edu/DATA/LOLA_GDR/POLAR/IMG/",
+    "terrain_cross_check": "https://pgda.gsfc.nasa.gov/products/78",
+    "rf": "https://www.itu.int/rec/R-REC-P.525/en"
+  },
+  "versions": {
+    "scipy": "1.18.1",
+    "spice": "CSPICE_N0067"
+  },
+  "config_sha256": "4603140a496f3e7f2b4a36abdf4c94ced460e0769034c1beceede586f5015868",
+  "code_commit": "9d12da193eb07e41ac5f15708c24c572e8c66532",
+  "source_sha256": {
+    "training/scripts/validate_haworth_mission.py": "772b96a8625c8e2a013497520acfc29ec5c83ccd6008a14f94706083f6fa8514",
+    "moonmesh/mission_sim.py": "65fec4150f45b89b2291f55f55966fe59263332ddf4442f2a9f92bf6b46b774a",
+    "moonmesh/science.py": "1f4db5aaffd190cdfece6b475b99b76543c862f56afe980c32ebffbf17f16a51",
+    "moonmesh/environment.py": "998146edb20706bd3132630b2463f935aee58acb0d142635c74acba83bf50fba",
+    "moonmesh/network.py": "9a0bc248eb7d656cd80c33c53268f23651754a36581aaba105d58dca453dff0a",
+    "lunar_core/horizon.py": "d71e00106228f5ddf67d6e5eabe8b0a365fd4ef46da4dea7b05e736a73124bd5"
+  },
+  "input_sha256": {
+    "naif0012.tls": "678e32bdb5a744117a467cd9601cd6b373f0e9bc9bbde1371d5eee39600a039b",
+    "moon_de440_250416.tf": "a47c71e9c9f33796bdafb2c9d69a7ee447b6016ecad80f71cd6f3e479f9cf768",
+    "moon_pa_de440_200625.bpc": "60cd55aa401ea2ea97360636f567554bfe4e37bb829f901b4460a455dfaf783f",
+    "de440s.bsp": "c1c7feeab882263fc493a9d5a5b2ddd71b54826cdf65d8d17a76126b260a49f2",
+    "haworth_near20km.npz": "57b847f1ffa37dd4d8632dd5452e6bf54dd896fd8f470674da28db428f783ca4",
+    "haworth_far.npz": "48be9f84e281d73a81b4fba797e80f265e263251666035c0de2d49e96dd9a7b4",
+    "Haworth_final_adj_5mpp_surf.tif": "387fd6e99bca266f4982f7256c4c185921105313882b4c2eee5b5ff1ef75016b"
+  }
+}

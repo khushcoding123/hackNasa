@@ -9,7 +9,7 @@ import {addImagery, type ImageryHandle, type ImageryState} from "./imagery.js";
 import {MoonTerrainProvider, loadTerrainInfo} from "./terrain.js";
 import {SiteView} from "./site3d.js";
 import {icon} from "./icons.js";
-import type {AreaResult, Candidate, Result} from "./types.js";
+import type {AreaResult, Candidate, ReferenceFailure, ReferenceMission, Result} from "./types.js";
 import {boresightHit, orbitPeriod, satelliteAccess, satellitePosition, satelliteState, surfacePosition} from "./orbital-preview.js";
 
 const MOON = Ellipsoid.MOON, R = MOON.maximumRadius;
@@ -716,7 +716,7 @@ export class MoonView {
  private refreshMission() {
   const viewer = this.viewer; if (!viewer) return;
   const r = this.result;
-  if (!r || !this.missionVisible) { for (const e of [...viewer.entities.values]) if (!/^(pin|area|layout|satellite:)/.test(String(e.id))) viewer.entities.remove(e); this.towers.clear(); this.lander = undefined; this.planRing = undefined; viewer.scene.requestRender(); return; }
+  if (!r || !this.missionVisible) { for (const e of [...viewer.entities.values]) if (!/^(pin|area|layout|satellite:|reference:)/.test(String(e.id))) viewer.entities.remove(e); this.towers.clear(); this.lander = undefined; this.planRing = undefined; viewer.scene.requestRender(); return; }
   if (!this.lander) {
    this.lander = viewer.entities.add({id: "lander", position: Cartesian3.fromDegrees(r.site.lon, r.site.lat, r.site.elevation + 4, MOON),
     point: {pixelSize: 12, color: Color.fromCssColorString("#84deff"), outlineColor: Color.BLACK, outlineWidth: 2, heightReference: HeightReference.NONE, disableDepthTestDistance: 2e5},
@@ -854,6 +854,52 @@ export class MoonView {
    }
   }
   this.setSatellitePreview(result, seconds);
+  viewer.scene.requestRender();
+ }
+
+ setReferenceMission(result?: ReferenceMission, index = 0, failure: ReferenceFailure = "nominal", frame = false) {
+  const viewer = this.viewer; if (!viewer) return;
+  for (const entity of [...viewer.entities.values]) {
+   if (String(entity.id).startsWith("reference:")) viewer.entities.remove(entity);
+   if (String(entity.id).startsWith("satellite:") && result) entity.show = false;
+  }
+  if (result) {
+   this.closeSite();
+   const sample = result.samples[index];
+   const nodes = [result.lander_km, result.relay_km, sample.orbiter_km, sample.receiver_km]
+    .map(([x,y,z]) => new Cartesian3(x*1000,y*1000,z*1000));
+   const [lander, relay, satellite, receiver] = nodes;
+   // Show the backhaul bearing at lunar scale. The ground receiver is far outside this view.
+   const bearing = Cartesian3.normalize(Cartesian3.subtract(receiver, satellite, new Cartesian3()), new Cartesian3());
+   const earthDirection = Cartesian3.add(satellite, Cartesian3.multiplyByScalar(bearing, 650_000, bearing), new Cartesian3());
+   const points = [lander, relay, satellite, earthDirection];
+   const online = result.states[failure].online[index];
+   const color = Color.fromCssColorString(online ? "#73d8ae" : "#f4ba72");
+   const off = Color.fromCssColorString("#f2848c");
+   ["Lander", "Relay", "Satellite", "Earth receiver direction"].forEach((name, i) => {
+    const disabled = name.toLowerCase() === failure || name in sample.node_failures;
+    viewer.entities.add({id: `reference:node:${i}`, position: points[i],
+     point: {pixelSize: i === 3 ? 6 : 11, color: disabled ? off : color, outlineWidth: 2, outlineColor: Color.BLACK},
+     label: {text: name + (disabled ? " · OFF" : ""), font: "600 13px IBM Plex Mono, monospace",
+      fillColor: disabled ? off : color, outlineColor: Color.BLACK, outlineWidth: 3, style: LabelStyle.FILL_AND_OUTLINE,
+      pixelOffset: new Cartesian2(0, i === 0 ? 15 : -14)}});
+   });
+   Object.values(sample.hops).forEach((hop, i) => {
+    const disabled = (failure === "relay" && i < 2) || (failure === "satellite" && i > 0);
+    if (hop.status !== "available" || disabled) return;
+    viewer.entities.add({id: `reference:hop:${i}`, polyline: {
+     positions: [points[i], points[i+1]], arcType: ArcType.NONE, width: 3,
+     material: online ? color : new PolylineDashMaterialProperty({color, dashLength: 14})}});
+   });
+   if (frame) {
+    this.setMode("3d");
+    cancelAnimationFrame(this.animation); this.animation = 0;
+    const bounds = BoundingSphere.fromPoints(points);
+    viewer.camera.flyToBoundingSphere(bounds, {duration: 1.2,
+     offset: new HeadingPitchRange(0, rad(-35), Math.max(1_500_000, bounds.radius * 4)),
+     complete: () => { this.view = this.readView(); this.refreshReadouts(); }});
+   }
+  }
   viewer.scene.requestRender();
  }
 

@@ -76,3 +76,19 @@ class Mission(BaseModel):
         if (self.latitude is None) != (self.longitude is None):
             raise ValueError("Enter both custom coordinates or leave both blank.")
         return self
+
+
+class RelayConfiguration(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    relay_ids: list[str] = Field(max_length=4)
+
+    @model_validator(mode="after")
+    def validate_ids(self):
+        if len(set(self.relay_ids)) != len(self.relay_ids):
+            raise ValueError("A configuration cannot install the same relay twice.")
+        return self
+
+
+class MissionComparisonRequest(BaseModel):
+    mission: Mission
+    alternatives: list[RelayConfiguration] = Field(min_length=1, max_length=4)

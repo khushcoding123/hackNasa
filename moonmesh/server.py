@@ -2,15 +2,18 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from spiceypy.utils.exceptions import SpiceyError
 
 from . import costmodel
 from .data import LOCAL, SITES
-from .models import Mission
+from .models import Mission, MissionComparisonRequest
+from .network import compare_configurations
 from .excel import ExportRequest, export_workbook
 from .science import scenario
+from .mission_sim import reference_mission
 from . import tiles
 from ora.api import router as ora_router
 try:  # Surface coverage needs the optional training environment (rasterio, numba, prepared terrain).
@@ -67,6 +70,33 @@ def cost_estimate(body: CostRequest):
         return costmodel.estimate(body.result, body.area, scope=body.scope, satellite=body.satellite, overrides=body.coefficients)
     except (KeyError, TypeError, IndexError) as error:
         raise HTTPException(422, "Cannot price this snapshot. Recalculate the network and try again.") from error
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+
+
+@app.get("/api/mission/reference")
+def mission_reference():
+    try:
+        return reference_mission()
+    except FileNotFoundError as error:
+        raise HTTPException(503, str(error)) from error
+    except (SpiceyError, ValueError) as error:
+        raise HTTPException(422, f"Cannot run the Haworth reference mission: {error}") from error
+
+
+@app.get("/api/mission/reference/validation")
+def mission_reference_validation():
+    report = Path(__file__).resolve().parents[1] / "docs/figures/haworth_mission_validation.json"
+    if not report.is_file():
+        raise HTTPException(404, "No published benchmark report is available.")
+    return FileResponse(report, media_type="application/json")
+
+
+@app.post("/api/mission/compare-configurations")
+def mission_configurations(body: MissionComparisonRequest):
+    result = compute(body.mission, include_map=False)
+    try:
+        return compare_configurations(result, body.mission, body.alternatives)
     except ValueError as error:
         raise HTTPException(422, str(error)) from error
 

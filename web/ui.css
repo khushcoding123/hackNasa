@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap');
 
 /* MOONMESH visual system: black canvas, large tight type, pill controls, glass surfaces, one blue accent.
    This file is loaded last and restyles both the planner (index.html) and the ORA lab (ora.html).
@@ -24,10 +24,11 @@
   --shadow: 0 0 0 1px rgba(0,0,0,.5), 0 18px 50px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06);
   --radius: 20px;
   --ease: cubic-bezier(.22,1,.36,1);
-  --display: 'Inter Tight', Inter, system-ui, sans-serif;
-  font-family: Inter, system-ui, -apple-system, sans-serif;
+  --display: 'Instrument Sans', system-ui, -apple-system, sans-serif;
+  --serif: 'Instrument Serif', 'Iowan Old Style', Georgia, serif;
+  --mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+  font-family: 'Instrument Sans', system-ui, -apple-system, sans-serif;
   font-size: 14px;
-  font-feature-settings: "ss01", "cv11";
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -80,7 +81,7 @@ legend, .configuration legend { color: #fff; font-size: 13px; font-weight: 500; 
 .metric small:first-child { font: 500 11px var(--mono); letter-spacing: .06em; color: var(--faint); }
 .metric strong { font-family: var(--display); font-size: clamp(28px, 2.6vw, 40px); font-weight: 600; letter-spacing: -.05em; line-height: 1; margin: 14px 0 10px; font-variant-numeric: tabular-nums; }
 .hero-value { font-family: var(--display); font-size: clamp(32px, 9.5vw, 56px); overflow-wrap: anywhere; font-weight: 600; letter-spacing: -.055em; line-height: 1; margin: 20px 0 12px; font-variant-numeric: tabular-nums; }
-.hero-value small { font-family: Inter, sans-serif; font-size: 13px; font-weight: 400; letter-spacing: 0; color: var(--muted); }
+.hero-value small { font-family: 'Instrument Sans', sans-serif; font-size: 13px; font-weight: 400; letter-spacing: 0; color: var(--muted); }
 .hero-stats { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 20px; }
 .hero-stats strong { font-family: var(--display); font-size: 22px; font-weight: 600; letter-spacing: -.03em; }
 .mission-summary { background: radial-gradient(120% 90% at 100% 0%, rgba(0,153,255,.2), transparent 60%), linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.015)); }
@@ -176,7 +177,7 @@ body.planner { --top: 68px; --strip: 40px; --hero-split: 54vh; background: #000;
 .menu-pop button:hover:not(:disabled), .export-options button:hover:not(:disabled) { background: rgba(255,255,255,.08); border-color: transparent; }
 .menu-pop p, .export-options p { font: 500 10.5px var(--mono); letter-spacing: .08em; color: var(--faint); line-height: 1.6; padding: 6px 12px 4px; margin: 0; }
 .menu-pop p { order: -1; }
-.export-options p { font: 12px/1.5 Inter, sans-serif; letter-spacing: 0; }
+.export-options p { font: 12px/1.5 'Instrument Sans', sans-serif; letter-spacing: 0; }
 .menu-link { display: block; padding: 10px 15px; border-top: 1px solid var(--line); margin-top: 4px; color: var(--cyan); font-size: 13px; text-decoration: none; }
 .planner #workspace-menu { display: none; width: 36px; padding: 0; place-items: center; background: var(--glass); border-color: var(--line); }
 .planner #nav-scrim { display: none; }
@@ -189,7 +190,7 @@ body.planner { --top: 68px; --strip: 40px; --hero-split: 54vh; background: #000;
 @keyframes fade-in { from { opacity: 0; } }
 
 /* Status strip */
-.planner .scenario-strip { top: auto; left: 0; right: 0; bottom: 0; height: var(--strip); padding: 0 20px; gap: 14px; background: #000; border-top: 1px solid var(--line); font: 12px Inter, sans-serif; color: var(--muted); text-shadow: none; z-index: 28; }
+.planner .scenario-strip { top: auto; left: 0; right: 0; bottom: 0; height: var(--strip); padding: 0 20px; gap: 14px; background: #000; border-top: 1px solid var(--line); font: 12px 'Instrument Sans', sans-serif; color: var(--muted); text-shadow: none; z-index: 28; }
 .planner .scenario-strip #subtitle { color: #e4e4e7; flex-shrink: 0; }
 .planner .scenario-strip #status { overflow: hidden; text-overflow: ellipsis; }
 .planner .scenario-strip #status::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--faint); margin-right: 8px; vertical-align: middle; animation: none; }
@@ -266,7 +267,7 @@ body:has(.moon-workspace[data-site=open]) #moon { bottom: 0 !important; z-index:
 .planner .flow-actions { gap: 14px; border-top-color: var(--line); padding-top: 18px; }
 .planner .flow-actions p { max-width: 34ch; font-size: 12.5px; }
 .planner .flow-buttons button { min-height: 40px; }
-.planner #panel-tab { top: auto; right: 20px; bottom: calc(var(--strip) + 16px); writing-mode: horizontal-tb; transform: none; padding: 10px 20px; min-height: 42px; border: 0; border-radius: 999px; background: #fff; color: #000; font: 600 13px Inter, sans-serif; letter-spacing: -.01em; text-transform: none; box-shadow: 0 8px 30px rgba(0,0,0,.5); }
+.planner #panel-tab { top: auto; right: 20px; bottom: calc(var(--strip) + 16px); writing-mode: horizontal-tb; transform: none; padding: 10px 20px; min-height: 42px; border: 0; border-radius: 999px; background: #fff; color: #000; font: 600 13px 'Instrument Sans', sans-serif; letter-spacing: -.01em; text-transform: none; box-shadow: 0 8px 30px rgba(0,0,0,.5); }
 .planner #panel-tab:hover { background: #e9e9ec; transform: translateY(-1px); }
 .planner:not(.panel-collapsed) #panel-tab { display: none; }
 .planner[data-step=landing].panel-collapsed:not(.exploring) #panel-tab { background: var(--glass); color: #fff; border: 1px solid var(--line); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); }
@@ -295,7 +296,7 @@ body:has(.moon-workspace[data-site=open]) #moon { bottom: 0 !important; z-index:
 .vw-stack { margin-top: 4px; gap: 0; background: var(--glass); border: 1px solid var(--line); border-radius: 20px; -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); box-shadow: var(--shadow); }
 .vw-stack button { width: 38px; min-height: 38px; color: #e4e4e7; border-radius: 0; }
 .vw-stack button+button { border-top: 1px solid var(--line); }
-.vw-label { padding: 4px 10px; border-color: rgba(255,255,255,.16); border-radius: 999px; background: rgba(10,10,12,.7); color: #e4e4e7; font: 500 11px Inter, sans-serif; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.vw-label { padding: 4px 10px; border-color: rgba(255,255,255,.16); border-radius: 999px; background: rgba(10,10,12,.7); color: #e4e4e7; font: 500 11px 'Instrument Sans', sans-serif; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
 .vw-label.region { color: #fff; border-color: rgba(0,153,255,.7); background: rgba(0,90,160,.45); }
 .vw-label.active { border-color: #fff; background: rgba(0,153,255,.6); }
 .vw-bottom { left: 20px; right: auto; bottom: 14px; max-width: calc(100% - 40px); gap: 5px 14px; padding: 9px 14px; font: 11px var(--mono); color: #d4d4d8; text-shadow: none; background: rgba(10,10,12,.66); border: 1px solid var(--line); border-radius: 16px; -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); }
@@ -420,7 +421,7 @@ body:has(.moon-workspace[data-site=open]) #moon { bottom: 0 !important; z-index:
 .ora-app .mission-fields { display: grid; grid-template-columns: 1.6fr repeat(3,1fr); gap: 16px 14px; }
 .ora-app .mission-fields label:first-child, .ora-app .mission-fields .primary { grid-column: auto; }
 .ora-app .mission-fields .primary { grid-column: span 2; align-self: end; width: 100%; min-height: 44px; }
-.ora-app main>.scenario-strip { font: 12.5px Inter, sans-serif; padding: 0 2px; margin: 18px 0; gap: 18px; line-height: 1.6; }
+.ora-app main>.scenario-strip { font: 12.5px 'Instrument Sans', sans-serif; padding: 0 2px; margin: 18px 0; gap: 18px; line-height: 1.6; }
 .ora-app main>footer { font: 11px var(--mono); border-top-color: var(--line); color: var(--faint); }
 .ora-app #view { gap: 16px; }
 .ora-app .split { gap: 16px; }
@@ -507,3 +508,32 @@ body:has(.moon-workspace[data-site=open]) #moon { bottom: 0 !important; z-index:
 .factor.terrain { color: #ff8a4c; } .factor.rf { color: #c78bff; } .factor.power { color: #ffd23f; } .factor.temperature { color: #5ec8ff; }
 .factor.data { color: #9aa4b2; } .factor.lander { color: #ff6b8b; } .factor.none, .factor.deploy-feasible { color: #4cd68a; }
 .factor.deploy-hazard { color: #ff8a4c; } .factor.deploy-unverified { color: #9aa4b2; }
+
+/* ---------- Editorial type: a serif for headlines, a quiet sans for the interface ---------- */
+.welcome h2, .planner .panel-head h1, .mission-summary h2, .introduction h2, .initial-state h2, .ora-app main>header h1, .site3d-bar strong, .vw-inspector h3, .explore-card h3, .hero-value, .metric strong, .hero-stats strong, .journey-list strong {
+  font-family: var(--serif); font-weight: 400; letter-spacing: -.015em; }
+.welcome h2 { font-size: clamp(44px, min(8vw, 12.5vh), 112px); line-height: .94; letter-spacing: -.025em; }
+.welcome h2 span { background: none; color: #8f8f98; -webkit-background-clip: border-box; background-clip: border-box; font-style: italic; }
+.planner .panel-head h1 { font-size: clamp(36px, 3vw, 46px); line-height: 1; }
+.mission-summary h2 { font-size: 36px; line-height: 1; }
+.introduction h2, .initial-state h2 { font-size: 32px; line-height: 1.05; }
+.ora-app main>header h1 { font-size: clamp(46px, 6.2vw, 92px); line-height: .96; letter-spacing: -.025em; }
+.hero-value { font-size: clamp(32px, 9.5vw, 64px); letter-spacing: -.02em; font-variant-numeric: lining-nums; }
+.metric strong { font-size: clamp(32px, 2.8vw, 44px); letter-spacing: -.01em; }
+.hero-stats strong { font-size: 26px; }
+.explore-card h3 { font-size: 24px; letter-spacing: -.01em; }
+.vw-inspector h3 { font-size: 24px; }
+.site3d-bar strong { font-size: 26px; }
+.journey-list strong { font-size: 18px; }
+.brand { font-family: var(--serif); font-weight: 400; font-size: 22px; letter-spacing: -.01em; }
+.hero-badge { padding: 0; margin-bottom: 20px; background: none; border: 0; -webkit-backdrop-filter: none; backdrop-filter: none; font: 500 11.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.hero-badge i { display: none; }
+.hero-glow { opacity: .45; }
+.mark { box-shadow: 0 0 0 1px rgba(255,255,255,.14); }
+.dot, .planner.computing .scenario-strip #status::before { box-shadow: none; }
+button.primary { box-shadow: none !important; }
+@media (max-width: 767px) {
+  .welcome h2 { font-size: clamp(42px, 13vw, 58px); }
+  .planner .panel-head h1 { font-size: 36px; }
+  .ora-app main>header h1 { font-size: 46px; }
+}

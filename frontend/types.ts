@@ -10,6 +10,24 @@ export interface PowerLossRow {id:string; affects_network:boolean; hours_off:num
 export interface PowerLoss {hours:number; nominal:Metrics; relays:PowerLossRow[]; basis:string}
 export interface DeploymentSummary {counts:Record<string,number>; enforced:boolean; slope_limit:number; selected_all_feasible:boolean; if_steep_allowed:{recommended:string[]; feasible:boolean; network:Metrics; excluded:string[]}|null; longest_route_km:number; assumption:string}
 export interface Outage {start:string; end:string; first:number; last:number; hours:number; causes:string[]}
+type PositionKm = [number, number, number];
+export type ReferenceFailure = "nominal" | "relay" | "satellite";
+export interface ReferenceSample {
+ time:string;
+ orbiter_km:PositionKm;
+ receiver_km:PositionKm;
+ hops:Record<string,{status:"available"|"unavailable"|"unknown"; reasons:string[]; range_km:number;
+  margin_db:number|null; elevation_deg?:number; azimuth_deg?:number; clearance_deg?:number|null}>;
+ node_failures:Record<string,string>;
+}
+export interface ReferenceMission {
+ site:string; start:string; end:string; minutes:number;
+ lander_km:PositionKm; relay_km:PositionKm;
+ samples:ReferenceSample[];
+ baselines:Record<string,{online:boolean[]; metrics:Metrics}>;
+ states:Record<ReferenceFailure,{online:boolean[]; metrics:Metrics; reasons:string[][]; outages:Outage[]}>;
+ assumptions:Record<string,unknown>;
+}
 export interface Assessment {
  status:"requirements_met"|"requirements_failed"|"insufficient_evidence"; label:string; subject:string; kind:"calculated window"|"scenario outcome";
  architecture:string; scope:string; checks:{name:string; target:string; value:unknown; met:boolean|null; basis:string}[];
@@ -21,6 +39,12 @@ export interface ModelStatus {
 }
 export interface ScoreEvidence {method:string; fallback:boolean; note:string; models:{name:string; loaded:boolean; used:boolean; sha256?:string|null; error?:string|null; warnings:string[]}[]}
 export interface Comparison {site:Site; direct:Metrics; solar:Metrics; network:Metrics; worst:Metrics; recommended:string[]; feasible:boolean; assessment?:Assessment}
+export interface RelayConfigurationComparison {
+ site:Site; config:Record<string,unknown>; times:string[]; architecture:string; environment_case:string;
+ configurations:{name:string; relay_ids:string[]; network:Metrics; worst_relay_failure:Metrics|null;
+  recovered_hours:number; meets_communications:boolean; within_relay_limit:boolean; cost:CostReport;
+  online:boolean[]; relay_sites:{id:string;lat:number;lon:number;distance:number}[]}[];
+}
 export interface CostReport {currency:string; budget_usd:number|null; relay_cost_usd:number; total_usd:number; remaining_usd:number|null; within_budget:boolean; assumptions:string; pricing_basis:"illustrative"|"user"; items:{category:string; item:string; quantity:number; unit_cost_usd:number; total_usd:number}[]}
 export interface DynamicCostItem {category:string; item:string; quantity:number; unit_cost_usd:number; total_usd:number; driver:string; node:string|null; role:string|null}
 export interface DynamicCostNode {id:string; role:string; range_km:number|null; route_km:number|null; slope_deg:number|null; verdict:string|null; total_usd:number; parts:{component:string; category:string; usd:number; driver:string}[]}

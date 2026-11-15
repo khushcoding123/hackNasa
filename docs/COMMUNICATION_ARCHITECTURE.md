@@ -12,7 +12,15 @@ The satellite orbit or constellation remains to be selected. A hypothetical cons
 
 ## Current implementation
 
-The current MOONMESH planner calculates direct lander-to-Earth service and independent **lander → surface relay → Earth** paths. It does not yet calculate satellite orbits, satellite access, satellite radio links, or satellite failures. Existing coverage, blackout, and N−1 figures describe that baseline and must not be relabeled as satellite-assisted results.
+The configurable MOONMESH planner calculates direct lander-to-Earth service and independent **lander → surface relay → Earth** paths. Its coverage, blackout and N−1 figures describe that baseline. The separate Haworth reference scenario exercises the complete satellite architecture with one fixed relay and one hypothetical satellite.
+
+### End-to-end Haworth reference simulation
+
+Open **End-to-end simulation** in the workspace menu and select **Run Haworth mission**. The app calls `GET /api/mission/reference` and opens playback at the first connected sample if one exists. Inspect each hop, jump to a blackout, disable the relay or satellite, or download the JSON with the sampled geometry, hop results, baseline comparisons, failure states, and assumptions. The Moon view clips the Earth link to a direction marker at lunar scale.
+
+The reference takes 288 samples at five-minute intervals on 1 November 2026 UTC. The 500 km two-body circular orbit starts northbound over the fixed relay. SPICE supplies the DE440 lunar frame rotations and Earth/Sun positions. The Earth receiver is hypothetical and uses a spherical Earth with approximate sidereal rotation. Access is screened using the relay's LOLA horizon and a 10° elevation mask. Backhaul checks lunar occultation and a 10° Earth receiver mask. The reference assumes ideal tracking, one simultaneous stream, external power at the receiver, and nominal satellite power. The lander and relay use the existing cold + dust model with fully charged batteries at the start. Results are simulated and sensitive to sampling and assumptions.
+
+The two nominal baselines use the planner's Earth-center geometry and RF model on the same time grid. The satellite path uses the fixed receiver and its elevation mask. The reference milestone uses local LOLA Haworth terrain and SPICE kernels. Run `python -m moonmesh.data` to prepare them. The configurable planner and orbital relay placement remain separate work.
 
 The ORA lab also retains its current surface-network and Earth-visible gateway model. Its published measurements do not validate the proposed orbital architecture.
 
@@ -51,4 +59,4 @@ Test both individual surface-relay failures and individual satellite failures. R
 6. Disable a surface relay or satellite and inspect the remaining complete paths.
 7. Export the architecture, orbital inputs and sources, link and power assumptions, sampling, uncertainty, and results.
 
-Satellite features are planned until the orbit, geometry, RF, power, optimization, API, visualization, and failure analysis are implemented and verified together. The local prototype continues to display its existing baseline in the meantime.
+The Haworth reference covers the fixed-path integration milestone. The full acceptance flow also requires configurable orbital scenarios and relay placement against the three-hop path.
