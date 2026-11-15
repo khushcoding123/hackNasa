@@ -167,6 +167,12 @@ def train(seed=0):
     card["marginal_gain"] = dict(task="coverage a candidate adds given the relays already chosen", training_rows=int(rows), windows=len(windows),
                                  rollouts="3 per window, 8 steps, 70% greedy and 30% random picks",
                                  limits=["Needs no line-of-sight matrix at use time; the final set is still re-checked exactly."])
+    # Bind the card to the exact files it describes, so a loaded model can be checked against it (ora.status).
+    from importlib import metadata
+    from .status import sha256
+    card["artifacts"] = {path.stem: dict(sha256=sha256(path), bytes=path.stat().st_size)
+                         for path in sorted(MODELS.glob("ora_*.joblib"))}
+    card["environment"] = dict(python=sys.version.split()[0], **{name: metadata.version(name) for name in ("numpy", "scipy", "scikit-learn", "joblib")})
     CARD.write_text(json.dumps(card, indent=1) + "\n")
     return card
 

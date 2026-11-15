@@ -5,6 +5,8 @@ GeoJSON schema (one FeatureCollection):
   elevation_m, sun_fraction, earth_fraction, siting_score (relays only), chosen (bool).
 - LineString features, one per link in the chosen network. Properties: a, b, distance_m,
   margin_db, kind.
+A ``provenance`` member records the code revision, which siting models produced the scores (with file
+hashes, or the fallback used) and the requirements assessment.
 Coordinates are [east longitude, latitude] in degrees on the Moon (IAU MOON_ME), not WGS 84.
 The collection carries a ``crs_note`` member saying so, because GeoJSON has no lunar CRS field.
 """
@@ -25,8 +27,12 @@ def to_geojson(network):
     features += [dict(type="Feature", geometry=dict(type="LineString", coordinates=[point(a), point(b)]),
                       properties=dict(a=int(a), b=int(b), distance_m=d["dist"], margin_db=d.get("margin"), kind=d.get("kind", "rf")))
                  for a, b, d in G.subgraph(members).edges(data=True)]
+    from .scenario import plan_assessment
+    from .status import git_state
     return dict(type="FeatureCollection", name=network["scenario"].name,
-                crs_note="Lunar planetocentric coordinates (IAU MOON_ME), east longitude; not WGS 84.", features=features)
+                crs_note="Lunar planetocentric coordinates (IAU MOON_ME), east longitude; not WGS 84.",
+                provenance=dict(code=git_state(), siting=network.get("score_evidence"), assessment=plan_assessment(network)),
+                features=features)
 
 
 def write_geojson(network, path):

@@ -140,6 +140,8 @@ Primary files: `moonmesh/network.py`, `moonmesh/models.py`, `moonmesh/server.py`
 
 ## Final acceptance checklist
 
+Status of this checklist for the current checkout is recorded in `docs/BASELINE_STATUS.md` (14 November 2026). The boxes below are left for the team to tick.
+
 - [ ] Two or three landing sites can be compared over the same mission period.
 - [ ] Earth and Sun geometry are terrain-aware and validated.
 - [ ] Flat-horizon, terrain-visible, RF-feasible, and uncertain states are distinct.

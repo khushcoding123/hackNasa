@@ -23,6 +23,29 @@ python -m moonmesh.data
 python -m uvicorn moonmesh.server:app --host 127.0.0.1 --port 8765
 ```
 
+## Check what this checkout has
+
+```shell
+python -m ora preflight            # data, trained models actually loaded, library versions, code revision
+python -m ora preflight --json     # the same, machine readable (also GET /api/status)
+```
+
+`python -m ora accuracy` scores the coverage calculation and the models against dense line-of-sight truth on windows never used for tuning; [docs/ACCURACY.md](docs/ACCURACY.md) has the results.
+
+The status is `ready`, `degraded` (the app runs, but a research model failed to load, or optional inputs or test dependencies are missing) or `not_ready` (required terrain or kernels are missing; exit code 1). The model card in `ora/model_card.json` is a training record, not proof that a model is loaded; the preflight and the ORA lab's *Models & limits* tab show what is loaded now, with file hashes. [docs/BASELINE_STATUS.md](docs/BASELINE_STATUS.md) is the baseline report for this checkout.
+
+## Result status
+
+Every mission, relay plan and twin run carries an `assessment` with one of three states, shown in the app and in every export:
+
+- **Requirements met**: every requirement check passes, and it still passes with marginal samples (within 3 dB of the RF threshold or 0.25° of the horizon) counted as lost.
+- **Requirements failed**: a check fails even when samples with unknown terrain are counted as available.
+- **Insufficient evidence**: the data cannot decide it: the answer changes with marginal or missing samples, or the terrain is coarser than 20 m.
+
+Every status is decided *under the assumptions listed with it*: radio budgets, batteries, and the assumed thermal sinks and dust event. Those thermal and dust values are planning envelopes, not calibrated measurements, and each result says so. Mission results take the worst of the four assumed environment cases (nominal, cold, dust, cold with dust); digital-twin results are scenario outcomes under the twin's equipment values.
+
+Each assessment names what it covers (`subject`), whether it is a deterministic *calculated window* or a *scenario outcome*, the hazards evaluated, the hazards **not** evaluated (equipment cold limits, dust, space weather, ground-station scheduling, failure rates, orbiting relays) and the assumed parameters. None of it is a forecast or a failure probability.
+
 ## Demonstration
 
 1. Open **Explore the Moon**. Rotate or zoom the globe, click anywhere to drop a red pin, then choose **Explore this site in 3D** from the pin card. Click an existing pin to reopen its card. The 3D view uses the best available LOLA terrain at that location, geographically aligned LROC WAC imagery, and polar NAC mosaics where covered. It labels the imagery and terrain source resolution, falls back to the bundled lunar map if live imagery fails, and starts at a low oblique angle with an **Overview** option. Its subtle close-up grain is illustrative, not measured relief; no mission runs automatically.
@@ -59,8 +82,13 @@ These are assumed engineering envelopes: no Diviner temperature products or cali
 - [LunarRF](https://arxiv.org/abs/2610.34554) provides related work on pole-wide terrain-aware surface coverage. MOONMESH focuses on time-dependent DTE outages and site-specific relay planning.
 
 ```shell
-python -m unittest discover -s tests -v
-npm run build
+python -m pip install -r requirements-dev.txt
+python -m pytest tests -q
+MOONMESH_REQUIRE_DATA=1 python -m pytest tests -q   # release check: a test skipped for missing data fails instead
+npm run build                                       # type-checks and bundles the frontend
+npm run test:terrain
 ```
+
+Some tests use the FastAPI test client, which needs `httpx` (in `requirements-dev.txt`).
 
 The existing exploratory scripts and generated studies are in `analysis/`. The application prepares datasets for its three supported sites.

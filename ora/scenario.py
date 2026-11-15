@@ -9,7 +9,6 @@ from datetime import UTC, date, datetime, time, timedelta
 from functools import lru_cache
 from pathlib import Path
 
-import joblib
 import numpy as np
 import yaml
 
@@ -17,10 +16,11 @@ from lunar_core.geometry import Body, SurfacePoint, horizontal_arrays
 from lunar_core.kernels import load_kernels
 from lunar_core.terrain import polar_stereographic_south
 from moonmesh.data import DATA
+from moonmesh.evidence import NOT_MODELLED, assess, check, gap
 from moonmesh.science import Observer, mask_for
 
 from .data import ALL_SITES, terrain
-from .features import CHEAP, FEATURES, prior_features, rasters, surrogate_features
+from .features import CHEAP, FEATURES, VIEW_RADIUS_M, rasters, view_rings
 from .graph import build_los_graph, candidate_sites, to_latlon
 from .links import SURFACE_RADIO
 from .optimize import place
@@ -95,41 +95,38 @@ def sky(site, lat, lon, ground, mast, times):
     return np.nan_to_num(lit, nan=0.0), np.where(np.isfinite(earth_limit), earth, False)
 
 
-@lru_cache(maxsize=2)
-def _models():
-    out = {}
-    for name in ("ora_siting_prior", "ora_coverage_surrogate"):
-        path = DATA / "models" / f"{name}.joblib"
-        if path.is_file():
-            try:
-                out[name] = joblib.load(path)
-            except Exception:  # a model saved by another library version is ignored, not fatal
-                pass
-    return out
+SITING_METHOD = "computed 8 km viewshed share (120 rays, 20 m steps)"
+
+
+def scoring_evidence(method):
+    """How the siting scores were produced: the method, any trained artifacts used (with hashes), and whether a fallback ran."""
+    from .status import model_status
+    used = {"lunar coverage surrogate (80%) with Earth-tower prior (20%)": ("ora_coverage_surrogate", "ora_siting_prior"),
+            "trained Earth-tower prior": ("ora_siting_prior",)}.get(method, ())
+    rows = [dict(name=m["name"], loaded=m["loaded"], used=m["name"] in used, sha256=m.get("sha256"), error=m.get("error"),
+                 warnings=m.get("warnings", [])) for m in model_status() if m["name"] != "ora_gain_model"]
+    note = ("Candidates are ranked by how much ground each one sees within 8 km, computed by a radial line-of-sight sweep. "
+            "Against dense line-of-sight truth this ranks sites with 99.6% rank correlation; the trained surrogate and "
+            "Earth-tower prior scored lower and are not used for ranking (docs/ACCURACY.md). Every chosen link is "
+            "re-checked with exact line of sight.") if method == SITING_METHOD else         "Siting scores only rank candidates. Every chosen link is re-checked with exact line of sight on the terrain grid."
+    return dict(method=method, fallback=method.startswith("terrain heuristic"), models=rows, note=note)
 
 
 def siting_scores(dem, px_m, cells, layers=None):
-    """Siting score in 0..1 for each cell and the name of the method that produced it.
+    """Siting score in 0..1 for each cell (rank of its computed 8 km viewshed share), the feature rows and the method name.
 
-    Uses the trained Earth-tower prior when it is available. Otherwise falls back to a
-    transparent terrain heuristic (prominence plus view), so the app still runs untrained.
+    The viewshed share is computed, not predicted: a 120-ray sweep with 20 m radial steps, 10 m mast and 2 m receiver.
+    It agrees with dense line of sight to R² 98.7% and rank correlation 99.6%, where the old learned blend
+    (coverage surrogate 80%, Earth-tower prior 20%) reached far less (docs/ACCURACY.md). ``features`` keeps the
+    FEATURES column order, with the computed share in the viewshed column.
     """
-    full = prior_features(dem, px_m, cells, layers)
-    features = full[:, :len(FEATURES)]
-    models = _models()
-    model, surrogate = models.get("ora_siting_prior"), models.get("ora_coverage_surrogate")
-    rank = lambda v: np.argsort(np.argsort(v)) / max(len(v) - 1, 1)
-    if surrogate is not None and model is not None:
-        # The Earth prior ranks lunar cells poorly (Spearman 0.18 with true visibility), so the lunar coverage
-        # surrogate leads and the prior only breaks ties.
-        wide, _ = surrogate_features(dem, px_m, cells, layers)
-        seen = surrogate.predict(wide[:, :surrogate.n_features_in_])
-        tower = model.predict_proba(full[:, :model.n_features_in_])[:, 1]
-        return 0.8 * rank(seen) + 0.2 * rank(tower), features, "lunar coverage surrogate (80%) with Earth-tower prior (20%)"
-    if model is not None:
-        return model.predict_proba(full[:, :model.n_features_in_])[:, 1], features, "trained Earth-tower prior"
-    rank = lambda v: np.argsort(np.argsort(v)) / max(len(v) - 1, 1)
-    return 0.5 * rank(features[:, CHEAP.index("tpi_1000")]) + 0.5 * rank(features[:, -1]), features, "terrain heuristic (untrained)"
+    layers = layers or rasters(dem, px_m)
+    cells = np.asarray(cells, float)
+    c, r = np.rint(cells[:, 0]).astype(int), np.rint(cells[:, 1]).astype(int)
+    view = view_rings(dem, px_m, cells, (VIEW_RADIUS_M,), step_px=1)[:, 0]
+    features = np.column_stack([layers[name][r, c] for name in CHEAP] + [view]).astype(np.float32)
+    rank = np.argsort(np.argsort(view, kind="stable"), kind="stable") / max(len(view) - 1, 1)
+    return rank, features, SITING_METHOD
 
 
 def floor_sites(dem, px_m, center, count, search_m=3_500, spacing_m=1_500, slope_limit=10.0, mask=None):
@@ -153,7 +150,9 @@ def floor_sites(dem, px_m, center, count, search_m=3_500, spacing_m=1_500, slope
 
 
 @lru_cache(maxsize=4)
-def _build(scenario):
+def _build(scenario, artifacts=()):
+    # ``artifacts`` (size and mtime of each model file) is part of the cache key, so a retrained or replaced model
+    # rebuilds the network instead of serving scores from the old one.
     if scenario.site not in ALL_SITES:
         raise ValueError(f"Unknown site {scenario.site}. Choose one of {', '.join(ALL_SITES)}.")
     grid = terrain(scenario.site)
@@ -223,9 +222,49 @@ def _build(scenario):
     return dict(scenario=scenario, grid=grid, center=center, sites=sites, heights=heights, lat=lat, lon=lon, ground=ground,
                 n_relays=n_relays, demand=demand, gateways=gateways, candidates=candidates, G=G, times=times, lit=lit,
                 earth=earth, sun_frac=sun_frac, earth_frac=earth_frac, score=score, features=features,
-                score_method=method, plan=plan, site_name=name, inside=inside, outside=outside_flag)
+                score_method=method, score_evidence=scoring_evidence(method), plan=plan, site_name=name, inside=inside, outside=outside_flag)
+
+
+def _artifacts():
+    from .status import MODELS
+    stats = ((DATA / "models" / f"{name}.joblib") for name in MODELS)
+    return tuple((p.name, p.stat().st_size, p.stat().st_mtime_ns) if p.is_file() else (p.name, None, None) for p in stats)
 
 
 def build(scenario):
     """Network for a scenario (cached). Accepts a Scenario, a scenario name or a YAML path."""
-    return _build(scenario if isinstance(scenario, Scenario) else load(scenario))
+    return _build(scenario if isinstance(scenario, Scenario) else load(scenario), _artifacts())
+
+
+def plan_assessment(network):
+    """Requirements met / failed / insufficient evidence for a relay plan, with what was and was not evaluated."""
+    scenario, plan, px = network["scenario"], network["plan"], network["grid"].pixel_size_m
+    gateways = network["gateways"]
+    contact = float(network["earth"][gateways].any(axis=0).mean() * 100) if gateways else 0.0
+    checks = [check("Every mining site linked to a gateway", "100% of mining sites", round(100 * plan["served"], 1), bool(plan["feasible"]),
+                    "Exact line of sight on the terrain grid" + (" and surface RF margin" if scenario.use_rf_margin else "")),
+              check("At least one gateway with an Earth view", f"≥ 1 gateway seeing Earth > 5% of {scenario.days} days", len(gateways),
+                    len(gateways) > 0, "SPICE Earth position against each site's terrain horizon")]
+    gaps = []
+    if px > 20.5:
+        gaps.append(gap("Coarse terrain", f"Terrain is {px:.0f} m per pixel. Ridges and hollows narrower than that are not resolved, "
+                        "so a link can be blocked or open in reality where the grid says otherwise."))
+    if not scenario.use_rf_margin:
+        gaps.append(gap("Link margin not checked", "Links are line of sight and range only; no RF budget was applied."))
+    evidence = network.get("score_evidence") or {}
+    if evidence.get("fallback"):
+        errors = "; ".join(f"{m['name']}: {m['error']}" for m in evidence.get("models", []) if m.get("error"))
+        gaps.append(gap("Siting models not loaded", f"Candidates were ranked with the terrain heuristic ({errors or 'no trained models loaded'}).", False))
+    gaps.append(gap("Earth contact over time", f"A gateway sees Earth {contact:.0f}% of the period. The placement does not require continuous "
+                    "Earth contact; the twin reports contact over time.", False))
+    return assess(
+        checks, gaps, kind="calculated window", subject="relay placement (static links; not Earth contact over time)",
+        architecture="Surface mesh: mining sites to relays to gateways with an Earth view (direct to Earth). No orbiting relay.",
+        evaluated=["Terrain line of sight between every pair of sites", "Surface RF margin" if scenario.use_rf_margin else "Link range only",
+                   "Earth and Sun visibility per site from SPICE and the terrain horizon", "Loss of any one relay or link (graph what-if)"],
+        not_evaluated=list(NOT_MODELLED),
+        assumptions=[f"Relay mast {scenario.relay_mast_m:g} m, mining-site antenna {scenario.demand_mast_m:g} m, link range {scenario.max_range_km:g} km",
+                     f"{scenario.candidates} candidate sites within {scenario.radius_km:g} km, slope up to {scenario.slope_limit:g}°, seed {scenario.seed}",
+                     f"Period {scenario.start.isoformat()} for {scenario.days} days at {scenario.step_h:g} h steps"],
+        metrics=dict(served_pct=round(100 * plan["served"], 1), worst_after_single_failure_pct=round(100 * plan["worst_after_failure"], 1),
+                     gateway_earth_contact_pct=round(contact, 1), terrain_m_per_pixel=px))
