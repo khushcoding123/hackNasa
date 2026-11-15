@@ -453,8 +453,7 @@ export class MoonView {
   const node = this.root.querySelector<HTMLElement>(".vw-inspector")!;
   node.innerHTML = `<button class="vw-close" aria-label="Close pin card">×</button><span class="eyebrow">PIN · TEST LOCATION</span><h3>${coordinate(lat, lon)}</h3>
    <dl><dt>Terrain elevation</dt><dd>${Math.round(c.height).toLocaleString()} m</dd></dl>
-   ${lat <= -75 ? `<p class="vw-note">Polar terrain data is available here (south of 75° S).</p><button class="primary" data-use-pin>Analyse a 6 km square here →</button>`
-    : `<p class="vw-note">Areas can be analysed south of 75° S, where polar terrain data exists. Use Go to the pole, then drop the pin.</p>`}
+   <p class="vw-note">${lat <= -75.5 ? "Polar terrain data (20 m near the pole) is available here." : "Global terrain data (about 470 m per pixel) is used here."}</p><button class="primary" data-use-pin>Analyse a 6 km square here →</button>
    <button data-clear-pin>Remove pin</button>`;
   node.hidden = false;
   node.querySelector<HTMLButtonElement>(".vw-close")!.onclick = () => { node.hidden = true; };
@@ -592,7 +591,7 @@ export class MoonView {
   viewer.entities.removeById("area-draft");
   if (kind) {
    viewer.entities.add({id: "area-draft", polyline: {positions: new CallbackProperty(() => this.draft.length > 1 ? [...this.draft, this.draft[0]] : [], false), width: 3, material: Color.fromCssColorString("#84deff"), depthFailMaterial: Color.fromCssColorString("#84deff")}});
-   this.toast(kind === "rect" ? "Drag across the Moon to draw a square. Any size, south of 75° S (use Go to the pole)." : "Press and drag to draw a free-form shape of any size. Areas must be south of 75° S.");
+   this.toast(kind === "rect" ? "Drag across the Moon to draw a square. Any size, anywhere on the Moon." : "Press and drag to draw a free-form shape of any size. Terrain detail is best near the south pole.");
   } else this.toast("");
   viewer.scene.requestRender();
  }

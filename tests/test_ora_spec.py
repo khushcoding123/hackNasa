@@ -178,10 +178,38 @@ def test_drawn_area_info_reports_size_and_centre():
 def test_drawn_area_rejects_only_impossible_shapes():
     from ora.area import AreaError, info
     for bad in ([(-89.0, 0.0), (-89.1, 10.0)],                       # too few corners
-                [(-60.0, 0.0), (-60.0, 10.0), (-61.0, 5.0)],         # north of the polar terrain data
                 square(half=20.0)):                                  # a few metres across
         with pytest.raises(AreaError):
             info(bad)
+
+
+def test_local_projection_round_trips_and_is_centred():
+    from lunar_core.terrain import local_frame, set_frame
+    from lunar_core.terrain import polar_stereographic_south as forward
+    from lunar_core.terrain import polar_stereographic_south_inverse as inverse
+    try:
+        for lat, lon in ((0.7, 23.5), (-43.0, 349.0), (60.0, 100.0)):
+            set_frame(local_frame(lat, lon))
+            assert np.hypot(*forward(lat, lon)) < 0.5   # metres
+            x, y = forward(lat + 0.4, lon + 0.5)
+            back = inverse(x, y)
+            assert float(back[0]) == pytest.approx(lat + 0.4, abs=1e-9) and float(back[1]) == pytest.approx((lon + 0.5) % 360, abs=1e-9)
+    finally:
+        set_frame(None)
+
+
+def test_drawn_area_outside_the_polar_cap_uses_global_terrain():
+    from lunar_core.terrain import set_frame
+    from moonmesh import globaldem
+    from ora.area import info
+    if not globaldem.available():
+        pytest.skip("ldem_64.img not installed")
+    try:
+        meta = info([(0.5, 23.0), (0.5, 24.0), (-0.5, 24.0), (-0.5, 23.0)])
+    finally:
+        set_frame(None)
+    assert meta["projection"] == "local" and meta["native_m"] == pytest.approx(473.8, abs=0.5)
+    assert 2 * meta["extent_m"] / meta["resolution_m"] <= 2101
 
 
 def test_drawn_area_accepts_any_size_and_thins_terrain():

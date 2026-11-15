@@ -10,6 +10,7 @@ import numpy as np
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from lunar_core.terrain import set_frame
 from . import area as drawn_area
 from . import breadcrumb, resilience, twin
 from .data import ALL_SITES
@@ -58,7 +59,10 @@ class NetworkBody(BaseModel):
                 changes.setdefault(name, value)
             changes.update(site=key, polygon=tuple(tuple(p) for p in self.polygon), radius_km=radius_km + 0.3, name=f"drawn_{key}")
         elif self.site:
+            set_frame(None)
             changes["site"] = self.site
+        else:
+            set_frame(None)
         return replace(base, **changes)
 
 

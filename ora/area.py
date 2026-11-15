@@ -10,8 +10,9 @@ import hashlib
 import networkx as nx
 import numpy as np
 
-from lunar_core.terrain import polar_stereographic_south, polar_stereographic_south_inverse
+from lunar_core.terrain import local_frame, polar_stereographic_south, polar_stereographic_south_inverse, set_frame
 from moonmesh import data as moon_data
+from moonmesh import globaldem
 
 from . import data as ora_data
 from . import resilience
@@ -21,6 +22,8 @@ EDGE_240M = 3812 * 240 / 2     # half-width of the 240 m product (75 S to the po
 MIN_RADIUS_M = 100.0
 MAX_GRID_PX = 2100             # terrain is thinned so the working grid never exceeds this many pixels across
 KEEP_AREAS = 12
+POLAR_LAT = -75.5              # shapes entirely south of this use the polar LOLA products; others use the global LDEM_64
+MAX_SPAN_M = 2_000_000.0       # largest radius a flat local projection represents well (about 60 degrees of arc)
 
 
 class AreaError(ValueError):
@@ -31,10 +34,27 @@ def project(polygon):
     pts = np.asarray(polygon, float)
     if pts.ndim != 2 or pts.shape[1] != 2 or not 3 <= len(pts) <= 200 or not np.isfinite(pts).all():
         raise AreaError("Draw a closed shape with at least three corners.")
-    if (pts[:, 0] > -75).any() or (pts[:, 0] < -90).any():
-        raise AreaError("Draw the area south of 75° S, where lunar polar terrain data exists. Use the 'Go to the pole' button.")
+    if (pts[:, 0] > 90).any() or (pts[:, 0] < -90).any():
+        raise AreaError("Latitudes must be between 90° S and 90° N.")
     x, y = polar_stereographic_south(pts[:, 0], pts[:, 1])
     return np.column_stack([x, y])
+
+
+def frame_for(polygon):
+    """Local projection for shapes that reach north of the polar terrain products; None keeps the polar projection."""
+    pts = np.asarray(polygon, float)
+    if pts.ndim != 2 or pts.shape[1] != 2 or not np.isfinite(pts).all():
+        raise AreaError("Draw a closed shape with at least three corners.")
+    if (pts[:, 0] <= POLAR_LAT).all():
+        return None
+    if not globaldem.available():
+        raise AreaError("Global terrain is not installed, so only the area south of 75° S can be analysed. Use the 'Go to the pole' button.")
+    la, lo = np.radians(pts[:, 0]), np.radians(pts[:, 1])
+    mean = np.array([(np.cos(la) * np.cos(lo)).mean(), (np.cos(la) * np.sin(lo)).mean(), np.sin(la).mean()])
+    if np.linalg.norm(mean) < 1e-6:
+        raise AreaError("That shape wraps around the Moon. Draw a smaller area.")
+    mean /= np.linalg.norm(mean)
+    return local_frame(float(np.degrees(np.arcsin(mean[2]))), float(np.degrees(np.arctan2(mean[1], mean[0]))))
 
 
 def centroid(xy):
@@ -55,23 +75,33 @@ def ring_for(radius_m):
 
 def info(polygon):
     """Size, centre and terrain plan for a shape. Any size is accepted: terrain is thinned to keep the grid workable."""
+    frame = frame_for(polygon)
+    set_frame(frame)
     xy = project(polygon)
     (cx, cy), area = centroid(xy)
     radius = float(np.hypot(xy[:, 0] - cx, xy[:, 1] - cy).max())
     reach = float(np.hypot(xy[:, 0], xy[:, 1]).max())
-    if reach > EDGE_240M - 1_000:
+    if frame is None and reach > EDGE_240M - 1_000:
         raise AreaError("That shape reaches past the edge of the polar terrain data (about 75° S). Draw it closer to the pole.")
+    if frame is not None and reach > MAX_SPAN_M:
+        raise AreaError("That shape is too large to analyse as one area (over about 4,000 km across). Draw a smaller one.")
     if radius < MIN_RADIUS_M:
         raise AreaError(f"Draw a larger area: at least about {2 * MIN_RADIUS_M:.0f} m across.")
-    product, native = ("LDEM_85S_20M", 20.0) if reach <= EDGE_20M - 1_000 else ("LDEM_75S_240M", 240.0)
+    if frame is not None:
+        product, native = "LOLA LDEM_64 (global)", float(globaldem.PIXEL_M)
+    else:
+        product, native = ("LDEM_85S_20M", 20.0) if reach <= EDGE_20M - 1_000 else ("LDEM_75S_240M", 240.0)
     ring = ring_for(radius)
     extent = radius + ring + 1_500.0   # margin so sites at the edge of the ring still have terrain under them
     if native == 20.0:
         extent = max(20_000.0, extent)
+    elif frame is not None:
+        extent = max(40_000.0, extent)
     stride = max(1, int(np.ceil(2 * extent / (native * MAX_GRID_PX))))
     lat, lon = polar_stereographic_south_inverse(cx, cy)
     return dict(xy=xy, center_xy=(float(cx), float(cy)), area_km2=float(area) / 1e6, radius_m=radius, lat=float(lat), lon=float(lon),
-                product=product, native_m=native, extent_m=float(extent), stride=stride, resolution_m=native * stride, ring_m=ring)
+                product=product, native_m=native, extent_m=float(extent), stride=stride, resolution_m=native * stride, ring_m=ring,
+                frame=frame, projection="polar" if frame is None else "local")
 
 
 def thin(crop, stride):
@@ -90,20 +120,28 @@ def register(polygon):
     """Crop terrain for the shape under a stable site key. Returns (key, display name, info)."""
     meta = info(polygon)
     rounded = np.round(np.asarray(polygon, float), 4).tolist()
-    key = "area-" + hashlib.sha1(repr(rounded).encode()).hexdigest()[:10]
+    key = "area-" + hashlib.sha1((repr(rounded) + ("" if meta["frame"] is None else "|local")).encode()).hexdigest()[:10]
     name = f"Drawn area ({meta['lat']:.2f}°, {meta['lon']:.1f}° E)"
     site = (name, meta["lat"], meta["lon"])
     folder = moon_data.DATA / "terrain"
     folder.mkdir(parents=True, exist_ok=True)
-    plans = (("near20km", meta["product"], meta["extent_m"], meta["stride"]), ("far", "LDEM_75S_240M", 180_000.0, 1))
+    local = meta["frame"] is not None
+    if local:
+        far_extent = max(180_000.0, meta["extent_m"] + 150_000.0)
+        plans = (("near20km", None, meta["extent_m"], meta["resolution_m"]),
+                 ("far", None, far_extent, max(globaldem.PIXEL_M, 2 * far_extent / MAX_GRID_PX)))
+    else:
+        plans = (("near20km", meta["product"], meta["extent_m"], meta["stride"]), ("far", "LDEM_75S_240M", 180_000.0, 1))
     for suffix, product, extent, stride in plans:
         path = folder / f"{key}_{suffix}.npz"
         if not path.is_file():
             partial = path.with_suffix(".partial")
+            data = globaldem.crop(extent, stride) if local else thin(moon_data.crop(site, product, extent), stride)
             with partial.open("wb") as file:
-                np.savez_compressed(file, **thin(moon_data.crop(site, product, extent), stride))
+                np.savez_compressed(file, **data)
             partial.replace(path)
-    moon_data.SITES[key] = site
+    if not local:
+        moon_data.SITES[key] = site   # only polar crops can be drawn by the Moon viewer's polar terrain tiles
     ora_data.ALL_SITES[key] = site
     prune(keep=key)
     return key, name, meta
@@ -235,7 +273,7 @@ def analyse(net, meta):
                   outside=bool(v < net["n_relays"] and net["outside"][v])) for v in members]
     plan = net["plan"]
     return dict(site=dict(key=net["scenario"].site, name=net["site_name"], lat=meta["lat"], lon=meta["lon"], area_km2=meta["area_km2"],
-                          radius_m=meta["radius_m"], resolution_m=meta["resolution_m"], ring_m=meta["ring_m"]),
+                          radius_m=meta["radius_m"], resolution_m=meta["resolution_m"], ring_m=meta["ring_m"], projection=meta["projection"], source=meta["product"]),
                 polygon=[list(p) for p in net["scenario"].polygon], nodes=nodes, layouts=layouts, recommended=best, reason=reason,
                 score_method=net["score_method"], candidates=int(net["n_relays"]),
                 plan=dict(served=plan["served"], worst_after_failure=plan["worst_after_failure"], feasible=bool(plan["feasible"]),
