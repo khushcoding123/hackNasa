@@ -135,3 +135,49 @@ The report estimates residual disk-union overlap at 100 m resolution: an
 8 km transmitter buffer does not imply disjoint 8 km receiver disks.
 Cross-site manifests stay empty until step 14. Reruns are deterministic and
 small, so interrupted output generation can be safely repeated.
+
+### Full-map validation (step 11)
+
+The evaluator defaults to validation, using six transmitters selected by stable
+round-robin terrain strata and all four antenna heights (24 scenarios). Run each
+bounded phase repeatedly until its checkpoints are complete:
+
+```powershell
+C:/moonmesh-data/venv/Scripts/python.exe training/scripts/10_evaluate.py --help
+C:/moonmesh-data/venv/Scripts/python.exe training/scripts/10_evaluate.py --phase maps --max-scenarios 4
+C:/moonmesh-data/venv/Scripts/python.exe training/scripts/10_evaluate.py --phase cross-source --max-scenarios 5
+C:/moonmesh-data/venv/Scripts/python.exe training/scripts/10_evaluate.py --phase runtime --max-scenarios 1
+C:/moonmesh-data/venv/Scripts/python.exe training/scripts/10_evaluate.py --phase report
+```
+
+Use `--scenarios 24` or explicit scenario IDs to select a different validation
+subset, with a fresh `run_id` in `configs/eval_haworth.yaml`. Config, model or
+implementation changes reject incompatible checkpoints. A final test requires
+`--split test --final` and always evaluates every test scenario; it does not
+replace the validation U-Net decision or step 11 status.
+
+Reports and prediction GeoTIFFs are under data-root
+`reports/eval/haworth_val_step11_full/`. They include separate terrain and RF
+dead-zone metrics, per-scenario and combined stratified CSVs, five warm timings
+and one application-cold timing per predictor, and five native-5m source checks.
+Run runtime measurements alone, with no concurrent map computation. Timings
+include raster/model reads, all features, all three LightGBM heads, and
+post-processing; OS disk cache and Python import startup are not controlled.
+
+The 5m terrain requires 2.5m path spacing under the existing tracer's half-pixel
+guard; the primary 20m labels use 10m spacing. Thus the source check includes
+both source and sampling differences, using identical 20m receiver coordinates
+and only jointly valid full paths. Two validation transmitters overlap the
+native footprint, so the five scenarios reuse heights at these two locations.
+PGDA quality strata are unavailable. Areas use the verified spherical lunar
+polar stereographic scale correction, rather than uncorrected projected area.
+
+`configs/acceptance.yaml` fixes the requested limits. Acceptance uses the worse
+terrain/RF area-weighted false-covered fraction (denominator: true-dead area),
+worst scenario boundary p95, pixel-weighted near-threshold margin MAE (within
+3dB of the true threshold), and mean warm deterministic/LightGBM speedup.
+Null/undefined learned boundary metrics fail acceptance. Boundary-distance
+receiver strata have no separate boundary p95; the full-map boundary metric
+remains available. `evaluation.register_predictor` accepts future locally
+trained predictors with the same LOS/margin/clearance/covered/valid array
+contract. No U-Net weights or torch installation are needed by this step.
