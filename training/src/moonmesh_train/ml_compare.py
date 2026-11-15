@@ -56,9 +56,12 @@ def models_available():
 
 @lru_cache(maxsize=1)
 def learned_context():
-    """Load terrain features and the three LightGBM boosters once per server process."""
+    """Load terrain features and the LOS and margin boosters once per server process.
+
+    The comparison never uses predicted clearance, so its booster (the largest) is not loaded or run.
+    """
     from .evaluation import Context  # heavy imports (lightgbm, pandas) only when this route is used
-    return Context(eval_config())
+    return Context(eval_config(), heads=('los', 'margin'))
 
 
 def refuse(entry_missing, meta):
@@ -66,9 +69,10 @@ def refuse(entry_missing, meta):
     if entry_missing:
         raise HTTPException(409, meta.get('message', 'Surface coverage is unavailable for this request.'))
     if not meta['in_evaluated_domain']:
-        raise HTTPException(422, 'The experimental model only covers what it was trained on: Haworth, '
-                                 'the MOONMESH 2.4 GHz profile, TX 5-50 m, RX 2 m, range up to 8 km, '
-                                 'within 8 km of the research point. ' + ' '.join(meta['fallback_reasons']))
+        raise HTTPException(422, 'The experimental model only covers what it was trained and tested on: Haworth, '
+                                 'the MOONMESH 2.4 GHz profile, TX 5-50 m, RX 2 m, range up to 8 km, and a '
+                                 'transmitter whose whole 8 km range is on the prepared Haworth terrain. '
+                                 + ' '.join(meta['fallback_reasons']))
     if not models_available():
         raise HTTPException(503, f'Trained model files were not found under {data_root()}. They are created by '
                                  'training steps 9 and 10 and are kept outside git, so this only works on a '
@@ -113,6 +117,7 @@ def compare(body, should_stop=lambda: False):
         coverage_agreement=float((truth_cov == model_cov)[valid].mean()),
         los_agreement=float((truth_los == model_los)[valid].mean()),
         physics_covered_km2=float(truth_cov.sum()*pixel_km2),
+        physics_dead_km2=float(dead.sum()*pixel_km2),  # the base of dead_zones_caught: small at short range
         model_covered_km2=float(model_cov.sum()*pixel_km2),
         dead_zones_caught=float((dead & ~model_cov).sum()/dead.sum()) if dead.any() else None,
         false_covered_fraction=float((dead & model_cov).sum()/dead.sum()) if dead.any() else None,

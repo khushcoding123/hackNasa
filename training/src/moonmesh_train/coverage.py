@@ -10,6 +10,7 @@ import io
 import json
 import logging
 from pathlib import Path
+import subprocess
 from threading import RLock
 from typing import Literal
 import zipfile
@@ -23,7 +24,7 @@ from fastapi import APIRouter, HTTPException
 
 from moonmesh.data import SITES
 from lunar_core.terrain import polar_stereographic_south, polar_stereographic_south_inverse
-from .config import configs_dir, _load_mapping, load_radio_profile
+from .config import configs_dir, _load_mapping, load_radio_profile, numba_threads
 from .downloads import sha256_file
 from .paths import data_root
 from .sampling import commit
@@ -60,6 +61,18 @@ class InspectRequest(CoverageRequest):
     rx_y_m: float = Field(allow_inf_nan=False)
 
 
+def code_version():
+    """Git commit for provenance, or None (null) when it cannot be read.
+
+    The app must still work from a GitHub "Download ZIP" copy or on a computer without git on PATH;
+    training scripts keep using the strict sampling.commit().
+    """
+    try:
+        return commit()
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def settings():
     return _load_mapping(configs_dir()/'surface_coverage.yaml')
 
@@ -85,6 +98,26 @@ def cache_key(*, terrain_version, grid, tx, heights, profile, propagation_model=
     return digest(dict(terrain=terrain_version, grid=grid, tx=tx, heights=heights,
                        profile_hash=digest(radio), propagation_model=propagation_model,
                        implementation=implementation))
+
+
+def full_range_on_terrain(src, tx, radius_m):
+    """True where the whole range around the transmitter lies on prepared terrain.
+
+    This is the rule that placed every training, validation and test tower (sampling.full_disk_valid):
+    no missing-terrain cell, and no raster edge, within radius_m plus half a pixel diagonal of the
+    transmitter's cell. Those towers span the prepared Haworth terrain, not only the area around the
+    research point, so this, not the lander deployment radius, is where the learned model was evaluated.
+    """
+    pixel = abs(src.transform.a)
+    reach = radius_m + pixel/np.sqrt(2)
+    row, col = src.index(*tx)
+    # Outside the raster counts as missing terrain, starting one cell beyond each edge.
+    if min(row+1, src.height-row, col+1, src.width-col)*pixel <= reach:
+        return False
+    n = int(reach//pixel)
+    block = src.read(1, window=rasterio.windows.Window(col-n, row-n, 2*n+1, 2*n+1), masked=True).filled(np.nan)
+    rr, cc = np.ogrid[-n:n+1, -n:n+1]
+    return bool(np.isfinite(block[np.hypot(rr, cc)*pixel <= reach]).all())
 
 
 def prepare(body):
@@ -123,18 +156,19 @@ def prepare(body):
         return None, dict(meta, state='missing_data', message='No integrated terrain for this site. Select Haworth.')
     dem_path, slope_path, grid_path = [data_root()/site_cfg[k] for k in ('dem', 'slope', 'grid')]
     if not all(p.exists() for p in (dem_path, slope_path, grid_path)):
-        return None, dict(meta, state='missing_data', message='Prepared DEM, slope or grid is missing; run terrain preparation.')
+        return None, dict(meta, state='missing_data', message=f'Prepared DEM, slope or grid is missing under {data_root()}. '
+                          'Unpack shared-data (see shared-data/README.md) and point MOONMESH_DATA_ROOT at that folder.')
     lat = SITES[body.site][1] if body.latitude is None else body.latitude
     lon = SITES[body.site][2] if body.longitude is None else body.longitude
     tx = list(map(float, polar_stereographic_south(lat, lon)))
-    reference = polar_stereographic_south(pilot['latitude_deg'], pilot['longitude_deg'])
-    if np.linalg.norm(np.asarray(tx)-reference) > pilot['deployment_radius_m']:
-        meta['in_evaluated_domain'] = False
-        reasons.append('Transmitter outside evaluated placement radius; deterministic fallback.')
     with rasterio.open(dem_path) as src:
         grid = dict(transform=list(src.transform)[:6], shape=[src.height, src.width], crs=src.crs.to_wkt())
         if not (src.bounds.left <= tx[0] <= src.bounds.right and src.bounds.bottom <= tx[1] <= src.bounds.top):
             return None, dict(meta, state='out_of_domain', message='Transmitter is outside prepared terrain.')
+        if not full_range_on_terrain(src, tx, pilot['max_range_m']):
+            meta['in_evaluated_domain'] = False
+            reasons.append(f'Part of the {pilot["max_range_m"]/1000:g} km range around this transmitter is off the prepared '
+                           'terrain, where no training or test tower was placed; deterministic fallback.')
     implementations = {name: version(Path(__file__).with_name(name)) for name in ('coverage.py', 'rf.py', 'los.py')}
     hashes = {str(p): version(p) for p in (dem_path, slope_path, grid_path)}
     key = cache_key(terrain_version=hashes, grid=grid, tx=tx, heights=[body.h_tx, body.h_rx],
@@ -161,7 +195,7 @@ def calculate(body):
         if hit:
             entry = CACHE.pop(key)
         else:
-            set_num_threads(cfg['numba_threads'])
+            set_num_threads(numba_threads(cfg['numba_threads']))
             with rasterio.open(dem_path) as src:
                 dem = src.read(1, masked=True).filled(np.nan)
                 arrays, tr, window = rf.label_arrays(tx, body.h_tx, body.h_rx, dem, src.transform, src.crs, radio)
@@ -176,7 +210,7 @@ def calculate(body):
         CACHE[key] = entry
         while len(CACHE) > cfg['cache_entries']:
             CACHE.popitem(last=False)
-    meta.update(cache_hit=hit, code_version=commit())
+    meta.update(cache_hit=hit, code_version=code_version())
     logging.getLogger(__name__).info('Surface coverage simulated; commit %s; key %s', meta['code_version'], key)
     valid = entry['arrays']['valid_mask'].astype(bool)
     covered = valid & (entry['arrays']['link_margin_db'] >= meta['threshold_db'])
@@ -244,7 +278,7 @@ def export_route(body: CoverageRequest):
                                  compress='deflate') as dst:
                     dst.write(a, 1)
                     dst.set_band_description(1, name)
-                    dst.update_tags(label_origin='simulated', units=unit, code_version=meta['code_version'])
+                    dst.update_tags(label_origin='simulated', units=unit, code_version=meta['code_version'] or 'null')
                 content = memory.read()
             filename = name+'.tif'
             archive.writestr(filename, content)
@@ -265,7 +299,7 @@ def inspect_route(body: InspectRequest):
         dem = src.read(1, masked=True).filled(np.nan)
         tr, crs = src.transform, src.crs
     rx = [body.rx_x_m, body.rx_y_m]
-    set_num_threads(cfg['numba_threads'])
+    set_num_threads(numba_threads(cfg['numba_threads']))
     trace = rf.trace_pairs(tx, [rx], body.h_tx, body.h_rx, dem, tr, crs,
                            radio['max_range_m'], 10, rf.C/(radio['frequency_ghz']*1e9), mode='fast')
     valid = bool(trace['valid'][0])
