@@ -83,11 +83,6 @@ $("#explore-surface").onclick=()=>{
  moon?.flyToSite(-89.6,0,160_000);
  status("Explore the south pole. Draw an area to start planning your network.");
 };
-// Landing hero: touching the Moon leaves the hero and opens the full-screen explorer. Presentation only.
-$("#moon").addEventListener("pointerdown",()=>{
- if(active!=="landing"||!moon||!document.body.classList.contains("panel-collapsed")||document.body.classList.contains("exploring"))return;
- document.body.classList.add("exploring");status("Exploring the Moon. Draw an area to start planning your network.");
-},true);
 // Cards follow the pointer with a soft highlight.
 document.querySelectorAll<HTMLElement>(".explore-card").forEach(card=>card.addEventListener("pointermove",e=>{
  const box=card.getBoundingClientRect();card.style.setProperty("--mx",`${e.clientX-box.left}px`);card.style.setProperty("--my",`${e.clientY-box.top}px`);

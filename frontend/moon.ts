@@ -125,6 +125,7 @@ export class MoonView {
  private disposed = false;
  private labelsOn = true;
  private view: View = {lat: 8, lon: 12, extent: FULL_EXTENT, heading: 0, pitch: -Math.PI / 2};
+ private cameraOffset = 0;
  private animation = 0;
  private labelButtons: {feature: Landmark; button: HTMLButtonElement}[] = [];
  private activeLandmark = "";
@@ -252,6 +253,7 @@ export class MoonView {
   scene.globe.tileLoadProgressEvent.addEventListener(count => { this.root.dataset.loading = String(count); scene.requestRender(); if (count === 0) this.refreshReadouts(); });
   this.setupLabels();
   this.setupPicking();
+  if (this.landingOffset()) this.view.extent = 3 * R;
   this.apply(this.view);
   this.applyMode();
   // The first frames lay out the canvas; re-apply the initial view once it has a real size, then trust the camera.
@@ -307,6 +309,13 @@ export class MoonView {
  }
 
  // ---------- camera ----------
+ private landingOffset() {
+  const body = document.body;
+  if (!body.matches(".planner[data-step=landing].panel-collapsed:not(.exploring)")) return 0;
+  const split = parseFloat(getComputedStyle(body).getPropertyValue("--hero-split")) / 100;
+  // Put the Moon's rim just below the hero split at the initial zoom.
+  return split - 0.14;
+ }
  private aspect() { const scene = this.viewer!.scene; return scene.drawingBufferWidth / Math.max(1, scene.drawingBufferHeight); }
  private canvasCenter() { const c = this.viewer!.scene.canvas; return new Cartesian2(c.clientWidth / 2, c.clientHeight / 2); }
  private surfacePoint(position: Cartesian2) {
@@ -317,7 +326,9 @@ export class MoonView {
  /** Current location, zoom (vertical extent in metres) and orientation, whichever projection is active. */
  private readView(): View {
   const camera = this.viewer!.scene.camera;
-  const point = this.surfacePoint(this.canvasCenter());
+  const center = this.canvasCenter();
+  center.y += this.cameraOffset * this.viewer!.canvas.clientHeight;
+  const point = this.surfacePoint(center);
   if (!point) return this.view;
   const c = Cartographic.fromCartesian(point, MOON)!;
   let extent: number;
@@ -331,13 +342,16 @@ export class MoonView {
   const camera = viewer.scene.camera;
   view = {...view, extent: Math.min(MAX_EXTENT, Math.max(MIN_EXTENT, view.extent))};
   const target = Cartesian3.fromDegrees(view.lon, view.lat, 0, MOON);
+  this.cameraOffset = this.landingOffset();
   if (this.mode === "map") {
    camera.switchToOrthographicFrustum();
-   camera.lookAt(target, new HeadingPitchRange(view.heading, -Math.PI / 2, ORTHO_DISTANCE));
    viewer.resize();
    const frustum = camera.frustum as unknown as {width: number; aspectRatio: number};
    frustum.aspectRatio = viewer.scene.drawingBufferWidth / viewer.scene.drawingBufferHeight;
-   frustum.width = view.extent * frustum.aspectRatio;
+   const width = view.extent * frustum.aspectRatio;
+   // Cesium derives the orthographic width from camera distance on wheel zoom.
+   camera.lookAt(target, new HeadingPitchRange(view.heading, -Math.PI / 2, this.cameraOffset ? width : ORTHO_DISTANCE));
+   frustum.width = width;
   } else {
    camera.switchToPerspectiveFrustum();
    const frustum = camera.frustum as unknown as {fov: number; fovy: number};
@@ -346,6 +360,7 @@ export class MoonView {
    camera.lookAt(target, new HeadingPitchRange(view.heading, view.pitch, distance));
   }
   camera.lookAtTransform(Matrix4.IDENTITY);
+  if (this.cameraOffset) camera.moveUp(view.extent * this.cameraOffset);
   this.view = view;
   viewer.scene.requestRender();
  }

@@ -1,0 +1,15 @@
+# Rebuilds the Hugging Face Space (which clones this repo) after every push to main.
+# One-time setup: add the repo secret HF_TOKEN (write token) and the repo variable HF_SPACE (e.g. yourname/moonmesh).
+name: Rebuild Hugging Face Space
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    if: ${{ vars.HF_SPACE != '' }}
+    steps:
+      - run: |
+          curl -fsS -X POST "https://huggingface.co/api/spaces/${{ vars.HF_SPACE }}/restart?factory=true" \
+            -H "Authorization: Bearer ${{ secrets.HF_TOKEN }}"
