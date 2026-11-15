@@ -1,7 +1,11 @@
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)
 $moonmeshPython = ".moonmesh-data/venv/Scripts/python.exe"
-if (!(Test-Path -LiteralPath $moonmeshPython)) {
+# Surface coverage needs the training venv (rasterio, numba) and its prepared terrain; use it when this machine has one.
+$trainingPython = if ($env:MOONMESH_DATA_ROOT) { Join-Path $env:MOONMESH_DATA_ROOT "venv\Scripts\python.exe" } else { "" }
+if ($trainingPython -and (Test-Path -LiteralPath $trainingPython)) {
+    $moonmeshPython = $trainingPython
+} elseif (!(Test-Path -LiteralPath $moonmeshPython)) {
     uv venv --python 3.13 .moonmesh-data/venv
     if ($LASTEXITCODE) { exit $LASTEXITCODE }
 }

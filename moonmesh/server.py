@@ -1,14 +1,29 @@
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from spiceypy.utils.exceptions import SpiceyError
 
+from . import costmodel
 from .data import LOCAL, SITES
-from .models import Mission
+from .models import Mission, MissionComparisonRequest
+from .network import compare_configurations
+from .excel import ExportRequest, export_workbook
 from .science import scenario
+from .mission_sim import reference_mission
 from . import tiles
 from ora.api import router as ora_router
+from ora.hazard_api import router as hazard_router
+try:  # Surface coverage needs the optional training environment (rasterio, numba, prepared terrain).
+    from moonmesh_train.coverage import router as coverage_router
+    from moonmesh_train.ml_compare import router as ml_compare_router  # experimental, not approved
+except ImportError as error:
+    import logging
+    coverage_router = ml_compare_router = None
+    logging.getLogger("moonmesh").warning("Surface coverage disabled (%s); start with the training venv to enable it.", error)
 
 app = FastAPI(title="MOONMESH", description="Lunar landing-site and communications planning prototype")
 
@@ -29,9 +44,72 @@ def config():
     return dict(defaults=Mission(), sites={k: v for k, v in SITES.items() if k not in LOCAL})
 
 
+@app.get("/api/status")
+def status():
+    """Preflight inventory: code revision, data present, models actually loaded, library versions."""
+    from ora.status import inventory
+    return inventory(hash_large=False)
+
+
 @app.post("/api/mission")
 def mission(body: Mission):
     return compute(body)
+
+
+class CostRequest(BaseModel):
+    result: dict
+    area: dict | None = None
+    scope: Literal["mission", "area"] = "mission"
+    satellite: costmodel.SatelliteSpec | None = None
+    coefficients: dict[str, float] | None = None
+
+
+@app.post("/api/cost/estimate")
+def cost_estimate(body: CostRequest):
+    """Dynamic cost of the applied network, from its node count, distances, area, mission length and optional satellite orbit."""
+    try:
+        return costmodel.estimate(body.result, body.area, scope=body.scope, satellite=body.satellite, overrides=body.coefficients)
+    except (KeyError, TypeError, IndexError) as error:
+        raise HTTPException(422, "Cannot price this snapshot. Recalculate the network and try again.") from error
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+
+
+@app.get("/api/mission/reference")
+def mission_reference():
+    try:
+        return reference_mission()
+    except FileNotFoundError as error:
+        raise HTTPException(503, str(error)) from error
+    except (SpiceyError, ValueError) as error:
+        raise HTTPException(422, f"Cannot run the Haworth reference mission: {error}") from error
+
+
+@app.get("/api/mission/reference/validation")
+def mission_reference_validation():
+    report = Path(__file__).resolve().parents[1] / "docs/figures/haworth_mission_validation.json"
+    if not report.is_file():
+        raise HTTPException(404, "No published benchmark report is available.")
+    return FileResponse(report, media_type="application/json")
+
+
+@app.post("/api/mission/compare-configurations")
+def mission_configurations(body: MissionComparisonRequest):
+    result = compute(body.mission, include_map=False)
+    try:
+        return compare_configurations(result, body.mission, body.alternatives)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+
+
+@app.post("/api/export/xlsx")
+def excel_export(body: ExportRequest):
+    try:
+        content = export_workbook(body)
+    except (KeyError, TypeError, ValueError, IndexError) as error:
+        raise HTTPException(422, "Cannot export this snapshot. Recalculate the network and try again.") from error
+    return Response(content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": 'attachment; filename="moonmesh-network-breakdown.xlsx"'})
 
 
 @app.post("/api/compare")
@@ -39,7 +117,7 @@ def compare(body: Mission):
     output = []
     for site in [s for s in SITES if s not in LOCAL]:
         result = compute(body.model_copy(update=dict(site=site, latitude=None, longitude=None)), include_map=False)
-        output.append({key: result[key] for key in ("site", "direct", "solar", "network", "worst", "recommended", "feasible")})
+        output.append({key: result[key] for key in ("site", "direct", "solar", "network", "worst", "recommended", "feasible", "assessment")})
     return output
 
 
@@ -65,7 +143,7 @@ def sensitivity(body: Mission):
     for label, changes in variants:
         try:
             result = compute(body.model_copy(update=changes), include_map=False)
-            rows.append(dict(label=label, direct=result["direct"], network=result["network"],
+            rows.append(dict(label=label, direct=result["direct"], network=result["network"], status=result["assessment"]["status"],
                              feasible=result["feasible"], count=len(result["recommended"]), eligible=result["eligible"]))
         except HTTPException as error:
             if not changes:
@@ -121,4 +199,8 @@ def terrain_site(lat: float, lon: float, half_width_m: float, size: int):
 
 
 app.include_router(ora_router)
+app.include_router(hazard_router)
+if coverage_router is not None:
+    app.include_router(coverage_router)
+    app.include_router(ml_compare_router)
 app.mount("/", StaticFiles(directory=Path(__file__).resolve().parents[1] / "web", html=True), name="web")

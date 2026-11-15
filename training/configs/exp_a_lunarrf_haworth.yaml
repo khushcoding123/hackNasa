@@ -1,0 +1,13 @@
+# Deterministic simulated comparison; no tuning on published layers.
+experiment: exp_a_lunarrf_haworth
+radio_profile: lunarrf_1p8
+label_origin: simulated
+site: haworth
+dem: derived/terrain/haworth/pgda90_dem_20m.tif
+reference_dir: derived/terrain/haworth/lunarrf
+catalog: interim/lunarrf/meta/data/atlas_base/candidates.csv
+h_tx_m: 4.0 # radio_params.json: mast_height_m
+h_rx_m: 1.5 # radio_params.json: rx_height_m
+spacing_m: 10
+comparison_threshold_dbm: -94.405 # Step 07 reporting threshold (rounded); aggregate count uses exact sensitivity.
+seed: 42

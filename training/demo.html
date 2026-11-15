@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src data:;">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MOONMESH · Offline Haworth</title>
+<style>
+body{background:#101927;color:#e5ecf5;font:16px system-ui;max-width:1100px;margin:25px auto;padding:0 20px}button,select{font:inherit;padding:9px;margin:5px;background:#243b50;color:white;border:1px solid #789;border-radius:5px}canvas{max-width:100%;background:#192334}#map{width:600px;image-rendering:pixelated}p{line-height:1.5}.panels{display:flex;gap:24px;flex-wrap:wrap}.detail{max-width:440px}#profile{width:440px}small{color:#b9cadc}a{color:#a2d9ff}
+</style>
+<h1>Haworth surface coverage</h1>
+<p>Offline · <strong>simulated</strong> deterministic map · NASA GSFC LOLA PGDA 90 · native terrain 20 m<br>TX at −86.8°, 337.2° E · RX 2 m · 2.4 GHz · 8 km range · 3 dB required margin</p>
+<button id="place">1. Place 5 m mast</button><button id="raise">2. Raise mast to 50 m</button>
+<label>Layer <select id="layer"><option value="class">RF covered / dead</option><option value="los">Geometric LOS</option><option value="margin">RF margin</option><option value="elevation">Elevation</option><option value="slope">Slope</option></select></label>
+<div class="panels"><div><canvas id="map" width="268" height="268" aria-label="Cached coverage map"></canvas><p id="legend"></p><small>White + = mast; yellow circle = inspected receiver.<br>Gray hatch = unknown. Click the yellow marker to inspect.</small></div>
+<div class="detail"><h2 id="height"></h2><p id="counts"></p><button id="inspect">Inspect ridge path</button><p id="details"></p><canvas id="profile" width="440" height="240" aria-label="Terrain and antenna chord profile"></canvas><p>Profile: gray terrain, cyan spherical chord, yellow obstruction marker. Distance in km; elevation in m.</p><p id="change"></p><p><a href="haworth_tx5m.zip">5 m native GeoTIFFs + provenance</a> · <a href="haworth_tx50m.zip">50 m export</a></p></div></div>
+<p><small>Unknown is excluded from covered/dead classes. Display center samples may omit narrow features; native GeoTIFFs retain every 20 m cell. No measured lunar RF validation. Vertical reference: null / TODO in source metadata. This cached walkthrough covers two fixed scenarios; arbitrary placements use the app.</small></p>
+<script id="cache" type="application/json">__CACHE__</script>
+<script>
+const data=JSON.parse(document.getElementById('cache').textContent);let active=0;
+const el=id=>document.getElementById(id),map=el('map'),ctx=map.getContext('2d');
+function inspect(){const p=data.scenarios[active].inspection;el('details').textContent=`Receiver ${p.latitude.toFixed(5)}°, ${p.longitude.toFixed(5)}° E: ${p.state}; LOS ${p.los?'clear':'ridge blocked'}; margin ${p.margin_db.toFixed(2)} dB; minimum clearance ${p.min_clearance_m.toFixed(2)} m. Obstruction ${ (p.obstruction_distance_m/1000).toFixed(2)} km from mast.`;
+ const c=el('profile'),g=c.getContext('2d'),pts=p.profile;g.clearRect(0,0,c.width,c.height);
+ const values=pts.flatMap(v=>[v.terrain_m,v.ray_m]).filter(v=>v!==null),lo=Math.min(...values)-3,hi=Math.max(...values)+3,end=pts.at(-1).distance_m;
+ const px=d=>45+d/end*380,py=z=>205-(z-lo)/(hi-lo)*180;
+ for(const [key,color] of [['terrain_m','#acb5c2'],['ray_m','#55d8ff']]){g.strokeStyle=color;g.beginPath();pts.forEach((v,i)=>{if(v[key]!==null)(i?g.lineTo.bind(g):g.moveTo.bind(g))(px(v.distance_m),py(v[key]));});g.stroke();}
+ g.strokeStyle='#ffdf60';g.beginPath();g.moveTo(px(p.obstruction_distance_m),20);g.lineTo(px(p.obstruction_distance_m),205);g.stroke();
+ g.fillStyle='#e5ecf5';g.font='12px system-ui';g.fillText(hi.toFixed(0)+' m',0,18);g.fillText(lo.toFixed(0)+' m',0,220);g.fillText('0 km',45,238);g.fillText((end/1000).toFixed(2)+' km',370,238);
+}
+function render(){const s=data.scenarios[active],m=s.response.metadata,l=s.response.layers,key=el('layer').value,a=l[key],h=a.length,w=a[0].length;map.width=w;map.height=h;const img=ctx.createImageData(w,h);
+const continuous=['elevation','slope','margin'].includes(key),values=a.flat().filter(v=>v!==null),lo=continuous?Math.min(...values):0,hi=continuous?Math.max(...values):1;
+for(let r=0;r<h;r++)for(let c=0;c<w;c++){let color;if(!l.valid[r][c])color=(r+c)%4<2?[95,101,115]:[45,50,65];else if(continuous){let f=(a[r][c]-lo)/(hi-lo||1);color=[Math.round(220*f),Math.round(190*(1-f)),170];}else color=a[r][c]===1?[57,181,144]:[208,89,85];let i=(r*w+c)*4;img.data.set([...color,255],i);}ctx.putImageData(img,0,0);
+ctx.strokeStyle='white';const t=m.display_transform,x=(m.tx_xy_m[0]-t[2])/t[0],y=(m.tx_xy_m[1]-t[5])/t[4];ctx.beginPath();ctx.moveTo(x-4,y);ctx.lineTo(x+4,y);ctx.moveTo(x,y-4);ctx.lineTo(x,y+4);ctx.stroke();ctx.strokeStyle='#ffe064';ctx.beginPath();ctx.arc(data.receiver.col+.5,data.receiver.row+.5,3.5,0,Math.PI*2);ctx.stroke();
+el('height').textContent=`Mast height: ${s.request.h_tx} m`;el('counts').textContent=`${m.covered_pixels.toLocaleString()} covered / ${m.valid_pixels.toLocaleString()} valid native cells. Display samples every ${m.display_stride*20} m.`;
+el('legend').textContent=continuous?`${key}: ${lo.toFixed(1)} to ${hi.toFixed(1)} ${m.units[key]}; green/blue low → pink high`:'Green = covered / clear; red = below margin / occluded; gray hatch = unknown';
+el('change').textContent=`Raising the mast changes RF coverage at ${data.changed_native_pixels.toLocaleString()} known native cells. The chosen receiver fails at 5 m and recovers at 50 m. A blocked ray may still have usable diffracted RF power.`;inspect();}
+el('place').onclick=()=>{active=0;render()};el('raise').onclick=()=>{active=1;render()};el('layer').onchange=render;el('inspect').onclick=inspect;map.onclick=inspect;render();
+</script></html>

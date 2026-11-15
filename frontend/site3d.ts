@@ -1,8 +1,9 @@
 import {
  ACESFilmicToneMapping, AmbientLight, BoxGeometry, BufferAttribute, BufferGeometry, CanvasTexture, Color, ConeGeometry, CylinderGeometry, DataTexture, DirectionalLight, FrontSide, Group, Line, LineBasicMaterial, LineDashedMaterial,
- Mesh, MeshBasicMaterial, MeshStandardMaterial, PerspectiveCamera, RepeatWrapping, Scene, SphereGeometry, Vector2, Vector3, WebGLRenderer, PCFSoftShadowMap, SRGBColorSpace,
+ Mesh, MeshBasicMaterial, MeshStandardMaterial, PerspectiveCamera, RepeatWrapping, Scene, SphereGeometry, Spherical, Vector2, Vector3, WebGLRenderer, PCFSoftShadowMap, SRGBColorSpace,
 } from "three";
 import {OrbitControls} from "three/examples/jsm/controls/OrbitControls.js";
+import {ViewCube, type Vec3} from "./viewcube.js";
 import {MOON_RADIUS_M} from "./terrain-mesh.js";
 import {
  BUNDLED_RESOLUTION_M, NAC_RESOLUTION_M, WAC_RESOLUTION_M, blendCentre, cropCentre, loadBundledPatch, loadWacPatch, loadWmsMosaic, nacLayerAt, withNac,
@@ -71,6 +72,7 @@ export class SiteView {
  private scene = new Scene();
  private camera = new PerspectiveCamera(50, 1, 5, 80_000);
  private controls: OrbitControls;
+ private cube: ViewCube | undefined;
  private sun = new DirectionalLight(0xfff4e0, 3.2);
  private ambient = new AmbientLight(0xc6cbd1, 0.9);
  private terrain: Mesh<BufferGeometry, MeshStandardMaterial[]> | undefined;
@@ -156,10 +158,11 @@ export class SiteView {
   this.resize();
   this.observer = new ResizeObserver(() => this.resize()); this.observer.observe(root);
   void this.load();
+  this.setupCube();
   const loop = () => {
    if (this.disposed) return;
    this.controls.update(); this.keepAboveGround(); this.sizePin();
-   this.renderer.render(this.scene, this.camera); this.placeLabels();
+   this.renderer.render(this.scene, this.camera); this.cube?.update(); this.placeLabels();
    this.frame = requestAnimationFrame(loop);
   };
   loop();
@@ -460,7 +463,7 @@ export class SiteView {
    (t.head.material as MeshBasicMaterial).color.copy(color);
    if (t.link) {
     (t.link.material as LineBasicMaterial).dispose();
-    t.link.material = up ? new LineBasicMaterial({color}) : new LineDashedMaterial({color, dashSize: 60, gapSize: 40});
+    t.link.material = up || off ? new LineBasicMaterial({color}) : new LineDashedMaterial({color, dashSize: 60, gapSize: 40});
     t.link.computeLineDistances();
    }
   }
@@ -548,6 +551,35 @@ export class SiteView {
   this.controls.update();
   this.updateSun();
  }
+
+ /** CAD-style view cube in the site's local frame: x east, y up, z south. */
+ private setupCube() {
+  const parent = this.el$, camera = this.camera, controls = this.controls;
+  const holder = document.createElement("div"); holder.className = "site3d-cube"; parent.append(holder);
+  const east: Vec3 = [1, 0, 0], up: Vec3 = [0, 1, 0], south: Vec3 = [0, 0, 1], neg = (v: Vec3): Vec3 => [-v[0], -v[1], -v[2]];
+  const look = (direction: Vec3) => {
+   // Move the camera to the given side of the target, keeping its distance, never below the horizon.
+   this.moved = true;   // cube navigation is the user's choice: imagery upgrades must not fly the camera away
+   const distance = camera.position.distanceTo(controls.target), d = new Vector3(...direction); d.y = Math.max(d.y, 0.04); d.normalize();
+   camera.position.copy(controls.target).addScaledVector(d, distance); controls.update();
+  };
+  this.cube = new ViewCube(holder, {
+   faces: [{label: "TOP", normal: up, up: neg(south)}, {label: "BOTTOM", normal: neg(up), up: south}, {label: "FRONT", normal: south, up},
+    {label: "BACK", normal: neg(south), up}, {label: "RIGHT", normal: east, up}, {label: "LEFT", normal: neg(east), up}],
+   axes: [east, neg(south), up],
+   basis: () => { const f = (x: number, y: number, z: number): Vec3 => { const v = new Vector3(x, y, z).applyQuaternion(camera.quaternion); return [v.x, v.y, v.z]; }; return {right: f(1, 0, 0), up: f(0, 1, 0), forward: f(0, 0, -1)}; },
+   orbit: (dx, dy) => {
+    this.moved = true;
+    const offset = camera.position.clone().sub(controls.target), spherical = new Spherical().setFromVector3(offset);
+    spherical.theta += dx * 0.012; spherical.phi = Math.min(Math.PI / 2 - 0.01, Math.max(0.02, spherical.phi - dy * 0.01));
+    camera.position.copy(controls.target).add(offset.setFromSpherical(spherical)); controls.update();
+   },
+   snap: direction => look(direction),
+   home: () => { this.moved = true; this.overview(); },
+   menu: [{label: "Home view", run: () => { this.moved = true; this.overview(); }}, {label: "Top", run: () => look([0, 1, 0])}, {label: "Front · south", run: () => look([0, 0, 1])},
+    {label: "Back · north", run: () => look([0, 0, -1])}, {label: "Right · east", run: () => look([1, 0, 0])}, {label: "Left · west", run: () => look([-1, 0, 0])}],
+  });
+ }
  private overview() {
   this.camera.position.set(-this.half * 0.9, this.half * 0.75, this.half * 1.1);
   this.controls.target.set(0, 0, 0);
@@ -609,7 +641,7 @@ export class SiteView {
  }
 
  dispose() {
-  this.disposed = true; cancelAnimationFrame(this.frame); this.abort.abort(); this.controls.dispose(); this.observer.disconnect();
+  this.disposed = true; this.cube?.dispose(); cancelAnimationFrame(this.frame); this.abort.abort(); this.controls.dispose(); this.observer.disconnect();
   this.scene.traverse(o => { if (o instanceof Mesh || o instanceof Line) { o.geometry.dispose(); (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => { if (m instanceof MeshStandardMaterial) m.map?.dispose(); m.dispose(); }); } });
   this.grain?.dispose();
   this.renderer.dispose(); this.el$.remove();

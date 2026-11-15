@@ -24,7 +24,7 @@ Each step is a command. Re-running with the same seed gives the same models.
    - **Coverage surrogate.** 1,500 cells are sampled from each of five lunar sites. The label is the exact viewshed share computed by line of sight. Features are the cheap ones above.
 3. **Validate.** Both models use spatial cross-validation: one whole region or site is held out per fold. Random splits would leak, because neighbouring cells are near-duplicates.
 4. **Read the model card.** `ora/model_card.json` records the date, seed, features, counts, per-fold metrics and limits. The app shows it under Models & limits.
-5. **Use.** `ora/scenario.py` loads the siting prior, scores every candidate, and passes the scores to the optimizer as path costs and tie-breaks. If the model file is missing, the app falls back to a terrain heuristic and says so.
+5. **Use.** The app no longer ranks lunar relay candidates with these models. `ora/scenario.py` ranks candidates by their computed 8 km viewshed share and passes those scores to the optimizer as path costs and tie-breaks, because that computation beats the models against dense line-of-sight truth and costs no more ([ACCURACY.md](ACCURACY.md)). The models remain for research, benchmarks and the stress suite. `python -m ora accuracy` trains two newer models (a view estimator and a gain selector) on development windows and scores them on untouched windows.
 
 ### Measured (seed 0)
 

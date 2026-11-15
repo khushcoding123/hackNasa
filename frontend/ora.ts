@@ -1,11 +1,11 @@
 // ORA lab: relay placement, resilience, digital twin, lunar night, underground, lasers.
 // API payloads are documented in ora/api.py; they are typed loosely here.
 type J = any;
-export {};
+import {assessmentBadge, assessmentHtml, modelsHtml} from "./evidence.js";
 
 const $=<T extends HTMLElement=HTMLElement>(q:string)=>document.querySelector<T>(q)!;
 const form=$<HTMLFormElement>("#scenario"), view=$("#view");
-const C={cyan:"#84deff",green:"#73d8ae",amber:"#f4ba72",red:"#f2848c",muted:"#a9bacd",text:"#edf5ff",violet:"#bba9ff",grid:"#29435a",bg:"#0c1520"};
+const C={cyan:"#33adff",green:"#3ddc97",amber:"#ffb84d",red:"#ff6b6b",muted:"#a1a1aa",text:"#ffffff",violet:"#bba9ff",grid:"#2c2c31",bg:"#0a0a0b"};
 const TABS:Record<string,[string,string,string]>={
  network:["01 / PLACE RELAYS","Relays for a lunar mine.","The model proposes sites. Line of sight on real terrain decides."],
  resilience:["02 / RESILIENCE LAB","What breaks first?","Fail nodes and links, and compare real terrain with idealized networks."],
@@ -17,7 +17,7 @@ const TABS:Record<string,[string,string,string]>={
  access:["08 / EARTH ACCESS","Where does Earth shine?","How much of a year Earth is above the horizon near the pole, and which link layouts survive failures."],
  data:["MODELS & LIMITS","What was trained, and how far to trust it.","Measured results, data sources and known limits."],
 };
-let tab="network", net:J, lab:J, sim:J, nightResult:J, mine:J, earthMine:J, beam:J, conf:J, cover:J, dteData:J, topo:J, stress:J;
+let tab="network", net:J, lab:J, sim:J, nightResult:J, mine:J, earthMine:J, beam:J, conf:J, cover:J, dteData:J, topo:J, stress:J, accuracy:J;
 let hour=0, layer="score", mode="betweenness", minePolicy="resilient", kills:{node:number;hour:number}[]=[], busy=0;
 
 const n=(x:number|null|undefined,d=1)=>x==null||Number.isNaN(x)?"—":x.toFixed(d);
@@ -72,7 +72,7 @@ function shadeImage(){
  rows.forEach((row,y)=>row.forEach((v,x)=>{const i=4*(y*image.width+x);data.data[i]=v*.62;data.data[i+1]=v*.68;data.data[i+2]=v*.8;data.data[i+3]=255;}));
  ctx.putImageData(data,0,0);shadeCache={key:k,image};return image;
 }
-const ROLE:Record<string,string>={gateway:C.cyan,relay:C.green,mine:C.amber,candidate:"#7d8da3"};
+const ROLE:Record<string,string>={gateway:C.cyan,relay:C.green,mine:C.amber,candidate:"#8a8a94"};
 interface MapState{nodes:J[];edges:{a:number;b:number;color:string;dash?:boolean}[];color:(node:J)=>string;label?:(node:J)=>string;pick?:(node:J)=>void}
 function drawMap(id:string,state:MapState,overlay?:string){
  const c=canvas(id);if(!c)return;
@@ -94,7 +94,7 @@ function drawMap(id:string,state:MapState,overlay?:string){
   ctx.fillStyle=state.color(v);ctx.beginPath();
   if(v.role==="mine")ctx.rect(x-5,y-5,10,10);else ctx.arc(x,y,big?5.5:2.4,0,2*Math.PI);
   ctx.fill();
-  if(big){ctx.strokeStyle="#07101a";ctx.lineWidth=1.2;ctx.stroke();ctx.font="11px monospace";ctx.fillStyle=C.text;ctx.fillText(state.label?state.label(v):String(v.id),x+8,y-6);}
+  if(big){ctx.strokeStyle="#050506";ctx.lineWidth=1.2;ctx.stroke();ctx.font="11px monospace";ctx.fillStyle=C.text;ctx.fillText(state.label?state.label(v):String(v.id),x+8,y-6);}
  }
  const km=5, bar=km*1000/net.pixel_m*scale;
  ctx.fillStyle=C.text;ctx.font="11px monospace";ctx.fillRect(x0+10,y0+side-14,bar,2);ctx.fillText(km+" km",x0+10,y0+side-19);ctx.fillText("GRID N ↑",x0+10,y0+16);
@@ -139,7 +139,7 @@ function drawMine(id:string,data:J,policy:string){
  const result=data.policies[policy], worst=result.worst_collapse as string|null;
  for(const [a,b] of data.segments as string[][]){
   const collapsed=worst===`${a}-${b}`||worst===`${b}-${a}`;
-  ctx.strokeStyle=collapsed?C.red:"#3d566f";ctx.lineWidth=collapsed?5:7;ctx.lineCap="round";ctx.beginPath();ctx.moveTo(...at(data.junctions[a]));ctx.lineTo(...at(data.junctions[b]));ctx.stroke();
+  ctx.strokeStyle=collapsed?C.red:"#3a3a40";ctx.lineWidth=collapsed?5:7;ctx.lineCap="round";ctx.beginPath();ctx.moveTo(...at(data.junctions[a]));ctx.lineTo(...at(data.junctions[b]));ctx.stroke();
  }
  ctx.font="11px monospace";
  for(const [name,radio] of Object.entries(result.radios) as [string,J][]){
@@ -165,13 +165,14 @@ function networkView(){
  const fragile=table(["Node","Role","Sunlight","Earth view","Mines linked if lost"],net.fragile.map((f:J)=>{const v=byId.get(f.id);return [String(f.id),f.role,pct(v.sun),pct(v.earth),`${pct(f.served_if_lost)} ${f.served_if_lost<1?'<span class="pill warn">critical</span>':""}`];}));
  const paths=Object.entries(net.structure.disjoint_paths as Record<string,number>).map(([id,k])=>`Mine ${id}: ${k} independent path${k===1?"":"s"}`).join(" · ");
  return kpis()+`<div class="split">${panel("Terrain, candidates and the chosen network",layers+`<canvas id="map" class="ora-map" aria-label="Terrain map with candidate sites, chosen relays, gateways and mining sites"></canvas>`+
-  key([[C.cyan,"gateway (sees Earth)"],[C.green,"chosen relay"],[C.amber,"mining site"],["#7d8da3","candidate"],["rgba(242,132,140,.8)","dead zone (coverage layer)"]])+
+  key([[C.cyan,"gateway (sees Earth)"],[C.green,"chosen relay"],[C.amber,"mining site"],["#8a8a94","candidate"],["rgba(242,132,140,.8)","dead zone (coverage layer)"]])+
   `<p class="caption">${esc(net.site)} · ${net.nodes.length} sites · ${net.all_edges.toLocaleString()} line-of-sight links within ${n(net.scenario.max_range_km,0)} km.</p>`)}
- ${panel("Placement",`<p class="callout ${p.feasible?"":"amber"}">${p.feasible?"Best evaluated relay set · every mining site linked in static graph":"Best evaluated relay set · some mining sites unreachable"}</p>`+readout([
-  ["Siting scores",esc(net.score_method)],["Chain relays",p.chain.join(", ")||"none needed"],["Spare relays",p.added.join(", ")||"none added"],["Gateways",p.gateways.join(", ")],
+ ${panel("Placement",`<p>${assessmentBadge(net.assessment)}</p><p class="callout ${p.feasible?"":"amber"}">${p.feasible?"Best evaluated relay set · every mining site linked in static graph":"Best evaluated relay set · some mining sites unreachable"}</p>`+readout([
+  ["Siting scores",esc(net.score_method)+(net.score_evidence?.fallback?' <span class="pill warn">fallback</span>':"")],["Chain relays",p.chain.join(", ")||"none needed"],["Spare relays",p.added.join(", ")||"none added"],["Gateways",p.gateways.join(", ")],
   ["After any one failure","mean "+pct(p.mean_after_failure)+" · worst "+pct(p.worst_after_failure)],["Independent paths",paths||"—"]])+
   `<p class="note">Stage 1 connects each mining site to a gateway along the cheapest line-of-sight chain, steering toward sunlit, high-scoring ground. Stage 2 adds spare relays where they most improve what survives a single failure. This is a heuristic search over the screened candidates, not a proven optimum.</p>`)}</div>`+
-  panel("What breaks first",fragile+`<p class="note">Each row removes one node from the chosen network and counts the mining sites that can still reach a gateway.</p>`)+partsPanel()+coveragePanel();
+  panel("What breaks first",fragile+`<p class="note">Each row removes one node from the chosen network and counts the mining sites that can still reach a gateway.</p>`)+
+  panel("Requirements status",assessmentHtml(net.assessment))+partsPanel()+coveragePanel();
 }
 function partsPanel(){
  const rows=(net.configs as J[]).map(c=>[String(c.id),esc(c.role),esc((c.parts as J[]).map(p=>p.module).join(", ")),n(c.mass_kg,1)+" kg",n(c.power_w,1)+" W",esc((c.notes as string[]).join(" · ")||"—")]);
@@ -180,8 +181,8 @@ function partsPanel(){
 }
 function coveragePanel(){
  const body=cover?readout([["Sites chosen",cover.sites.map((x:J)=>x.id).join(", ")],["Ground seen",pct(cover.coverage)+" of sampled points"],["Random sets of the same size",pct(cover.random_coverage)],["Line of sight computed for",`${cover.los_rows} of ${cover.candidates} candidates`]])
-  +`<p class="note">The trained surrogate shortlists ${cover.shortlist} candidates from terrain and skyline features; exact line of sight then picks the best set inside the shortlist. This is the coverage-first alternative to the mine-linking placement above.</p>`
-  :`<p class="note">Choose sites for the most ground seen instead of for linking the mines. The surrogate shortlists candidates and exact line of sight decides.</p>`;
+  +`<p class="note">${esc(cover.method)}: every candidate's line of sight to ${cover.targets} sampled ground points is computed, and sites are added one at a time by how much new ground each one sees. This is the coverage-first alternative to the mine-linking placement above.</p>`
+  :`<p class="note">Choose sites for the most ground seen instead of for linking the mines. Every candidate is checked by exact line of sight.</p>`;
  return panel("Coverage-first sites",`<div class="ora-grid"><label>Relays<input id="cover-budget" type="number" min="1" max="16" value="${cover?cover.sites.length:6}"></label><button id="run-cover" class="primary">Choose for coverage</button></div>`+body);
 }
 function paintNetwork(){
@@ -252,9 +253,9 @@ function twinView(){
  ${metric("LONGEST LOCAL OUTAGE",n(s.longest_gateway_outage_h,0)+" h","mines cut off from every gateway",s.longest_gateway_outage_h?"amber":"green")}${metric("RELAYS FROZEN",String(s.frozen.length),s.frozen.length?"nodes "+s.frozen.join(", "):"none below −60 °C",s.frozen.length?"red":"green")}
  ${metric("LASER FEEDS · OPTICAL TRUNKS",`${s.beams} · ${s.optical_trunks}`,"active in this run")}</div>`+
  `<div class="split">${panel("Network state",`<canvas id="twin-map" class="ora-map" aria-label="Network state at the selected hour"></canvas><input id="hour" class="time" type="range" min="0" max="${sim.times.length-1}" value="${hour}" aria-label="Hour of the simulation"><p id="clock" class="caption"></p>`+
-  key([[C.green,"relaying"],[C.violet,"hibernating"],["#5b6b80","off or dead"],[C.red,"frozen"],[C.cyan,"gateway seeing Earth"],[C.amber,"laser power feed",true]]))}
+  key([[C.green,"relaying"],[C.violet,"hibernating"],["#6b6b75","off or dead"],[C.red,"frozen"],[C.cyan,"gateway seeing Earth"],[C.amber,"laser power feed",true]]))}
  ${panel("Nodes at this hour",`<div id="twin-table"></div>`)}</div>`+
- hazardPanel()+panel("Service over time",`<canvas id="service" class="ora-chart" aria-label="Share of mining sites linked over time"></canvas>${key([[C.green,"linked to a gateway",true],[C.cyan,"linked to Earth",true]])}`)+controls;
+ panel("Scenario status",assessmentHtml(sim.assessment))+hazardPanel()+panel("Service over time",`<canvas id="service" class="ora-chart" aria-label="Share of mining sites linked over time"></canvas>${key([[C.green,"linked to a gateway",true],[C.cyan,"linked to Earth",true]])}`)+controls;
 }
 function hazardPanel(){
  const swaps:J[]=sim.module_swaps||[], blast=sim.blast, dust:J[]=sim.dust_failures||[];
@@ -267,11 +268,11 @@ function hazardPanel(){
 }
 function paintTwin(){
  if(!sim||!document.querySelector("#twin-map"))return;
- const t=hour, modeColor=(v:J)=>v.frozen_h!=null&&v.frozen_h<=t*sim.step_h?C.red:v.mode[t]===2?(v.role==="gateway"&&v.earth?.[t]?C.cyan:v.role==="mine"?C.amber:C.green):v.mode[t]===1?C.violet:"#5b6b80";
+ const t=hour, modeColor=(v:J)=>v.frozen_h!=null&&v.frozen_h<=t*sim.step_h?C.red:v.mode[t]===2?(v.role==="gateway"&&v.earth?.[t]?C.cyan:v.role==="mine"?C.amber:C.green):v.mode[t]===1?C.violet:"#6b6b75";
  const base=new Map<number,J>(net.nodes.map((v:J)=>[v.id,v]));
  const nodes=sim.nodes.map((v:J)=>({...v,x:base.get(v.id).x,y:base.get(v.id).y}));
  drawMap("twin-map",{nodes,color:modeColor,label:(v:J)=>`${v.id} ${v.role==="mine"?"":n(v.temp_c[t],0)+"°C"}`,
-  edges:[...sim.edges.map((e:J)=>({a:e.a,b:e.b,color:e.up[t]==="1"?(e.kind==="optical"?"rgba(132,222,255,.95)":"rgba(115,216,174,.9)"):"rgba(242,132,140,.55)",dash:e.up[t]!=="1"})),
+  edges:[...sim.edges.map((e:J)=>({a:e.a,b:e.b,color:e.up[t]==="1"?(e.kind==="optical"?"rgba(132,222,255,.95)":"rgba(115,216,174,.9)"):"rgba(242,132,140,.55)",dash:false})),
    ...sim.beams.map((b:J)=>({a:b.source,b:b.target,color:C.amber,dash:true}))],
   pick:(v:J)=>{if(v.role==="mine")return;kills=[...kills.filter(k=>k.node!==v.id),{node:v.id,hour:t*sim.step_h}];status(`Node ${v.id} will fail at hour ${t*sim.step_h}. Run the twin to apply.`);render();}});
  $("#clock").textContent=`${sim.times[t].slice(0,16).replace("T"," ")} UTC · hour ${t*sim.step_h} · ${pct(sim.served_gateway[t])} of mines linked to a gateway, ${pct(sim.served_earth[t])} to Earth`;
@@ -334,17 +335,36 @@ function paintAccess(){
  g.forEach((row,y)=>row.forEach((v,x)=>{if(v==null)return;const t=Math.max(0,Math.min(1,v));ctx.fillStyle=`rgb(${Math.round(20+110*t)},${Math.round(45+170*t)},${Math.round(80+175*t)})`;ctx.fillRect(x0+x*cell,y0+y*cell,cell+.5,cell+.5);}));
  ctx.fillStyle=C.text;ctx.font="11px monospace";ctx.fillText("pole at centre · 85°S at the edge",x0+8,y0+side-8);
 }
+function accuracyPanel(){
+ if(!accuracy)return panel("Accuracy against independent truth",`<p class="note">No saved accuracy report. Run <code>python -m ora accuracy</code>.</p>`);
+ const h=accuracy.coverage.hold, l=accuracy.coverage.legacy, app="computed sweep used by the app (120 rays, 20 m steps)", fast="fast view estimator (24-ray sweep + learned correction)";
+ const old=(o:J)=>Object.entries(o).find(([k])=>k.startsWith("old coverage surrogate"))?.[1] as J;
+ const sel=(split:string)=>Object.values(accuracy.selection[split] as Record<string,J>).map((b:J)=>b.new_learned_selector?.mean_pct_of_exact).filter((v:J)=>v!=null);
+ const range=(v:number[])=>v.length?`${n(Math.min(...v),1)}–${n(Math.max(...v),1)}%`:"—";
+ const rk=(split:string)=>accuracy.ranking[split];
+ const rows=[["How much ground a relay sees (app)",`R² ${n(h[app].r2_pct,1)}% · ${n(l[app].r2_pct,1)}%`,`R² ${n(old(h)?.r2_pct,1)}% · ${n(old(l)?.r2_pct,1)}% (old surrogate)`],
+  ["Fast learned view estimator",`R² ${n(h[fast].r2_pct,1)}% · ${n(l[fast].r2_pct,1)}%`,"—"],
+  ["Ranking relay candidates (app)",`${n(rk("hold")["app now: computed viewshed share"],1)}% · ${n(rk("legacy")["app now: computed viewshed share"],1)}%`,`${n(rk("hold")["app before: surrogate 80% + Earth prior 20%"],1)}% · ${n(rk("legacy")["app before: surrogate 80% + Earth prior 20%"],1)}% (rank correlation)`],
+  ["Coverage-first relay selection (app)","exact greedy","about 55% of exact on Shackleton (old shortlist)"],
+  ["Learned selector without line of sight",`${range(sel("hold"))} · ${range(sel("legacy"))} of exact greedy`,"74.5–90.3% (old gain model)"],
+  ["Earth tower siting model",`AUC ${n(accuracy.earth_siting_prior.auc_pct,1)}%`,"no longer used to rank lunar relays"]];
+ return panel("Accuracy against independent truth",table(["What","Now (holdout · legacy test)","Before"],rows)+
+  `<p class="note">Truth for coverage is dense line of sight to ${accuracy.protocol.truth_rays.toLocaleString()} random ground points per site. Methods were chosen and trained on ${accuracy.protocol.dev_windows} development windows only; the ${accuracy.protocol.hold_windows} holdout windows (buffered from development) and ${accuracy.protocol.legacy_windows} legacy test windows were scored once. See <code>docs/ACCURACY.md</code>.</p>`);
+}
 function dataView(){
- const card=conf.model_card;
- if(!card)return panel("Models",`<p class="callout amber">No trained models found. Run <code>python -m ora.data --earth</code> then <code>python -m ora.train</code>. Until then siting uses a transparent terrain heuristic.</p>`);
+ const card=conf.model_card, models:J[]=conf.models||[], missing=models.filter(m=>!m.loaded);
+ const acc=accuracyPanel();
+ const active=panel("Loaded in this server now",(missing.length?`<p class="callout amber">${missing.length} of ${models.length} trained models are not loaded, so results use the fallback listed below.</p>`:`<p class="callout">All ${models.length} trained models loaded from the files listed below.</p>`)+modelsHtml(conf.models)+
+  `<p class="note">This table is read from the running server. The figures further down are the training record (model card${card?.trained?`, trained ${esc(card.trained)}`:""}); they describe how the models were evaluated when trained, not that they are active. Run <code>python -m ora preflight</code> for the full inventory.</p>`);
+ if(!card)return acc+active+panel("Training record",`<p class="callout amber">No model card found. Run <code>python -m ora.data --earth</code> then <code>python -m ora.train</code>. Until then siting uses a transparent terrain heuristic.</p>`);
  const p=card.siting_prior,s=card.coverage_surrogate,g=card.marginal_gain;
  const checks=stress?Object.entries(stress.checks as Record<string,J>):[];
- return `<div class="metrics">${metric("SITING PRIOR · AUC",n(p.mean_auc,2),"held-out Earth regions (0.5 is chance)","green")}${metric("TOWERS FOUND IN TOP 10%",pct(p.mean_recall_top10pct),"chance would find 10%")}${metric("COVERAGE SURROGATE · RANK",n(s.mean_spearman,2),"Spearman, held-out lunar blocks")}${metric("COVERAGE SURROGATE · R²",n(s.mean_r2,2),`${s.windows} lunar windows, spatial folds`,s.mean_r2>=0.6?"green":"amber")}</div>`+
+ return acc+active+`<h2 class="section-title">Training record (historical, from the model card)</h2><div class="metrics">${metric("SITING PRIOR · AUC",n(p.mean_auc,2),"held-out Earth regions (0.5 is chance)","green")}${metric("TOWERS FOUND IN TOP 10%",pct(p.mean_recall_top10pct),"chance would find 10%")}${metric("COVERAGE SURROGATE · RANK",n(s.mean_spearman,2),"Spearman, held-out lunar blocks")}${metric("COVERAGE SURROGATE · R²",n(s.mean_r2,2),`${s.windows} lunar windows, spatial folds`,s.mean_r2>=0.6?"green":"amber")}</div>`+
  panel("Siting prior: where towers stand on Earth",table(["Held-out region","Towers","AUC","Towers in top 10%","View-only baseline AUC"],p.folds.map((f:J)=>[f.held_out,String(f.towers),n(f.auc,3),pct(f.recall_top10pct),n(f.viewshed_only_auc,3)]))+
   `<p class="note">Labels: ${esc(p.labels)}. Terrain: ${esc(p.terrain)}. Validation: ${esc(p.cross_validation)}, so the score is always tested on a region it never saw.</p><ul class="ora-list">${p.limits.map((x:string)=>`<li>${esc(x)}</li>`).join("")}</ul>`)+
  panel("Coverage surrogate: predicting a site's view on the Moon",table(["Fold","Cells","R²","Rank correlation","Mean error"],s.folds.map((f:J)=>[String(f.fold+1),f.cells.toLocaleString(),n(f.r2,2),n(f.spearman,2),n(f.mean_abs_error,3)]))+
   `<p class="note">${esc(s.task)}. Cross-validation: ${esc(s.cross_validation)}. It screens candidates; the app still computes exact line of sight for the final set.${g?` A second model (${esc(g.task)}, ${g.training_rows.toLocaleString()} examples) picks sites without a line-of-sight matrix.`:""}</p>`)+
- (checks.length?panel(`Stress tests: ${stress.summary.passed} of ${stress.summary.total} pass`,table(["Check","Value","Criterion","Result"],checks.map(([k,v])=>[esc(k.replaceAll("_"," ")),esc(typeof v.value==="number"?n(v.value,3):v.value),esc(v.criterion),pill(!!v.passed,"pass","fail")]))+`<p class="note">Run on sealed lunar windows and Earth tiles that training never read (<code>python -m ora stress</code>). Criteria were written before the results were seen.</p>`):"")+
+ (checks.length?panel(`Stress tests (saved report): ${stress.summary.passed} of ${stress.summary.total} pass`,`<p class="callout ${stress.provenance?"":"amber"}">${stress.provenance?`Generated ${esc(stress.provenance.generated)} at commit ${esc(String(stress.provenance.code?.commit??"?").slice(0,10))}; ${Object.entries(stress.provenance.models||{}).every(([k,v])=>(conf.models||[]).find((m:J)=>m.name===k)?.sha256===v)?"model hashes match the loaded models":"model hashes differ from the loaded models, so these results describe other files"}.`:"Saved before reports recorded a date or model hashes, so it cannot be tied to the loaded models. Rerun python -m ora stress."}</p>`+table(["Check","Value","Criterion","Result"],checks.map(([k,v])=>[esc(k.replaceAll("_"," ")),esc(typeof v.value==="number"?n(v.value,3):v.value),esc(v.criterion),pill(!!v.passed,"pass","fail")]))+`<p class="note">Run on sealed lunar windows and Earth tiles that training never read (<code>python -m ora stress</code>). Criteria were written before the results were seen.</p>`):"")+
  panel("What this tool does not claim",`<ul class="ora-list"><li>No placement is optimal. The search is heuristic over screened candidates.</li><li>The twin runs on simulated telemetry, bounded by 20 m terrain.</li><li>Tunnel radio numbers are placeholders until fitted from a bench test; a bench test validates the method, not lunar values.</li><li>Laser power is evaluated as a technology. It is not flight heritage.</li><li>"Not found in our search" is not "does not exist" for prior work.</li></ul>`);
 }
 
@@ -388,7 +408,7 @@ async function loadAccess(){
  if(!topo)topo=await task("Comparing layouts…",()=>api("topologies"));
  render();
 }
-async function loadStress(){stress=(await task("Loading stress results…",()=>api("stress")))??null;render();}
+async function loadStress(){const saved=await task("Loading saved results…",()=>Promise.all([api("stress"),api("accuracy")]));stress=saved?.[0]??null;accuracy=saved?.[1]??null;render();}
 async function buildNetwork(){
  if(busy||!form.reportValidity())return;
  const submit=$<HTMLButtonElement>('#scenario button[type="submit"]');
