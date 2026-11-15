@@ -1,0 +1,29 @@
+# Planned transmitter-conditioned deterministic-label pilot.
+experiment: exp_b_haworth_pilot
+radio_profile: moonmesh_2p4_ref
+label_origin: simulated
+site: haworth
+latitude_deg: -86.8
+longitude_deg: 337.2 # East longitude
+grid_resolution_m: 20
+tx_heights_m: [5, 10, 20, 50]
+rx_height_m: 2
+max_range_m: 8000
+seed: 42
+pilot_transmitters: 150
+min_spacing_m: 500
+block_size_m: 5000
+# Terrain-only sampling rules, fixed before any coverage-label inspection.
+# Observed terrain percentiles: relative elevation p20=-14.74m/p80=15.77m;
+# slope p90=19.77deg. Rounded sampling strata, not semantic ground truth.
+terrain_strata:
+  relative_elevation_radius_m: 1000
+  crest_min_m: 15
+  shoulder_min_m: 0
+  floor_max_m: -15
+  steep_min_deg: 20
+buffer_m: 8000
+deployment_radius_m: 8000
+split_fractions: [0.70, 0.15, 0.15]
+split_layout_trials: 256
+footprint_report_resolution_m: 100

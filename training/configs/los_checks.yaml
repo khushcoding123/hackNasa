@@ -1,0 +1,7 @@
+seed: 42
+site_config: exp_b_haworth_pilot.yaml
+pair_count: 50
+max_range_m: 8000
+h_tx_m: 5
+h_rx_m: 2
+spacings_m: [10, 5, 2.5]

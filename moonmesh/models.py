@@ -24,6 +24,8 @@ class Mission(BaseModel):
     blackout_hours: float = Field(default=24, ge=0, le=1440)
     darkness_hours: float = Field(default=72, ge=0, le=1440)
     max_relays: int = Field(default=2, ge=0, le=4)
+    budget_usd: float | None = Field(default=None, ge=0, le=1e12, allow_inf_nan=False)
+    relay_cost_usd: float | None = Field(default=None, ge=0, le=1e12, allow_inf_nan=False)
     deployment_km: float = Field(default=8, ge=1, le=8)
     slope_limit: float = Field(default=15, gt=0, le=45)
     observer_m: float = Field(default=2, ge=0.1, le=100)
@@ -53,6 +55,10 @@ class Mission(BaseModel):
     dust_cleaning_per_day: float = Field(default=0, ge=0, le=1)
     dust_solar_loss: float = Field(default=0.8, ge=0, le=1)
     resilient: bool = False
+    # Deployment feasibility and failure what-ifs. None means "use the relay slope limit".
+    route_slope_limit: float | None = Field(default=None, gt=0, le=45)
+    avoid_hazard_routes: bool = True   # when true (the default), relays whose straight traverse crosses terrain steeper than the limit are not selectable
+    power_loss_hours: float = Field(default=24, ge=1, le=720)
     latitude: float | None = Field(default=None, ge=-90, le=-85)
     longitude: float | None = Field(default=None, ge=-180, le=360)
     dem_bias_m: float = Field(default=0, ge=-30, le=30)
@@ -70,3 +76,19 @@ class Mission(BaseModel):
         if (self.latitude is None) != (self.longitude is None):
             raise ValueError("Enter both custom coordinates or leave both blank.")
         return self
+
+
+class RelayConfiguration(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    relay_ids: list[str] = Field(max_length=4)
+
+    @model_validator(mode="after")
+    def validate_ids(self):
+        if len(set(self.relay_ids)) != len(self.relay_ids):
+            raise ValueError("A configuration cannot install the same relay twice.")
+        return self
+
+
+class MissionComparisonRequest(BaseModel):
+    mission: Mission
+    alternatives: list[RelayConfiguration] = Field(min_length=1, max_length=4)

@@ -14,6 +14,8 @@ from lunar_core.terrain import (
     MOON_RADIUS_M, TerrainGrid, polar_stereographic_south, polar_stereographic_south_inverse, radial_points,
 )
 
+from .costs import cost_report
+from .diagnostics import deployment_report, explain_candidate, power_loss_simulation
 from .environment import CASES, node_states, public_state, optimize_environment
 from .data import DATA, LOLA, PRODUCTS, SITES, activate
 from .evidence import NOT_MODELLED, assess, check, gap
@@ -183,6 +185,7 @@ def scenario(mission, include_map=True):
     direct, solar, horizon, sample = visibility(mission.site, lander, times, mission)
     slope = slopes(mission.site)
     options = candidates(grid, slope, x, y, mission)
+    slope_surface = TerrainGrid(slope, grid.x_left, grid.y_top, grid.pixel_size_m)
     geometric_direct = direct.copy()
     quality = np.array(sample["status"])  # data quality per sample, before environment reasons are written in
     lander_states = node_states(mission, solar, sample['solar_known'], lander=True)
@@ -197,7 +200,7 @@ def scenario(mission, include_map=True):
     relays = []
     geometric_relays = []
     relays_low, relays_high = {case: [] for case in CASES}, {case: [] for case in CASES}
-    eligible = []
+    eligible, usable = [], []   # usable = could carry traffic; eligible = usable and allowed by the traverse rule
     for idx, candidate in enumerate(options):
         relay = Observer(candidate["lat"], candidate["lon"], candidate["elevation"], mission.mast_m)
         los, distance = surface_path(grid, lander, relay)
@@ -218,19 +221,32 @@ def scenario(mission, include_map=True):
         reserve = (states['cold_dust']['soc'] * mission.battery_hours).tolist()
         link = relay_cases['cold_dust'][-1]
         relays.append(link)
+        deployment = deployment_report(grid, slope_surface, (x, y), candidate, mission)
         if any(relay_cases[case][-1].any() for case in CASES):
-            eligible.append(idx)
+            usable.append(idx)
+            if not (mission.avoid_hazard_routes and deployment["verdict"] == "hazard"):
+                eligible.append(idx)
         candidate.update(los=los, surface_margin=local_margin, earth=metrics(rf, hours),
                          solar=metrics(sunlight, hours), power=metrics(powered, hours),
                          coverage=metrics(link, hours), recovered=float((link & ~direct).mean()*100),
                          temporal_coverage=link.tolist(), sunlight=sunlight.tolist(), powered=powered.tolist(),
                          reserve=reserve, minimum_reserve=min(reserve), minimum_earth_margin=min(relay_sample["rf_margin"]),
                          unknown_samples=relay_sample["status"].count("uncertain"),
-                         environment={case: public_state(states[case], mission) for case in CASES})
+                         environment={case: public_state(states[case], mission) for case in CASES},
+                         deployment=deployment,
+                         limiting=explain_candidate(los, surface_ok, local_margin >= mission.surface_radio.margin, relay_sample,
+                                                    states['cold_dust'], sunlight, lander_states['cold_dust']['available'],
+                                                    mission.earth_radio.margin))
     baseline_selection, baseline_feasible = optimize(geometric_direct, geometric_relays,
         [i for i, path in enumerate(geometric_relays) if path.any()], mission, options)
     baseline_metrics = evaluate(geometric_direct, geometric_relays, baseline_selection, mission)[1]
     selection, feasible = optimize_environment(direct_cases, relay_cases, eligible, mission)
+    alternative = None
+    if mission.avoid_hazard_routes and set(usable) != set(eligible):
+        # What the plan would be if steep traverses were allowed, so the cost of the rule is visible.
+        other, other_feasible = optimize_environment(direct_cases, relay_cases, usable, mission)
+        alternative = dict(recommended=[options[i]["id"] for i in other], feasible=other_feasible,
+                           network=evaluate(direct, relays, other, mission)[1], excluded=[options[i]["id"] for i in usable if i not in eligible])
     environment_cases = {}
     for case in CASES:
         _, values, failure, _ = evaluate(direct_cases[case], relay_cases[case], selection, mission)
@@ -263,6 +279,7 @@ def scenario(mission, include_map=True):
             key = ",".join(sorted(options[idx]["id"] for idx in removed)) or "nominal"
             failure_states[key] = dict(
                 combined=online.tolist(), assisted=assisted.tolist(), metrics=values, meets=all_cases_pass(active))
+    power_loss = power_loss_simulation(direct, relays, selection, options, times, end, mission, mission.power_loss_hours)
     sun_metrics = metrics(solar, hours)
     details = site_details(grid, slope, x, y)
     result = dict(site=dict(name=name, lat=lat, lon=lon, elevation=ground, **details),
@@ -271,8 +288,10 @@ def scenario(mission, include_map=True):
                   outages=intervals(direct, times, end, hours, sample["reason"]),
                   darkness=intervals(solar, times, end, hours),
                   recommended=[options[idx]["id"] for idx in selection], feasible=feasible, eligible=len(eligible),
+                  cost=cost_report(len(selection), mission.budget_usd, mission.relay_cost_usd),
                   darkness_meets=sun_metrics["longest"] <= mission.darkness_hours,
-                  failures=failures, failure_states=failure_states, candidates=options,
+                  failures=failures, failure_states=failure_states, power_loss=power_loss, candidates=options,
+                  deployment=deployment_summary(options, selection, mission, alternative),
                   horizon=dict(azimuth=horizon.azimuth_deg.tolist(), elevation=nullable(horizon.elevation_deg),
                                distance=nullable(horizon.distance_m)),
                   samples=dict(**sample, direct=direct.tolist(), solar=solar.tolist(), network=combined.tolist()),
@@ -288,6 +307,18 @@ def scenario(mission, include_map=True):
     if include_map:
         result["map"] = map_data(grid, slope, x, y)
     return result
+
+
+def deployment_summary(options, selection, mission, alternative=None):
+    counts = {}
+    for option in options:
+        counts[option["deployment"]["verdict"]] = counts.get(option["deployment"]["verdict"], 0) + 1
+    chosen = [options[idx]["deployment"] for idx in selection]
+    return dict(counts=counts, enforced=mission.avoid_hazard_routes,
+                slope_limit=mission.route_slope_limit if mission.route_slope_limit is not None else mission.slope_limit,
+                if_steep_allowed=alternative, selected_all_feasible=all(item["verdict"] == "feasible" for item in chosen),
+                longest_route_km=max((item["route_km"] for item in chosen), default=0.0),
+                assumption="Straight-line traverse over a 20 m DEM from the lander to each mast; no route planning, regolith strength or sub-pixel hazards.")
 
 
 def bounded(name, target, nominal, low, high, better_high, unit, basis):
@@ -347,7 +378,9 @@ def mission_assessment(mission, cases, bands, solar, details, selection):
         evaluated=["Terrain obstruction of Earth (LOLA 20 m near field, 240 m far field)", "Earth and Sun position (NAIF SPICE, DE440)",
                    "Free-space RF margin to Earth and between surface nodes", "Darkness at each node from terrain shadowing",
                    "Battery, heater and node temperature through darkness (lumped model, assumed sinks, four cases)",
-                   "Local dust deposition reducing solar output (assumed event)", "Loss of any one selected relay (what-if)"],
+                   "Local dust deposition reducing solar output (assumed event)", "Loss of any one selected relay (what-if), and a timed power loss of each relay",
+                   "Slope at each mast, and slope along a straight traverse from the lander (screening, not route planning)",
+                   "Which constraint limits each candidate: terrain, RF, power or temperature"],
         not_evaluated=["Calibrated thermal and dust behaviour (current values are assumptions)"]
                       + [h for h in NOT_MODELLED if not h.startswith(modelled)],
         assumptions=[f"Earth link: {mission.earth_radio.ghz:g} GHz, {mission.earth_radio.watts:g} W, receiver gain {mission.earth_radio.rx_gain:g} dBi, "

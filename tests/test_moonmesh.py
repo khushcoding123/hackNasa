@@ -86,7 +86,7 @@ class DataTests(unittest.TestCase):
 
     @unittest.skipUnless((DATA/"terrain/haworth_near20km.npz").exists(), "NASA datasets are not prepared")
     def test_real_scenario(self):
-        mission = Mission()
+        mission = Mission(avoid_hazard_routes=False)   # the default also excludes steep traverses; see test_diagnostics
         result = scenario(mission)
         self.assertEqual(len(result["times"]), 1440)
         self.assertEqual(len(result["candidates"]), 15)

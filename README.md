@@ -2,7 +2,9 @@
 
 MOONMESH is a lunar communication planning product targeting **lander → surface relay → lunar communications satellite → Earth**. It will place surface relays against terrain, satellite access, power, blackout, and resilience constraints. NASA LOLA elevation data and JPL DE440 SPICE ephemerides support the existing terrain and Earth/Sun geometry.
 
-**Current prototype:** the planner calculates direct-to-Earth service and lander → surface relay → Earth paths. Satellite orbits and satellite-assisted links are planned and are not included in current results. See [Communication architecture](docs/COMMUNICATION_ARCHITECTURE.md) for the target, modeling requirements, and implementation boundary.
+**Current prototype:** the configurable planner calculates direct-to-Earth and lander → surface relay → Earth paths. Open **End-to-end simulation** from the workspace menu to run the fixed Haworth lander → relay → satellite → Earth scenario, inspect blackouts, test failures, and download the results. See [Communication architecture](docs/COMMUNICATION_ARCHITECTURE.md) for model inputs and scope.
+
+After applying a regular mission, open **Analysis → Compare relay configurations** to evaluate alternate relay sites against the direct-only baseline and the planner recommendation on the same timeline. See the [Haworth mission validation report](docs/HAWORTH_VALIDATION.md) for the fixed satellite mission benchmark.
 
 ## Run locally
 
@@ -22,6 +24,15 @@ npm run build
 python -m moonmesh.data
 python -m uvicorn moonmesh.server:app --host 127.0.0.1 --port 8765
 ```
+
+## One command to get a working demo
+
+```shell
+python -m moonmesh.setup           # checks packages, NASA terrain and kernels, the built UI, trained models, and runs a short real mission
+python -m moonmesh.setup --apply   # also installs missing packages, downloads missing terrain/kernels, builds the UI
+```
+
+It never needs the trained models to produce results (relay ranking is the computed viewshed); a missing model is reported as a warning with its rebuild command, and `--apply --train` rebuilds them (slow). Exit code 1 means the app cannot run, and every line marked MISS comes with its fix. The preflight now checks every package in `requirements.txt`, so a package the server imports at start-up (for example XlsxWriter) can no longer hide behind a READY status.
 
 ## Check what this checkout has
 
@@ -72,6 +83,24 @@ python -m ora --help
 The main planner evaluates nominal, cold-night, dust-exposure and combined cases. Each relay and the lander must have power and thermal survival before a communication interval counts. All four cases feed relay selection and optional N−1 checks. The combined case drives the main timeline; the case table shows the other outcomes. Open **Expert settings → Night temperatures and dust exposure** to configure thermal sinks, hardware heat losses, heater power, lander battery and the local dust event. Dust accumulates during the event, persists until cleaned and reduces solar generation. RF propagation does not receive an unsupported dust penalty.
 
 These are assumed engineering envelopes: no Diviner temperature products or calibrated hardware measurements are loaded. The results identify modeled limits met under assumptions, rather than validated survival. JSON/CSV exports include case outcomes and per-node temperature, charge, heater, dust and availability histories. See [the implementation plan and status](NIGHT_TEMPERATURE_DUST_PLAN.md) for scope and remaining calibration work. Run `python -m unittest tests.test_environment -v` for the environmental regression tests.
+
+## Dynamic cost model
+
+The **Cost** tab prices the network from what it is made of, instead of one price for every node ([`moonmesh/costmodel.py`](moonmesh/costmodel.py)). The flat estimate ($100,000 per node, `moonmesh/costs.py`) is still shown as a reference and still limits the optimizer's budget; the dynamic figure never changes which relays are chosen.
+
+| Driver | What it changes |
+| --- | --- |
+| Number of nodes and their role | Every node is priced separately; a gateway adds Earth-link communications cost. Fixed programme costs are shared, so cost per node falls as the network grows. |
+| Longest link | Radios and antennas scale with the square root of the longest link (floor 0.75×, cap 3×). |
+| Traverse distance, slope, route check | Installation grows per kilometre carried and with slope, plus an uplift for routes that cross steep or unverified ground. |
+| Mast height, battery, solar, heater | Structure scales with mast height^1.5; batteries, solar and thermal with their sizing. |
+| Area | Site survey per km² (with a floor); only for a drawn area. |
+| Mission length | Contingency grows with days up to a cap, plus a bump for steep or unverified routes. |
+| Relay satellite (optional) | Altitude sets orbital speed (√(μ/r), with the gravity you choose), the insertion burn (√(v∞² + 2μ/r) − √(μ/r)) and station-keeping. The rocket equation turns Δv into propellant and delivered mass. The elevation mask and beam width set how much of the time one satellite sees the area, which sets how many are needed for the coverage target (best case, capped at 12). |
+
+A node at the reference conditions (5 m mast, 2 km link, 288 Wh, 18 W, 4 W heater, no traverse) costs exactly the flat $100,000. **Every coefficient is an illustrative planning value, not a quote or a market price**: they are listed in the response, in the workbook's *Cost Coefficients* sheet and in `Coefficients`, and any can be overridden (`coefficients` in the request). What the model adds is how the cost moves when the scenario changes, not a more certain total. It excludes the lander, launch of the surface payload and ongoing surface operations.
+
+`POST /api/cost/estimate` takes `{result, area?, scope, satellite?, coefficients?}`. The satellite uses the orbit controls (altitude, gravity, track heading, beam, mask) plus a coverage target. The Excel download adds **Dynamic Cost** (every line with its driver, editable unit prices, formulas and category subtotals), **Cost by Node**, **Cost Drivers** (including the satellite derivation) and **Cost Coefficients**, and the Summary shows both totals. Run `python -m pytest tests/test_costmodel.py`.
 
 ## Model and validation
 
