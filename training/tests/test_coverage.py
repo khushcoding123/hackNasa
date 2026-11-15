@@ -16,6 +16,9 @@ from moonmesh.server import app
 from moonmesh_train import coverage as c
 from moonmesh_train.config import load_radio_profile
 from moonmesh_train.los import PROJECTION
+from moonmesh_train.paths import repo_root
+
+REAL_DOMAIN_RULE = c.full_range_on_terrain  # captured before any fixture patches it
 
 
 @pytest.fixture
@@ -33,6 +36,9 @@ def terrain(tmp_path, monkeypatch):
                numba_threads=2, cache_entries=2,
                sites={'haworth': dict(dem='dem.tif', slope='slope.tif', grid='grid.json', source='analytic fixture')})
     monkeypatch.setattr(c, 'settings', lambda: cfg)
+    # The 800 m analytic DEM cannot hold the real 8 km model domain; apply the same rule at 300 m.
+    real_rule = c.full_range_on_terrain
+    monkeypatch.setattr(c, 'full_range_on_terrain', lambda src, tx, radius_m: real_rule(src, tx, 300))
     c.CACHE.clear()
     yield TestClient(app), tmp_path
     c.CACHE.clear()
@@ -112,7 +118,11 @@ def test_export_georeferencing_masks_and_checksums(terrain):
         meta = json.loads(archive.read('scenario.json'))
         assert meta['threshold_db'] == 7
         assert meta['label_origin'] == 'simulated'
-        assert meta['sources'] and meta['implementation_sha256'] and meta['code_version']
+        assert meta['sources'] and meta['implementation_sha256']
+        # Null (not a failure) outside a git checkout, e.g. a GitHub ZIP download.
+        assert meta['code_version'] == c.code_version()
+        if (repo_root()/'.git').exists():
+            assert meta['code_version']
         for name, info in meta['exports'].items():
             content = archive.read(name)
             assert hashlib.sha256(content).hexdigest() == info['sha256']
@@ -149,3 +159,50 @@ def test_coincident_phase_center_is_unknown_without_losing_map():
     assert arrays['valid_mask'].sum() > 0
     # The transmitter lies on a receiver center in the odd-sized lattice.
     assert arrays['valid_mask'][arrays['valid_mask'].shape[0]//2, arrays['valid_mask'].shape[1]//2] == 0
+
+
+def test_model_domain_rule_matches_the_tower_sampler(tmp_path):
+    """The app's model domain must be exactly where step 07 could place training and test towers."""
+    from moonmesh_train.sampling import full_disk_valid
+    rng = np.random.default_rng(3)
+    dem = np.zeros((45, 60), dtype='float32')
+    dem[rng.random(dem.shape) < 0.004] = np.nan  # scattered holes
+    dem[30:33, 5:9] = np.nan
+    tr = from_origin(0, 900, 20, 20)
+    with rasterio.open(tmp_path/'dem.tif', 'w', driver='GTiff', width=60, height=45, count=1, dtype='float32',
+                       crs=PROJECTION, transform=tr, nodata=np.nan) as dst:
+        dst.write(dem, 1)
+    for radius in (100, 200):
+        expected = full_disk_valid(np.isfinite(dem), 20, radius)
+        with rasterio.open(tmp_path/'dem.tif') as src:
+            got = np.array([[REAL_DOMAIN_RULE(src, src.xy(r, k), radius) for k in range(60)] for r in range(45)])
+        assert expected.any() and (~expected).any()
+        assert np.array_equal(got, expected)
+
+
+def test_transmitter_near_the_terrain_edge_is_out_of_model_domain(terrain, monkeypatch):
+    client, _ = terrain
+    # 500 m of range does not fit around the centre of the 800 m fixture terrain.
+    monkeypatch.setattr(c, 'full_range_on_terrain', lambda src, tx, radius_m: REAL_DOMAIN_RULE(src, tx, 500))
+    m = client.post('/api/coverage', json=dict(range_m=300)).json()['metadata']
+    assert not m['in_evaluated_domain'] and m['state'] == 'out_of_domain'
+    assert any('off the prepared terrain' in r for r in m['fallback_reasons'])
+    assert m['valid_pixels'] > 0  # the physics map is still drawn
+    refused = client.post('/api/coverage/ml-compare/jobs', json=dict(range_m=300))
+    assert refused.status_code == 422 and 'whole 8 km range is on the prepared Haworth terrain' in refused.json()['detail']
+
+
+def test_coverage_works_outside_a_git_checkout(terrain, monkeypatch):
+    """A GitHub "Download ZIP" copy, or a computer without git, has no commit to record: report null, do not fail."""
+    import subprocess
+    client, _ = terrain
+
+    def no_git():
+        raise subprocess.CalledProcessError(128, ['git', 'rev-parse', 'HEAD'])
+    monkeypatch.setattr(c, 'commit', no_git)
+    response = client.post('/api/coverage', json=dict(range_m=300))
+    assert response.status_code == 200 and response.json()['metadata']['code_version'] is None
+    exported = client.post('/api/coverage/export', json=dict(range_m=300))
+    assert exported.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(exported.content)) as archive:
+        assert json.loads(archive.read('scenario.json'))['code_version'] is None

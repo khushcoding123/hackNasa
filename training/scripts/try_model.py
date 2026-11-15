@@ -25,7 +25,7 @@ from matplotlib.colors import ListedColormap
 
 from lunar_core.terrain import polar_stereographic_south
 from moonmesh_train import paths, rf
-from moonmesh_train.config import configs_dir
+from moonmesh_train.config import configs_dir, numba_threads
 from moonmesh_train.evaluation import Context
 
 
@@ -46,9 +46,9 @@ def main(argv=None):
     a = p.parse_args(argv)
 
     cfg = yaml.safe_load(a.config.read_text())
-    numba.set_num_threads(min(int(cfg.get('numba_threads', 8)), numba.config.NUMBA_NUM_THREADS))
-    print('Loading terrain, features and the three LightGBM models...', flush=True)
-    ctx = Context(cfg)
+    numba.set_num_threads(numba_threads(cfg.get('numba_threads', 8)))
+    print('Loading terrain, features and the LOS and margin LightGBM models...', flush=True)
+    ctx = Context(cfg, heads=('los', 'margin'))  # clearance is not shown, so it is not run
     radio = ctx.radio
     x, y = (float(v) for v in polar_stereographic_south(a.lat, a.lon))
 

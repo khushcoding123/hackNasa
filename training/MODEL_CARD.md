@@ -143,9 +143,9 @@ This is a Haworth simulator-based planning demonstration, with no measured lunar
 drive-test validation. Learned results generalize poorly at boundaries and are
 slower than the deterministic reference. Out-of-site behavior is untested; Malapert
 and Nobile have no integrated terrain. The app reports missing data rather than
-downloading it. Inputs outside evaluated heights, RX height, profile, range or
-placement radius explicitly select deterministic fallback; unsupported terrain
-positions remain out of domain. Explicit model requests also fall back because
+downloading it. Inputs outside evaluated heights, RX height, profile or range,
+or a transmitter whose 8 km range is not fully on prepared terrain (the rule that
+placed every training and test tower), explicitly select deterministic fallback. Explicit model requests also fall back because
 the learned predictor was rejected. A deterministic fallback is not evidence of
 out-of-domain accuracy. U-Net was recommended but deferred in the earlier time-boxed
 run (`reports/eval/unet_decision.json`); no U-Net result exists.

@@ -1,6 +1,7 @@
 """Load run configurations, rejecting incomplete radio metadata before a run."""
 
 import math
+import os
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,22 @@ class ConfigError(ValueError):
 
 def configs_dir() -> Path:
     return repo_root() / "training" / "configs"
+
+
+def numba_threads(requested: int) -> int:
+    """The configured Numba thread count, capped at what this computer allows.
+
+    Numba raises "The number of threads must be between 1 and N" when asked for more threads than
+    NUMBA_NUM_THREADS (by default the number of CPUs), so a config written on a 16-thread PC would
+    otherwise break surface coverage on a 4-thread laptop.
+    """
+    import numba
+    return max(1, min(int(requested), numba.config.NUMBA_NUM_THREADS))
+
+
+def cpu_threads(requested: int) -> int:
+    """LightGBM accepts any thread count but slows down when given more threads than CPUs."""
+    return max(1, min(int(requested), os.cpu_count() or 1))
 
 
 def _load_mapping(path: Path) -> dict[str, Any]:
