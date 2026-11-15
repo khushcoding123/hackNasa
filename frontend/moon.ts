@@ -120,7 +120,7 @@ export class MoonView {
      <label>Imagery <select data-imagery><option value="auto">LROC WAC (live)</option><option value="bundled">Bundled (lower detail)</option></select></label>
      <p class="vw-note">Terrain is shown at true 1× scale.</p><p class="vw-note">Click the Moon to drop a pin, then open its 3D site view.</p>
     </div></div>
-   <div class="vw-draw" role="group" aria-label="Draw an area to analyse"><button class="vw-chip" data-draw="rect" aria-pressed="false" title="Drag across the Moon to draw a square or rectangle">▭ Draw square</button><button class="vw-chip" data-draw="free" aria-pressed="false" title="Press and drag to draw any shape">✎ Draw freeform</button><button class="vw-chip" data-draw="clear" hidden>Clear area</button><button class="vw-chip" data-pole title="Zoom to the 85–90° S cap, where 20 m terrain exists">⌖ Go to the pole</button></div>
+   <div class="vw-draw" role="group" aria-label="Draw an area to analyse"><button class="vw-chip" data-draw="rect" aria-pressed="false" title="Drag across the Moon to draw a square or rectangle">▭ Draw square</button><button class="vw-chip" data-draw="free" aria-pressed="false" title="Press and drag to draw any shape">✎ Draw freeform</button><button class="vw-chip" data-draw="clear" hidden>Clear area</button><button class="vw-chip" data-pole title="Zoom to the south polar cap, where terrain data exists">⌖ Go to the pole</button></div>
   </div>
   <div class="vw-right" role="group" aria-label="Map controls">
    <div class="vw-modes" role="group" aria-label="View mode"><button data-mode="map" aria-pressed="true">Map</button><button data-mode="3d" aria-pressed="false">3D</button></div>
@@ -468,7 +468,7 @@ export class MoonView {
   node.querySelector<HTMLButtonElement>("[data-choose]")?.addEventListener("click", e => this.hooks.onChooseRegion?.((e.currentTarget as HTMLElement).dataset.choose!));
  }
 
- /** Drop a new pin anywhere; mission calculations remain restricted to their supported terrain crops. */
+ /** Drop a new pin anywhere on the Moon. */
  private dropPin(point: Cartesian3) {
   if (this.pins.size >= MAX_PINS) { this.toast(`You can keep up to ${MAX_PINS} pins. Remove one to add another.`, true); return; }
   const c = Cartographic.fromCartesian(point, MOON)!;
@@ -500,15 +500,15 @@ export class MoonView {
    <h3>${coordinate(pin.lat, pin.lon)}</h3>
    <dl><dt>Terrain elevation</dt><dd>${Math.round(pin.h).toLocaleString()} m</dd></dl>
    <button class="primary" data-open-site>Explore this site in 3D →</button>
-   ${region ? `<p class="vw-note">Inside the ${escapeHtml(region.name)} 20 m terrain, so a mission can be tested here.</p><button data-use-pin>Test a mission at this pin →</button>`
-    : `<p class="vw-note">3D exploration uses the best available LOLA terrain. Mission calculations need a supported 20 m region.</p>`}
+   <p class="vw-note">${region ? `Inside the ${escapeHtml(region.name)} 20 m terrain.` : "Global LOLA terrain (about 470 m per pixel) is used here."}</p>
+   <button data-use-pin>Analyse a 6 km square here →</button>
    <button data-clear-pin>Remove pin</button>`;
   node.hidden = false;
   node.querySelector<HTMLButtonElement>(".vw-close")!.onclick = () => { node.hidden = true; this.deselectPin(); };
   node.querySelector<HTMLInputElement>("[data-pin-name]")!.oninput = e => { pin.name = (e.target as HTMLInputElement).value.trim() || `Pin ${pin.id}`; this.renderPinList(); this.viewer?.scene.requestRender(); };
   node.querySelector<HTMLButtonElement>("[data-clear-pin]")!.onclick = () => { this.removePin(pin.id); node.hidden = true; };
   node.querySelector<HTMLButtonElement>("[data-open-site]")!.onclick = () => this.openSite({lat: pin.lat, lon: pin.lon, name: pin.name});
-  node.querySelector<HTMLButtonElement>("[data-use-pin]")?.addEventListener("click", () => this.hooks.onUsePin?.(pin.lat, pin.lon, region!.id));
+  node.querySelector<HTMLButtonElement>("[data-use-pin]")?.addEventListener("click", () => this.hooks.onUsePin?.(pin.lat, pin.lon, region?.id ?? ""));
  }
  private deselectPin() {
   this.selectedPin = 0;
@@ -694,7 +694,7 @@ export class MoonView {
   viewer.entities.removeById("area-draft");
   if (kind) {
    viewer.entities.add({id: "area-draft", polyline: {positions: new CallbackProperty(() => this.draft.length > 1 ? [...this.draft, this.draft[0]] : [], false), width: 3, material: Color.fromCssColorString("#84deff"), depthFailMaterial: Color.fromCssColorString("#84deff")}});
-   this.toast(kind === "rect" ? "Drag across the Moon to draw a square. Areas must be near the south pole (use Go to the pole)." : "Press and drag to draw a free-form shape around the area. Areas must be near the south pole.");
+   this.toast(kind === "rect" ? "Drag across the Moon to draw a square. Any size, anywhere on the Moon." : "Press and drag to draw a free-form shape of any size. Terrain detail is best near the south pole.");
   } else this.toast("");
   viewer.scene.requestRender();
  }

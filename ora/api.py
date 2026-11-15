@@ -10,6 +10,8 @@ import numpy as np
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from lunar_core.terrain import set_frame
+from moonmesh import data as moon_data
 from . import area as drawn_area
 from . import breadcrumb, resilience, twin
 from .data import ALL_SITES
@@ -51,10 +53,19 @@ class NetworkBody(BaseModel):
                 raise HTTPException(422, str(error)) from error
             except FileNotFoundError as error:
                 raise HTTPException(503, "LOLA terrain is missing. Run python -m moonmesh.data.") from error
-            changes.update(site=key, polygon=tuple(tuple(p) for p in self.polygon), radius_km=meta["radius_m"] / 1000 + 0.3,
-                           name=f"drawn_{key}")
+            radius_km = meta["radius_m"] / 1000
+            # Sized to the shape: longer links and more candidates for big areas.
+            scaled = dict(max_range_km=float(np.clip(radius_km * 0.6, 12.0, 25.0)), candidates=int(np.clip(120 + 20 * radius_km, 220, 500)))
+            for name, value in scaled.items():
+                changes.setdefault(name, value)
+            changes.update(site=key, polygon=tuple(tuple(p) for p in self.polygon), radius_km=radius_km + 0.3, name=f"drawn_{key}")
         elif self.site:
+            moon_data.activate(self.site)   # restores the local projection for drawn areas outside the polar cap
+            if self.site in moon_data.SITES:
+                ALL_SITES.setdefault(self.site, moon_data.SITES[self.site])
             changes["site"] = self.site
+        else:
+            set_frame(None)
         return replace(base, **changes)
 
 
