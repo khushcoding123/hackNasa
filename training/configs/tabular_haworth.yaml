@@ -1,0 +1,13 @@
+seed: 42
+dataset: derived/datasets/haworth_pilot
+output: models/tabular
+num_threads: 16
+num_leaves: 63
+learning_rate: 0.05
+max_rounds: 2000
+early_stopping_rounds: 50
+checkpoint_rounds: 25
+# Explicit experiment choices, fixed before validation evaluation.
+huber_alpha: 0.9
+classification_threshold: 0.5
+distance_dominance_gain_fraction: 0.5
