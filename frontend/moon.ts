@@ -141,6 +141,7 @@ export class MoonView {
   if (scene.sun) scene.sun.show = false; if (scene.moon) scene.moon.show = false; scene.fog.enabled = false;
   scene.globe.showGroundAtmosphere = false; scene.globe.baseColor = Color.fromCssColorString("#26272a");
   scene.globe.depthTestAgainstTerrain = true; scene.globe.maximumScreenSpaceError = 2.6;
+  scene.globe.tileCacheSize = 400; scene.globe.preloadSiblings = false; scene.globe.loadingDescendantLimit = 12;
   scene.globe.lightingFadeInDistance = 1e12; scene.globe.lightingFadeOutDistance = 1e12; scene.globe.dynamicAtmosphereLighting = false;
   scene.light = new DirectionalLight({direction: new Cartesian3(1, 0, 0), intensity: 2});
   scene.shadowMap.softShadows = true; scene.shadowMap.size = 4096; scene.shadowMap.darkness = 0.42; scene.shadowMap.maximumDistance = 60_000;
@@ -152,8 +153,9 @@ export class MoonView {
   control.inertiaSpin = 0.7; control.inertiaZoom = 0.6;
   this.imagery = addImagery(viewer, state => this.onImageryState(state));
   // Continuous rendering only while the camera is moving or lighting is being dragged: idle frames cost nothing.
-  camera.moveStart.addEventListener(() => { scene.requestRenderMode = false; });
-  camera.moveEnd.addEventListener(() => { scene.requestRenderMode = true; scene.requestRender(); this.view = this.readView(); this.clampZoom(); this.refreshReadouts(); });
+  // While moving, trade a little sharpness for speed (coarser tile error, 2x MSAA); the full-quality settings return at rest.
+  camera.moveStart.addEventListener(() => { scene.requestRenderMode = false; scene.globe.maximumScreenSpaceError = 4; scene.msaaSamples = 2; });
+  camera.moveEnd.addEventListener(() => { scene.requestRenderMode = true; scene.globe.maximumScreenSpaceError = 2.6; scene.msaaSamples = 4; scene.requestRender(); this.view = this.readView(); this.clampZoom(); this.refreshReadouts(); });
   camera.changed.addEventListener(() => { this.clampZoom(); });
   scene.preRender.addEventListener(() => { if (this.mode === "3d") this.updateLight(); });
   scene.postRender.addEventListener(() => { this.positionLabels(); if (!scene.globe.tilesLoaded) scene.requestRender(); });   // keep streaming until tiles settle, then idle

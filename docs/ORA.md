@@ -112,7 +112,7 @@ The surrogate screens candidates; the app still computes exact line of sight for
 
 ### Drawn areas and layouts (main app, step 3)
 
-The main MOONMESH app no longer starts from fixed landing regions. Draw a square or a free-form shape anywhere between 85 S and the pole (about 2 to 24 km across); `POST /api/ora/area` crops 20 m LOLA terrain for it, plans relays, gateways and mining sites inside the shape, and compares three layouts over the same sites: a tree, a tree with loops, and a full mesh. The best layout survives the most single relay or link failures with the fewest links. If nothing inside the shape sees Earth or links up, sites in a 6 km ring around it are used and marked as outside. Every ORA endpoint also accepts `polygon`. Drawn terrain is cached under `.moonmesh-data/terrain/area-*` (the 12 most recent are kept).
+The main MOONMESH app no longer starts from fixed landing regions. Draw a square or a free-form shape of any size south of 75 S (0.2 km up to the whole polar cap); `POST /api/ora/area` crops LOLA terrain for it (20 m inside 85 S, 240 m beyond, thinned further for very large shapes), plans relays, gateways and mining sites inside the shape, and compares three layouts over the same sites: a tree, a tree with loops, and a full mesh. The best layout survives the most single relay or link failures with the fewest links. If nothing inside the shape sees Earth or links up, sites in a ring around it (at least 6 km, a quarter of the shape's radius for big ones) are used and marked as outside. Every ORA endpoint also accepts `polygon`. Drawn terrain is cached under `.moonmesh-data/terrain/area-*` (the 12 most recent are kept).
 
 ## What ORA does not claim
 

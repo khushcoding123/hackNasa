@@ -38,7 +38,7 @@ export function addImagery(viewer: Viewer, onState: (state: ImageryState) => voi
  const live = (layer: string, title: string) => {
   const provider = new WebMapServiceImageryProvider({
    url: WMS_URL, layers: layer, parameters: {format: "image/jpeg", transparent: false, version: "1.1.1"},
-   tilingScheme: scheme(), ellipsoid: MOON, tileWidth: 256, tileHeight: 256, maximumLevel: 8,
+   tilingScheme: scheme(), ellipsoid: MOON, tileWidth: 256, tileHeight: 256, maximumLevel: 8, minimumLevel: 0,
    credit: new Credit(`${title} · NASA / GSFC / ASU via LROC QuickMap`, false),
   });
   return {provider, layer: layers.addImageryProvider(provider)};

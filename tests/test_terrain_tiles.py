@@ -56,12 +56,12 @@ class TileTests(unittest.TestCase):
 
     def test_levels_stop_at_source_resolution(self):
         sources = tiles.info()["sources"]
-        self.assertEqual(sources["global"]["max_level"], 7)
-        self.assertEqual(sources["far"]["max_level"], 10)
-        self.assertEqual(sources["near"]["max_level"], 13)
+        self.assertEqual(sources["global"]["max_level"], 6)
+        self.assertEqual(sources["far"]["max_level"], 9)
+        self.assertEqual(sources["near"]["max_level"], 12)
         # At the deepest level the sample spacing is not much finer than the source.
         for key in sources.values():
-            spacing = np.pi * tiles.MOON_RADIUS_M / 32 / 2 ** key["max_level"]
+            spacing = np.pi * tiles.MOON_RADIUS_M / (tiles.DEFAULT_SIZE - 1) / 2 ** key["max_level"]
             self.assertGreaterEqual(spacing, key["resolution_m"] * 0.6)
 
     def test_invalid_requests_are_rejected(self):
