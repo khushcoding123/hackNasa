@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#f3f5f1"><meta name="description" content="Explore the Moon in a full-screen map and 3D workspace, then plan terrain-aware lunar communication networks."><title>MOONMESH · Lunar mission planner</title><link rel="icon" href="/moon.svg" type="image/svg+xml"><link rel="stylesheet" href="/cesium/Widgets/widgets.css"><link rel="stylesheet" href="/style.css"><script>window.CESIUM_BASE_URL="/cesium/";</script><script type="module" src="/app.js?ui=3"></script><link rel="stylesheet" href="/ui.css?ui=4"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#f3f5f1"><meta name="description" content="Explore the Moon in a full-screen map and 3D workspace, then plan terrain-aware lunar communication networks."><title>MOONMESH · Lunar mission planner</title><link rel="icon" href="/moon.svg" type="image/svg+xml"><link rel="stylesheet" href="/cesium/Widgets/widgets.css"><link rel="stylesheet" href="/style.css"><script>window.CESIUM_BASE_URL="/cesium/";</script><script type="module" src="/app.js?ui=6"></script><link rel="stylesheet" href="/ui.css?ui=4"></head>
 <body class="planner panel-collapsed" data-step="landing">
 <a class="skip-link" href="#panel">Skip to mission panel</a>
 <button id="nav-scrim" aria-label="Close navigation" tabindex="-1"></button>
@@ -12,7 +12,8 @@
 <li><button data-view="layout" disabled><span class="nav-number">03</span><span class="nav-copy"><span class="nav-text">Network layout</span><small>Compare relay formats</small></span></button></li>
 <li><button data-view="overview" disabled><span class="nav-number">04</span><span class="nav-copy"><span class="nav-text">Earth connection</span><small>Inspect your signal path</small></span></button></li>
 <li><button data-view="communication" disabled><span class="nav-number">05</span><span class="nav-copy"><span class="nav-text">Blackout analysis</span><small>Understand lost contact</small></span></button></li>
-<li><button data-view="resilience" disabled><span class="nav-number">06</span><span class="nav-copy"><span class="nav-text">Resilience</span><small>Test the remaining links</small></span></button></li></ol></nav>
+<li><button data-view="resilience" disabled><span class="nav-number">06</span><span class="nav-copy"><span class="nav-text">Resilience</span><small>Test the remaining links</small></span></button></li>
+<li><button data-view="cost" disabled><span class="nav-number">07</span><span class="nav-copy"><span class="nav-text">Cost breakdown</span><small>Total and Excel download</small></span></button></li></ol></nav>
  <div class="rail-lab"><p class="rail-label">EXPLORE MORE</p><a href="/ora.html"><span class="lab-icon" aria-hidden="true">↗</span><span><strong>ORA relay lab</strong><small>Mining &amp; surface networks</small></span></a></div>
  <div class="rail-foot"><span class="prototype-pill"><i></i> Planning prototype</span><p>Real terrain. Explicit assumptions.<br>Better informed decisions.</p></div>
 </aside>
@@ -21,7 +22,7 @@
  <div class="breadcrumbs"><span>Mission workspace</span><span aria-hidden="true">/</span><strong id="workspace-crumb">Moon explorer</strong></div>
  <div class="topbar-tools"><span class="data-badge"><span class="dot"></span> NASA terrain data</span><button id="start-mission" class="primary" hidden>New mission <span aria-hidden="true">+</span></button>
   <details class="more-menu"><summary>Analysis tools <span aria-hidden="true">⌄</span></summary><div class="menu-pop"><p>ADDITIONAL ANALYSIS</p><button data-view="sites" disabled>Compare sites</button><button data-view="relays" disabled>Relay details</button><button data-view="sensitivity" disabled>Sensitivity</button><button data-view="data" disabled>Data &amp; assumptions</button><a class="menu-link" href="/ora.html">Open ORA relay lab ↗</a></div></details>
-  <details class="export-menu"><summary>Export <span aria-hidden="true">↗</span></summary><div class="export-options"><p>Available after a successful mission run.</p><button id="json" disabled>Download JSON</button><button id="csv" disabled>Download CSV</button><button id="report" disabled>Print report</button></div></details>
+  <details class="export-menu"><summary>Export <span aria-hidden="true">↗</span></summary><div class="export-options"><p>Available after a successful mission run.</p><button id="xlsx" disabled>Download Excel breakdown</button><button id="json" disabled>Download JSON</button><button id="csv" disabled>Download CSV</button><button id="report" disabled>Print report</button></div></details>
  </div>
 </header>
 <section class="welcome" aria-labelledby="welcome-title">
@@ -39,12 +40,12 @@
 <div class="scenario-strip"><p id="subtitle">No mission calculated yet.</p><span id="status" role="status" aria-live="polite">Loading mission settings…</span><button id="retry" hidden>Retry setup</button></div>
 <button id="panel-tab" aria-expanded="false" aria-controls="panel"><span id="panel-tab-label">Mission</span></button>
 <aside id="panel" class="side-panel" aria-label="Mission panel" aria-hidden="true" inert>
- <div class="panel-head"><div><p class="eyebrow" id="chapter">STEP 01 OF 06 / EXPLORE</p><h1 id="title" tabindex="-1">Start with the Moon.</h1><p id="purpose" class="subtitle">Explore the surface, then build a communication plan for your mission.</p></div><button id="panel-close" aria-label="Collapse mission panel">✕</button></div>
+ <div class="panel-head"><div><p class="eyebrow" id="chapter">STEP 01 OF 07 / EXPLORE</p><h1 id="title" tabindex="-1">Start with the Moon.</h1><p id="purpose" class="subtitle">Explore the surface, then build a communication plan for your mission.</p></div><button id="panel-close" aria-label="Collapse mission panel">✕</button></div>
  <div id="area-setup" hidden></div>
  <form id="mission" class="panel configuration" hidden>
   <div class="config-heading"><span class="eyebrow">MISSION PARAMETERS</span><span id="dirty" class="state-label" role="status">Preparing scenario</span></div>
   <div class="fields mission-fields"><label hidden>Landing region<select name="site" required></select></label><label>Start · UTC<input name="start" type="date" required></label><label>End · UTC<input name="end" type="date" required></label><label>Sampling<select name="minutes"><option value="5">5 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select></label><button class="primary" type="submit" disabled>Calculate network <span aria-hidden="true">↗</span></button></div>
-  <fieldset class="mission-requirements"><legend>What does your mission need?</legend><p class="muted">Set the coverage goal and the number of relay towers you can deploy. Technical radio and battery assumptions are in Expert settings.</p><div id="basic-constraints" class="fields"></div></fieldset>
+  <fieldset class="mission-requirements"><legend>What does your mission need?</legend><p class="muted">Set the coverage goal, maximum relay count, and relay deployment budget. Leave the budget blank for no cost limit. The default cost per relay is illustrative; enter your own estimate. Technical radio and battery assumptions are in Expert settings.</p><div id="basic-constraints" class="fields"></div></fieldset>
   <details id="advanced"><summary>Expert settings <span class="muted">/ constraints, radio &amp; power</span></summary><div id="expert" class="fields"></div></details>
  </form>
  <div id="view" tabindex="-1"></div>

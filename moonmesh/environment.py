@@ -5,6 +5,8 @@ These inputs describe an effective thermal sink, not regolith measurements or a 
 from dataclasses import replace
 from itertools import combinations
 
+from .costs import relay_limit
+
 import numpy as np
 
 from ora.thermal import NodeDesign, simulate
@@ -59,7 +61,7 @@ def public_state(state, mission):
 def optimize_environment(direct, relays, eligible, mission):
     """Search increasing relay count; all cases must pass, including N−1 if requested."""
     best, best_key = (), None
-    for count in range(min(mission.max_relays, len(eligible)) + 1):
+    for count in range(relay_limit(min(mission.max_relays, len(eligible)), mission.budget_usd, mission.relay_cost_usd) + 1):
         winners = []
         for selection in combinations(eligible, count):
             reports = {case: evaluate(direct[case], relays[case], selection, mission) for case in CASES}

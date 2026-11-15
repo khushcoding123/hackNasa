@@ -282,7 +282,7 @@ def analyse(net, meta):
                           radius_m=meta["radius_m"], resolution_m=meta["resolution_m"], ring_m=meta["ring_m"], projection=meta["projection"], source=meta["product"]),
                 polygon=[list(p) for p in net["scenario"].polygon], nodes=nodes, layouts=layouts, recommended=best, reason=reason,
                 score_method=net["score_method"], score_evidence=net.get("score_evidence"), assessment=plan_assessment(net),
-                candidates=int(net["n_relays"]),
+                candidates=int(net["n_relays"]), cost=plan["cost"],
                 plan=dict(served=plan["served"], worst_after_failure=plan["worst_after_failure"], feasible=bool(plan["feasible"]),
                           chosen=[int(v) for v in plan["chosen"]], gateways=[int(v) for v in gateways], mines=[int(v) for v in demand],
                           unreachable=[int(v) for v in plan["unreachable"]]))
