@@ -4,7 +4,7 @@ Illustrative planning numbers. The default node is a small insulated electronics
 heat capacity, emissivity, area and conductance against a real design before quoting results.
 """
 from dataclasses import dataclass
-from math import expm1
+from math import expm1, inf
 
 import numpy as np
 
@@ -91,34 +91,184 @@ def simulate(design, lit, dt_h, T_env_lit=250.0, T_env_dark=100.0, beam_w=None, 
     sink = dark + (light - dark) * sun
     if not np.all(np.isfinite(sink)) or np.any(sink <= 0) or np.any(~np.isfinite(factor)) or np.any((factor < 0) | (factor > 1)):
         raise ValueError("Thermal sinks must be finite positive kelvin; solar factors must be in 0..1.")
-    soc, temp, mode, heat = (np.zeros(len(sun)) for _ in range(4))
-    reasons, energy, T, frozen = [], design.battery_wh * soc0, T0, -1
     sub = max(1, int(np.ceil(dt_h * 3600 / 60)))
     dt = dt_h * 3600 / sub
-    for i, illumination in enumerate(sun):
-        supply = design.solar_w * illumination * factor[i] + beam[i]
+    soc, temp, mode, heat, reasons, frozen = _integrate(design, sun.tolist(), factor.tolist(), beam.tolist(), sink.tolist(),
+                                                        valid.tolist(), float(design.battery_wh * soc0), float(T0), sub, dt, dt_h)
+    return dict(soc=np.array(soc), temp_k=np.array(temp), mode=np.array(mode, float), heater_w=np.array(heat),
+                frozen_step=frozen, reason=reasons, sink_k=sink)
+
+
+def _charge(energy, battery_wh):
+    """Battery clamp, ``float(min(battery_wh, max(0, energy)))`` with the same tie behaviour."""
+    energy = energy if energy > 0 else 0.0
+    return energy if energy < battery_wh else battery_wh
+
+
+def _quiet_interval(alive, energy, supply, desired, heater_w, battery_wh, sub, dt):
+    """Decide the electrical branches of a whole interval in advance, when that is exact.
+
+    Returns ``(electronics, heater draw when on, charge increment with heater off, with heater on,
+    heater-on case valid)`` or None. It is exact when at every internal step the electronics and
+    heater draws are the ones returned and adding the increment reproduces the clamped charge update:
+
+    * pinned: the clamped update returns the same charge (full and charging, empty and short of
+      supply, or no net flow), so every draw is a function of the thermostat alone; or
+    * moving: neither clamp can act and the charge stays high enough for the full draws.
+      Floating-point rounding is monotone, so bounds on the charge also bound ``available``;
+      the margin in ``_charge_floor`` covers the rounding accumulated over the interval.
+
+    A frozen node draws nothing, so only the clamp matters for it.
+    """
+    available = supply + energy * 3600 / dt
+    if alive:
+        electronics = desired if not available < desired else available
+        spare = available - electronics
+        spare = spare if spare > 0 else 0.0  # min(heater_w, max(0, spare)), same ties
+        heater_on = spare if spare < heater_w else heater_w
+    else:
+        electronics = heater_on = 0.0
+    if _charge(energy + (supply - electronics - 0.0) * dt / 3600, battery_wh) == energy:
+        on_ok = heater_on == 0.0 or _charge(energy + (supply - electronics - heater_on) * dt / 3600, battery_wh) == energy
+        return electronics, heater_on, 0.0, 0.0, on_ok
+    if not alive:
+        d_off = (supply - 0.0 - 0.0) * dt / 3600
+        return (0.0, 0.0, d_off, d_off, True) if _charge_floor(energy, (d_off,), battery_wh, sub) is not None else None
+    d_off, d_on = (supply - desired - 0.0) * dt / 3600, (supply - desired - heater_w) * dt / 3600
+    floor = _charge_floor(energy, (d_off,), battery_wh, sub)
+    if floor is None or supply + floor * 3600 / dt < desired:
+        return None
+    floor = _charge_floor(energy, (d_off, d_on), battery_wh, sub)
+    on_ok = floor is not None and not supply + floor * 3600 / dt - desired < heater_w
+    return desired, heater_w, d_off, d_on, on_ok
+
+
+def _charge_floor(energy, increments, battery_wh, sub):
+    """A lower bound on the charge over ``sub`` steps of these increments if neither clamp can act."""
+    margin = 1e-12 * sub * (abs(battery_wh) + abs(energy) + 1.0)
+    rise, fall = max(increments), min(increments)
+    if rise > 0 and not energy + sub * rise + margin < battery_wh:
+        return None
+    if fall >= 0:
+        return energy  # never falls: rounding is monotone, and a charge of exactly 0 clamps to itself
+    floor = energy + sub * fall - margin
+    return floor if floor > 0 else None
+
+
+def _integrate(design, sun, factor, beam, sink, valid, energy, T, sub, dt, dt_h):
+    """The internal-step loop of ``simulate``.
+
+    Each internal step is the original update: ``step_temp`` and the battery clamp, in the same
+    operation order (or an exact IEEE identity of it), so the results are bit-for-bit unchanged.
+    The speed comes from Python floats, hoisted constants and deciding the electrical branches once
+    per interval where that is exact (``_quiet_interval``).
+    """
+    B, solar_w, hibernate = float(design.battery_wh), float(design.solar_w), design.hibernate
+    sleep_w = float(design.survival_w + design.duty * (design.active_w - design.survival_w))
+    active_w, hw, rhu = float(design.active_w), float(design.heater_w), float(design.rhu_w)
+    hon, ron, kill = float(design.heater_on_k), float(design.radiator_on_k), float(design.kill_k)
+    C, kl = float(design.heat_capacity), float(design.k_loss)
+    # step_temp's radiative term is eps * SIGMA * A * (T + T_env) * (...); its left-hand prefix is constant.
+    rad_closed, rad_open = design.emissivity * SIGMA * design.area, design.radiator_emissivity * SIGMA * design.area
+    # step_temp's T + (eq - T) * -expm1(-g * dt / C), rewritten with exact sign identities:
+    # (-g) * dt == g * (-dt) and x + y * (-e) == x - y * e in IEEE arithmetic.
+    back = -dt
+    lean = B >= 0 and C > 0 and kl > 0 and rad_closed >= 0 and rad_open >= 0 and hon <= ron  # designs the fast path covers
+    soc_scale = max(B, 1e-9)
+    soc, temp, mode, heat, reasons = [], [], [], [], []
+    frozen, alive = -1, True
+    energy = energy + 0.0  # a -0.0 start charge reads as 0.0 after the first clamp; the pinned path never clamps
+    for i in range(len(sun)):
+        illumination, Te = sun[i], sink[i]
+        Te2 = Te * Te
+        supply = solar_w * illumination * factor[i] + beam[i]
         full_service, used, lowest = True, 0.0, T
-        asleep = design.hibernate and illumination <= 0 and beam[i] <= 0
-        desired = design.survival_w + design.duty * (design.active_w - design.survival_w) if asleep else design.active_w
-        for _ in range(sub):
-            available = supply + energy * 3600 / dt
-            electronics = min(desired, available) if frozen < 0 else 0.0
-            heater = min(design.heater_w, max(0, available - electronics)) if frozen < 0 and T < design.heater_on_k else 0.0
-            if electronics < desired - 1e-9 or frozen >= 0:
+        asleep = hibernate and illumination <= 0 and beam[i] <= 0
+        desired = sleep_w if asleep else active_w
+        short = desired - 1e-9
+        start = 0
+        quiet = _quiet_interval(alive, energy, supply, desired, hw, B, sub, dt) if lean and T > 0 and not (alive and T < kill) else None
+        if quiet is not None:
+            electronics, heater_on, d_off, d_on, on_ok = quiet
+            power_off, power_on, used_on = electronics + rhu + 0.0, electronics + rhu + heater_on, heater_on * dt / 3600
+            if not (power_off >= 0 and power_on >= 0):
+                quiet = None
+        if quiet is not None:
+            # The general step below with its branches taken in advance: the electrical ones are
+            # fixed for the interval (_quiet_interval); with heater_on_k <= radiator_on_k at most
+            # one of heater and radiator is on; and the conductance stays positive, because T
+            # starts positive and each step moves it toward a positive equilibrium.
+            if alive and electronics < short:
                 full_service = False
-            emissivity = design.radiator_emissivity if T > design.radiator_on_k else design.emissivity
-            T = step_temp(T, electronics + design.rhu_w, heater, dt, design.heat_capacity, emissivity,
-                          design.area, design.k_loss, sink[i])
-            lowest = min(lowest, T)
-            used += heater * dt / 3600
-            energy = float(min(design.battery_wh, max(0, energy + (supply - electronics - heater) * dt / 3600)))
-            if frozen < 0 and T < design.kill_k:
-                frozen, full_service = i, False
-        reason = "Unknown environment" if not valid[i] else "Frozen" if frozen >= 0 else "Insufficient power" if not full_service else "Available"
-        state = (1 if asleep else 2) if valid[i] and full_service and frozen < 0 else 0
-        soc[i], temp[i], mode[i], heat[i] = energy / max(design.battery_wh, 1e-9), lowest, state, used / dt_h
-        reasons.append(reason)
-    return dict(soc=soc, temp_k=temp, mode=mode, heater_w=heat, frozen_step=frozen, reason=reasons, sink_k=sink)
+            freeze_k = kill if alive else -inf
+            for k in range(sub):
+                if T > ron:
+                    conductance = kl + rad_open * (T + Te) * (T*T + Te2)
+                    T = T - (Te + power_off / conductance - T) * expm1(conductance * back / C)
+                    energy = energy + d_off
+                elif T < hon:
+                    if not on_ok:
+                        start = k
+                        break
+                    used += used_on  # adding 0.0 when the heater has nothing to draw changes nothing
+                    conductance = kl + rad_closed * (T + Te) * (T*T + Te2)
+                    T = T - (Te + power_on / conductance - T) * expm1(conductance * back / C)
+                    energy = energy + d_on
+                else:
+                    conductance = kl + rad_closed * (T + Te) * (T*T + Te2)
+                    T = T - (Te + power_off / conductance - T) * expm1(conductance * back / C)
+                    energy = energy + d_off
+                if T < lowest:
+                    lowest = T
+                    if T < freeze_k:  # lowest started at or above kill, so a freeze always lands here
+                        frozen, alive, full_service = i, False, False
+                        start = k + 1
+                        break
+            else:
+                start = sub
+        for _ in range(start, sub):
+            if alive:
+                available = supply + energy * 3600 / dt
+                electronics = desired if not available < desired else available
+                if T < hon:
+                    spare = available - electronics
+                    spare = spare if spare > 0 else 0.0  # min(hw, max(0, spare)), same ties
+                    heater = spare if spare < hw else hw
+                else:
+                    heater = 0.0
+                if electronics < short:
+                    full_service = False
+            else:
+                electronics = heater = 0.0
+            if T > ron:
+                conductance = kl + rad_open * (T + Te) * (T*T + Te2)
+            else:
+                conductance = kl + rad_closed * (T + Te) * (T*T + Te2)
+            power = electronics + rhu + heater
+            if conductance <= 0.0:
+                T = T + power * dt / C
+            else:
+                T = T - (Te + power / conductance - T) * expm1(conductance * back / C)
+            if T < lowest:
+                lowest = T
+            if heater:
+                used += heater * dt / 3600
+            energy = energy + (supply - electronics - heater) * dt / 3600
+            energy = energy if energy > 0 else 0.0  # _charge, inlined
+            energy = energy if energy < B else B
+            if alive and T < kill:
+                frozen, alive, full_service = i, False, False
+        if not valid[i]:
+            reasons.append("Unknown environment")
+        elif not alive:
+            reasons.append("Frozen")
+        else:
+            reasons.append("Available" if full_service else "Insufficient power")
+        mode.append((1 if asleep else 2) if valid[i] and full_service and alive else 0)
+        soc.append(energy / soc_scale)
+        temp.append(lowest)
+        heat.append(used / dt_h)
+    return soc, temp, mode, heat, reasons, frozen
 
 
 def minimum_battery(design, hours=LUNAR_NIGHT_H, T_env=100.0):

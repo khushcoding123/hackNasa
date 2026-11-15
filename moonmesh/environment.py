@@ -28,9 +28,9 @@ def node_states(mission, sunlight, known, distance_km=0, lander=False):
     exposure = np.maximum(0, np.minimum(time + hours, mission.dust_start_h + mission.dust_duration_h)
                           - np.maximum(time, mission.dust_start_h))
     load, value = [], 0.0
-    for dt in exposure:
-        value = float(np.clip(value + mission.dust_deposition_per_day * dt / 24
-                              - mission.dust_cleaning_per_day * hours / 24, 0, 1))
+    for dt in exposure.tolist():
+        value = value + mission.dust_deposition_per_day * dt / 24 - mission.dust_cleaning_per_day * hours / 24
+        value = 0.0 if value < 0 else 1.0 if value > 1 else value  # clip to 0..1 without a numpy call per sample
         load.append(value if distance_km <= mission.dust_radius_km else 0.0)
     load = np.asarray(load)
     states = {}
