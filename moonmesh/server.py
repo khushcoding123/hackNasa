@@ -16,6 +16,7 @@ from .science import scenario
 from .mission_sim import reference_mission
 from . import tiles
 from ora.api import router as ora_router
+from ora.hazard_api import router as hazard_router
 try:  # Surface coverage needs the optional training environment (rasterio, numba, prepared terrain).
     from moonmesh_train.coverage import router as coverage_router
     from moonmesh_train.ml_compare import router as ml_compare_router  # experimental, not approved
@@ -198,6 +199,7 @@ def terrain_site(lat: float, lon: float, half_width_m: float, size: int):
 
 
 app.include_router(ora_router)
+app.include_router(hazard_router)
 if coverage_router is not None:
     app.include_router(coverage_router)
     app.include_router(ml_compare_router)

@@ -1,0 +1,33 @@
+# Thermal hazard model (research / experimental). Spec: docs/HAZARD_RESPONSE.md
+seed: 42
+source:
+  # Real data. Provenance, licence and URLs are written to the dataset manifest and docs/HAZARD_RESPONSE.md.
+  prp_south_url: https://pds-geosciences.wustl.edu/lro/urn-nasa-pds-lro_diviner_derived1/data_derived_prp/dlre_prp_south.tab
+  prp_label_url: https://pds-geosciences.wustl.edu/lro/urn-nasa-pds-lro_diviner_derived1/data_derived_prp/dlre_prp_south.lbl
+  prp_xml_url: https://pds-geosciences.wustl.edu/lro/urn-nasa-pds-lro_diviner_derived1/data_derived_prp/dlre_prp_south.xml
+  prp_bytes: 604800210            # from the HTTP Content-Length and the label (210 bytes x 2,880,001 records incl. header)
+  prp_dir: diviner_prp             # under <data root>/raw/
+  dem: LDEM_75S_240M.IMG           # read-only, from the app cache (.moonmesh-data/terrain)
+domain:
+  max_lat_deg: -80.0               # PRP label: mesh "covers a square region centered on the pole to 80 degrees latitude"
+labels:
+  # ice_depth is reported as -999.0 when deeper than 2.8738 m (label text). 0 means ice is stable at the surface.
+  cold_trap_ice_depth_m: 0.0
+split:
+  block_km: 60                     # whole 60 km squares are assigned to one split
+  fractions: {train: 0.6, val: 0.2, test: 0.2}
+  buffer_km: 15                    # training points this close to a val/test block are dropped (horizon features see 30 km)
+  min_points_per_block: 200
+training:
+  train_subsample: 400000          # random rows from the train blocks (seeded)
+  hist_gradient_boosting:          # chosen on the validation blocks only (see report); test blocks are scored once
+    max_iter: 300
+    learning_rate: 0.08
+    max_leaf_nodes: 63
+    min_samples_leaf: 200
+    l2_regularization: 1.0
+  interval_quantiles: [0.1, 0.9]
+output:
+  dataset: hazard_thermal_v1.npz
+  model: ora_hazard_thermal.joblib
+  report: hazard_thermal

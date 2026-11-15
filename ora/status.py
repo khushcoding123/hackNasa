@@ -31,6 +31,9 @@ MODELS = {
     "ora_gain_model": dict(card="marginal_gain", fallback="not used by the app; ora.benchmark and ora.stress cannot score it"),
     "ora_view_estimator": dict(card="view_estimator", fallback="not used by the app", train="python -m ora accuracy"),
     "ora_gain_selector": dict(card="gain_selector", fallback="not used by the app", train="python -m ora accuracy"),
+    # Research / experimental thermal hazard model trained on Diviner data; the dashboard shows it beside the physics, never instead of it.
+    "ora_hazard_thermal": dict(card="hazard_thermal", fallback="the Hazard response view reports the model as unavailable; mission results are unchanged",
+                               train="python training/scripts/18_build_hazard_dataset.py then 19_train_hazard.py (docs/HAZARD_RESPONSE.md; `python -m ora preflight` shows the state)"),
 }
 LIBRARIES = ("numpy", "scipy", "spiceypy", "fastapi", "uvicorn", "networkx", "scikit-learn", "PyYAML", "joblib", "pydantic", "pytest", "httpx")
 
