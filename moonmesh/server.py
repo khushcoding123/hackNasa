@@ -8,6 +8,7 @@ from .data import LOCAL, SITES
 from .models import Mission
 from .excel import ExportRequest, export_workbook
 from .science import scenario
+from .mission_sim import reference_mission
 from . import tiles
 from ora.api import router as ora_router
 try:  # Surface coverage needs the optional training environment (rasterio, numba, prepared terrain).
@@ -47,6 +48,16 @@ def status():
 @app.post("/api/mission")
 def mission(body: Mission):
     return compute(body)
+
+
+@app.get("/api/mission/reference")
+def mission_reference():
+    try:
+        return reference_mission()
+    except FileNotFoundError as error:
+        raise HTTPException(503, str(error)) from error
+    except (SpiceyError, ValueError) as error:
+        raise HTTPException(422, f"Cannot run the Haworth reference mission: {error}") from error
 
 
 @app.post("/api/export/xlsx")

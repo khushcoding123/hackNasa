@@ -4,6 +4,24 @@ export interface Metrics { availability:number; longest:number; total:number; in
 export interface Site {name:string; lat:number; lon:number; elevation:number; mean_slope:number|null; max_slope:number|null; terrain_coverage:number; resolution:number}
 export interface Candidate {environment:Record<string,EnvironmentState>; id:string; x:number; y:number; lat:number; lon:number; distance:number; slope:number; elevation:number; los:boolean|null; surface_margin:number; earth:Metrics; solar:Metrics; power:Metrics; coverage:Metrics; recovered:number; temporal_coverage:boolean[]; unknown_samples:number; minimum_reserve:number; sunlight:boolean[]; powered:boolean[]; reserve:number[]; minimum_earth_margin:number}
 export interface Outage {start:string; end:string; first:number; last:number; hours:number; causes:string[]}
+type PositionKm = [number, number, number];
+export type ReferenceFailure = "nominal" | "relay" | "satellite";
+export interface ReferenceSample {
+ time:string;
+ orbiter_km:PositionKm;
+ receiver_km:PositionKm;
+ hops:Record<string,{status:"available"|"unavailable"|"unknown"; reasons:string[]; range_km:number;
+  margin_db:number|null; elevation_deg?:number; azimuth_deg?:number; clearance_deg?:number|null}>;
+ node_failures:Record<string,string>;
+}
+export interface ReferenceMission {
+ site:string; start:string; end:string; minutes:number;
+ lander_km:PositionKm; relay_km:PositionKm;
+ samples:ReferenceSample[];
+ baselines:Record<string,{online:boolean[]; metrics:Metrics}>;
+ states:Record<ReferenceFailure,{online:boolean[]; metrics:Metrics; reasons:string[][]; outages:Outage[]}>;
+ assumptions:Record<string,unknown>;
+}
 export interface Assessment {
  status:"requirements_met"|"requirements_failed"|"insufficient_evidence"; label:string; subject:string; kind:"calculated window"|"scenario outcome";
  architecture:string; scope:string; checks:{name:string; target:string; value:unknown; met:boolean|null; basis:string}[];

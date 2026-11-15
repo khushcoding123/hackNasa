@@ -2,7 +2,7 @@
 
 MOONMESH is a lunar communication planning product targeting **lander → surface relay → lunar communications satellite → Earth**. It will place surface relays against terrain, satellite access, power, blackout, and resilience constraints. NASA LOLA elevation data and JPL DE440 SPICE ephemerides support the existing terrain and Earth/Sun geometry.
 
-**Current prototype:** the planner calculates direct-to-Earth service and lander → surface relay → Earth paths. Satellite orbits and satellite-assisted links are planned and are not included in current results. See [Communication architecture](docs/COMMUNICATION_ARCHITECTURE.md) for the target, modeling requirements, and implementation boundary.
+**Current prototype:** the configurable planner calculates direct-to-Earth and lander → surface relay → Earth paths. Open **End-to-end simulation** from the workspace menu to run the fixed Haworth lander → relay → satellite → Earth scenario, inspect blackouts, test failures, and download the results. See [Communication architecture](docs/COMMUNICATION_ARCHITECTURE.md) for model inputs and scope.
 
 ## Run locally
 

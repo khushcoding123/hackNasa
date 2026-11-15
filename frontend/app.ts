@@ -2,7 +2,7 @@ import {MoonView} from "./moon.js";
 import {surfaceCoverage} from "./surface.js";
 import {icon} from "./icons.js";
 import {map, timeline, horizon, powerTimeline} from "./charts.js";
-import type {Result, Comparison, Candidate, Sensitivity, Metrics, AreaResult} from "./types.js";
+import type {Result, Comparison, Candidate, Sensitivity, Metrics, AreaResult, ReferenceMission, ReferenceFailure} from "./types.js";
 import {assessmentBadge, assessmentHtml} from "./evidence.js";
 import {ORBIT_PERIOD, satelliteAccess, satellitePosition} from "./orbital-preview.js";
 
@@ -16,6 +16,9 @@ let moon:MoonView|undefined;
 let stale=false, configured=false, shownStale=false;
 let area:[number,number][]|undefined, areaKey="", areaDirty=false, layout:AreaResult|undefined, layoutKey="", layoutFormat="";
 let satelliteSeconds=0;
+let reference:ReferenceMission|undefined, referenceIndex=0, referenceFailure:ReferenceFailure="nominal";
+let referenceBusy=false, referenceError="";
+const independentViews=["landing","configure","surface","reference"];
 const steps=["landing","configure","layout","overview","communication","resilience","cost"];
 const MOON_R=1737400, DEG=Math.PI/180;
 const toXY=(lat:number,lon:number)=>{const rho=2*MOON_R*Math.tan((90+lat)*DEG/2);return [rho*Math.sin(lon*DEG),rho*Math.cos(lon*DEG)];};
@@ -23,7 +26,8 @@ const toLatLon=(x:number,y:number):[number,number]=>[2*Math.atan(Math.hypot(x,y)
 let sites:Record<string,[string,number,number]>={};
 const views:Record<string,[string,string]>={landing:["Start with the Moon.","01 · Explore the surface. Then draw the area you want to analyse: a square or any shape."],configure:["Define your mission.","Select an area, choose your dates, and set your communication goals."],layout:["Plan the network.","03 · The best layout of towers and links inside the area you drew, compared with simpler formats."],overview:["Your mission, in three dimensions.","04 · Inspect the lander and calculated relay network. Explore the local terrain, or switch to Whole Moon for context."],sites:["Choose your horizon.","Compare landing regions over the same mission period and assumptions."],communication:["Understand the silence.","Trace each communication blackout to terrain, geometry, and RF conditions."],relays:["Bridge the distance.","Explore the smallest screened relay configuration and its physical constraints."],resilience:["Plan for the unexpected.","Disable a relay and inspect how the remaining paths perform."],cost:["Review the network cost.","See the total installed network estimate and download the itemized Excel breakdown."],sensitivity:["Question the assumptions.","Change one assumption at a time and compare the modeled outcome."],data:["The science behind the signal.","Inspect sources, model assumptions, and the limits of these planning estimates."]};
 views.surface=["Surface coverage","Explore simulated surface links independently of mission dates."];
-document.querySelector('.menu-pop')?.insertAdjacentHTML('afterbegin','<button data-view="surface">Surface coverage</button>');
+views.reference=["End-to-end simulation","Run the Haworth reference mission and inspect each hop from the lander to Earth."];
+document.querySelector('.menu-pop')?.insertAdjacentHTML('afterbegin','<button data-view="reference">End-to-end simulation</button><button data-view="surface">Surface coverage</button>');
 function dirty(){
  // Compare only editable fields; API configuration may include additional model defaults.
  const same=(a:unknown,b:unknown):boolean=>a!==null&&typeof a==="object"?Object.entries(a).every(([k,v])=>same(v,(b as Record<string,unknown>)?.[k])):a===b;
@@ -54,13 +58,13 @@ document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!document.body.clas
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&document.body.classList.contains("nav-open"))setNavigation(false);});
 function updateNavigation(){
  document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(b=>{
-  const available=["landing","configure","surface"].includes(b.dataset.view!)||(!!result&&!stale);
+  const available=independentViews.includes(b.dataset.view!)||(!!result&&!stale);
   b.disabled=!available;b.title=available?"":"Complete mission setup and calculate a network first.";
   b.classList.toggle("completed",!!result&&!stale&&steps.indexOf(b.dataset.view!)<steps.indexOf(active));
  });
  for(const id of ["json","csv","report","xlsx"])$<HTMLButtonElement>("#"+id).disabled=!result||stale||(id==="xlsx"&&exporting);
  document.querySelectorAll<HTMLButtonElement>("[data-excel]").forEach(b=>b.disabled=!result||stale||exporting);
- $(".export-menu").hidden=!result||stale||active==="landing";
+ $(".export-menu").hidden=!result||stale||["landing","reference"].includes(active);
  if(moon&&shownStale!==stale){shownStale=stale;moon.setMission(stale?undefined:result);}
  $("#start-mission").hidden=active!=="landing";
  $<HTMLButtonElement>('button[type="submit"]').disabled=busy||!configured||!area;
@@ -88,7 +92,17 @@ document.querySelectorAll<HTMLButtonElement>("[data-region]").forEach(button=>bu
  status(`Exploring ${button.textContent?.replace("↗", "").trim()}. Draw an area to plan a network.`);
 });
 function navigate(view:string,focus=true){
- if(!["landing","configure","surface"].includes(view)&&(!result||stale))view="configure";
+ if(!independentViews.includes(view)&&(!result||stale))view="configure";
+ if(active==="reference"&&view!=="reference"){
+  moon?.setReferenceMission();
+  moon?.setMission(stale?undefined:result);
+  moon?.update(cursor,disabled,selected);
+  moon?.setLayout(layout,layoutFormat,satelliteSeconds);
+ }
+ if(active!=="reference"&&view==="reference"){
+  moon?.setMission(undefined);
+  moon?.setLayout(undefined,"");
+ }
  active=view;
  moon?.setSatellitePreview(view==="layout"?layout:undefined,satelliteSeconds);
  if(view==="landing")document.body.classList.remove("exploring");
@@ -334,6 +348,7 @@ function environmentPanel(){
 function render(){
  document.body.dataset.step=active;flow();form.hidden=active!=="configure";$("#area-setup").hidden=active!=="configure";
  if(active==="surface"){$("#flow-actions").innerHTML="";surfaceCoverage(outlet);return;}
+ if(active==="reference"){$("#flow-actions").innerHTML="";renderReference();return;}
  if(active==="landing"){
   outlet.innerHTML=`<section class="panel introduction"><p class="eyebrow">A CONNECTION STARTS HERE</p><h2>From the surface to a working plan.</h2><p>Search, zoom and click the Moon to read coordinates, elevation and nearby features. Then <strong>draw the area you care about</strong>, a square or any shape of any size anywhere on the Moon, and MOONMESH plans the towers and links inside it.</p><div class="draw-actions"><button class="primary" data-draw-start="rect">${icon("rectangle")} Draw a square</button><button data-draw-start="free">${icon("pen")} Draw freeform</button><button data-pole-go>${icon("target")} Go to the pole</button></div><p>Terrain can hide Earth from a lunar lander. Relay towers may help restore contact. MOONMESH shows when, where, and under which assumptions.</p><ol class="journey-list"><li><strong>Draw an area</strong><span>Any size, anywhere on the Moon.</span></li><li><strong>Plan the layout</strong><span>Towers, gateways and links, with tree, loop and mesh compared.</span></li><li><strong>Understand and test it</strong><span>The Earth link, blackouts and relay failures.</span></li></ol><button class="primary" data-go="configure">Set up my mission →</button><p class="caption">${result&&!stale?"Your applied mission is ready in Step 3.":"No towers are placed before you calculate a mission."}</p></section>`;
   connect();return;
@@ -374,6 +389,83 @@ function satelliteReadout(L:AreaResult){
  const satellite=satellitePosition(L.site.lat,L.site.lon,satelliteSeconds);
  return `<p class="callout">Pass time: +${n(satelliteSeconds/60,1)} min · ${L.nodes.filter(v=>satelliteAccess(v,satellite).visible).length} of ${L.nodes.length} nodes above the 10° mask</p>`+table(["Node → S1","Elevation","Range","Geometric access"],L.nodes.map(v=>{const a=satelliteAccess(v,satellite);return row([`${v.role==="gateway"?"G":v.role==="mine"?"M":"R"}${v.id} → S1`,`${n(a.elevationDeg,1)}°`,`${n(a.rangeM/1000,0)} km`,a.visible?'<span class="green">Above mask</span>':'<span class="amber">Below mask · no link drawn</span>']);}));
 }
+
+async function runReference(){
+ if(referenceBusy)return;
+ referenceBusy=true;referenceError="";renderReference();
+ try{
+  reference=await api<ReferenceMission>("mission/reference");
+  referenceFailure="nominal";
+  const firstOnline=reference.states.nominal.online.indexOf(true);
+  referenceIndex=Math.max(firstOnline,0);
+ }catch(error){
+  referenceError=(error as Error).message;
+ }finally{
+  referenceBusy=false;
+  if(active==="reference"){
+   renderReference();
+   if(reference&&!referenceError)moon?.setReferenceMission(reference,referenceIndex,referenceFailure,true);
+  }
+ }
+}
+
+function renderReference(){
+ const runButton=`<button id="run-reference" class="primary" ${referenceBusy?"disabled":""}>${referenceBusy?"Running mission…":reference?"Run again":"Run Haworth mission"}</button>`;
+ outlet.innerHTML=panel("Haworth reference scenario",`<p>One lander, one fixed surface relay, one hypothetical satellite, and a fixed Earth receiver. The simulation evaluates a 24-hour mission at five-minute intervals.</p>${runButton}
+  ${referenceError?`<p role="alert" class="callout amber">${escape(referenceError)}</p>`:""}`);
+ $("#run-reference").onclick=()=>void runReference();
+ if(!reference)return;
+ outlet.insertAdjacentHTML("beforeend",panel("Mission playback",`
+  <div class="controls"><label>Simulated failure <select id="reference-failure">
+   <option value="nominal">None</option><option value="relay">Disable surface relay</option><option value="satellite">Disable satellite</option>
+  </select></label><button id="frame-reference">Frame path on Moon</button><button id="export-reference">Download simulation JSON</button></div>
+  <label for="reference-time">Mission timestamp</label>
+  <input id="reference-time" type="range" min="0" max="${reference.samples.length-1}" value="${referenceIndex}">
+  <div id="reference-sample" aria-live="polite"></div>
+  <p class="caption">Green map segments show a complete path. Dashed segments mark individual usable hops during a blackout. The Earth segment shows direction at lunar scale.</p>
+  <div id="reference-summary"></div>
+  <details><summary>Simulation assumptions</summary><p>The 500 km circular orbit uses DE440 lunar frame transforms. The Earth receiver uses approximate rotation and a 10° elevation mask. Radios assume free-space loss, ideal tracking, and a single 128 kbps stream. The satellite is assumed powered unless disabled. The surface nodes use the cold + dust case and start fully charged.</p></details>`));
+ const slider=$<HTMLInputElement>("#reference-time");
+ const failure=$<HTMLSelectElement>("#reference-failure");failure.value=referenceFailure;
+ const frame=()=>moon?.setReferenceMission(reference,referenceIndex,referenceFailure,true);
+ slider.oninput=()=>{referenceIndex=Number(slider.value);paintReference();};
+ failure.onchange=()=>{referenceFailure=failure.value as ReferenceFailure;referenceSummary();paintReference();};
+ $("#frame-reference").onclick=frame;
+ $("#export-reference").onclick=()=>download(JSON.stringify({...reference,selected_failure:referenceFailure,
+  selected_sample:referenceIndex,active:reference!.states[referenceFailure]},null,2),"json","application/json","moonmesh-haworth-simulation.json");
+ referenceSummary();paintReference();
+}
+
+function paintReference(){
+ if(!reference)return;
+ const sample=reference.samples[referenceIndex], state=reference.states[referenceFailure];
+ const online=state.online[referenceIndex];
+ const hops=Object.entries(sample.hops).map(([name,hop])=>
+  row([escape(name),hop.status,n(hop.range_km)+" km",n(hop.margin_db)+" dB",
+   hop.elevation_deg===undefined?"—":n(hop.elevation_deg)+"°",escape(hop.reasons.join("; "))||"—"]));
+ $("#reference-sample").innerHTML=`<p class="callout ${online?"":"amber"}">${utc(sample.time)} · ${online?"End-to-end path available":"End-to-end blackout"}</p>`+
+  table(["Hop","Physical link","Range","RF margin","Elevation","Link blockers"],hops)+
+  (online?"":`<p>${state.reasons[referenceIndex].map(escape).join(" · ")}</p>`);
+ moon?.setReferenceMission(reference,referenceIndex,referenceFailure);
+}
+
+function referenceSummary(){
+ if(!reference)return;
+ const state=reference.states[referenceFailure];
+ const summary=[["Satellite-assisted path",state.metrics] as const,
+  ...Object.entries(reference.baselines).map(([name,baseline])=>[name,baseline.metrics] as const)];
+ $("#reference-summary").innerHTML=table(["Architecture","Availability","Longest blackout"],
+  summary.map(([name,m])=>row([escape(name),pct(m.availability),hours(m.longest)])))+
+  '<p class="caption">The two baseline rows use the planner’s Earth-center model and nominal node states. The failure control applies to the satellite-assisted path.</p>'+
+  `<details><summary>Satellite path blackouts (${state.outages.length})</summary>`+
+  table(["Start","Duration","Blockers during interval"],state.outages.map(o=>row([
+   `<button data-reference-time="${o.first}">${utc(o.start)}</button>`,hours(o.hours),escape(o.causes.join(" · "))])))+"</details>";
+ $("#reference-summary").querySelectorAll<HTMLButtonElement>("[data-reference-time]").forEach(button=>button.onclick=()=>{
+  referenceIndex=Number(button.dataset.referenceTime);
+  $<HTMLInputElement>("#reference-time").value=String(referenceIndex);paintReference();
+ });
+}
+
 function satellitePanel(L:AreaResult){
  return panel("Surface nodes → relay satellite",`<p>Blue beams show each node’s geometric access to S1; green lines show the surface network. Move through the pass to see access open and close.</p><div class="controls"><button data-satellite-view>Show satellite and nodes</button><button data-surface-view>Zoom to surface network</button></div><label for="satellite-time">Satellite pass · minutes after overhead</label><input id="satellite-time" type="range" min="0" max="${Math.round(ORBIT_PERIOD)}" step="10" value="${satelliteSeconds}" style="width:100%"><div id="satellite-readout" aria-live="polite">${satelliteReadout(L)}</div><p class="caption">Assumed single satellite: circular polar orbit, 500 km altitude, ${n(ORBIT_PERIOD/60,1)} minute period; overhead at preview time zero. Approximate uniform lunar rotation, 10 m antennas and 10° elevation mask. Marker enlarged for visibility. <a href="https://ssd.jpl.nasa.gov/astro_par.html" target="_blank" rel="noopener noreferrer">Lunar gravity: JPL</a>.</p><p class="caption">Geometry preview only. Local terrain blockage, radio budgets, pointing, capacity, power and satellite-to-Earth access are not evaluated. A node below the mask needs a surface route to another node with satellite access. Existing coverage and failure results still use the direct-to-Earth baseline.</p>`);
 }
