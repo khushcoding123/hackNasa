@@ -1,0 +1,17 @@
+.moonmesh-data
+node_modules
+shared-data
+training
+data
+tests
+notebooks
+analysis
+hardware
+scenarios
+output
+tmp
+.playwright-cli
+.pytest_cache
+moonmesh_workspace.egg-info
+*.pdf
+*.docx
