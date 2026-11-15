@@ -1,0 +1,7 @@
+seed: 42
+coverage_config: surface_coverage.yaml
+output: demo/haworth
+site: haworth
+tx_heights_m: [5, 50]
+rx_height_m: 2
+display_size: 256
