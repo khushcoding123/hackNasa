@@ -1,13 +1,15 @@
 import {
- ACESFilmicToneMapping, AmbientLight, Box3, BoxGeometry, BufferAttribute, BufferGeometry, CanvasTexture, Color, ConeGeometry, CylinderGeometry, DataTexture, DirectionalLight, DoubleSide, Group, Line, LineBasicMaterial, LineDashedMaterial,
+ ACESFilmicToneMapping, AmbientLight, Box3, BoxGeometry, Matrix4, BufferAttribute, BufferGeometry, CanvasTexture, Color, ConeGeometry, CylinderGeometry, DataTexture, DirectionalLight, DoubleSide, Group, Line, LineBasicMaterial, LineDashedMaterial,
  Mesh, MeshBasicMaterial, MeshStandardMaterial, PerspectiveCamera, RepeatWrapping, Scene, SphereGeometry, Spherical, Vector2, Vector3, WebGLRenderer, PCFSoftShadowMap, SRGBColorSpace,
 } from "three";
 import {OrbitControls} from "three/examples/jsm/controls/OrbitControls.js";
 import {GLTFLoader} from "three/examples/jsm/loaders/GLTFLoader.js";
+import {DRACOLoader} from "three/examples/jsm/loaders/DRACOLoader.js";
 import {ViewCube, type Vec3} from "./viewcube.js";
 import {MOON_RADIUS_M} from "./terrain-mesh.js";
 import {loadBundledPatch, loadWacPatch, loadWmsPatch, nacLayerAt, withNac} from "./site-imagery.js";
 import {satelliteAccess, satelliteState} from "./orbital-preview.js";
+import {horizonDeg, loadHorizons, type HorizonSet} from "./horizon.js";
 import {LoadingCover} from "./loading.js";
 import type {AreaNode, AreaResult, Result} from "./types.js";
 
@@ -30,6 +32,11 @@ export function detailForReach(best: SiteDetail, reach: number): SiteDetail {
 const ROLE_COLOR = {gateway: 0x84deff, relay: 0x73d8ae, mine: 0xf4ba72} as const, ROLE_LETTER = {gateway: "G", relay: "R", mine: "M"} as const;
 const SATELLITE_LINK = 0xff5ad0, SATELLITE_MODEL = "/assets/cassini-satellite.glb";
 const rad = (d: number) => d * Math.PI / 180;
+/** Mission timestamps are ISO strings that already carry their offset ("+00:00"); treat a bare one as UTC. */
+const utc = (iso: string) => Date.parse(/(Z|[+-]\d\d:?\d\d)$/i.test(iso) ? iso : iso + "Z");
+/** The Cassini file is Draco-compressed, like the copy Cesium flies on the Moon map; Three.js needs the decoder (copied to /draco/ by the build). */
+let draco: DRACOLoader | undefined;
+const gltfLoader = () => { draco ??= new DRACOLoader().setDecoderPath("/draco/"); return new GLTFLoader().setDRACOLoader(draco); };
 const clamp = (x: number, a: number, b: number) => Math.min(b, Math.max(a, x));
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&#39;"}[c]!));
 
@@ -113,7 +120,11 @@ export class SiteView {
  private areaReach = 0;
  private areaCentre = new Vector2();
  private planRing: {points: Vector2[]; line: Line; label: {el: HTMLElement; world: Vector3}} | undefined;
- private satellite: {group: Group; dir: Vector3; label: {el: HTMLElement; world: Vector3}; links: {part: AreaPart; line: Line}[]; size: number} | undefined;
+ private satellite: {group: Group; dir: Vector3; aim: Vector3; boom: Vector3; label: {el: HTMLElement; world: Vector3}; links: {part: AreaPart; line: Line}[];
+  linked: number; elevation: number; rangeKm: number; failed?: boolean} | undefined;
+ // Satellite clock: seconds after the overhead pass (the mission start when a mission is applied).
+ private satTime = 0; private satSpan = 86_400; private satPlaying = true; private satSpeed = 60; private satLast = 0; private satShown = 0;
+ private horizons: HorizonSet | undefined;
 
  constructor(private root: HTMLElement, private options: SiteOptions) {
   this.result = options.result; this.index = options.index ?? 0; this.disabled = new Set(options.disabled ?? []);
@@ -130,6 +141,12 @@ export class SiteView {
     <button data-close>← Back to Moon</button>
    </div>
    <div class="site3d-hud"><span data-imagery>Imagery · loading</span><span data-quality>Terrain · loading</span><span>1× measured relief · close-up grain is illustrative</span><span>Drag to orbit · scroll to zoom</span></div>
+   <div class="site3d-timebar" hidden role="group" aria-label="Satellite time">
+    <button type="button" data-sat-play aria-label="Pause the satellite">❚❚</button>
+    <input type="range" data-sat-time min="0" max="86400" step="10" value="0" aria-label="Time from the start of the mission to its end">
+    <span data-sat-text aria-live="off"></span>
+    <select data-sat-speed aria-label="Playback speed"><option value="60">1 min/s</option><option value="600">10 min/s</option><option value="3600">1 h/s</option><option value="21600">6 h/s</option></select>
+   </div>
    <details class="site3d-panel" ${root.clientWidth >= 700 ? "open" : ""}><summary>Light &amp; camera</summary>
     <label class="site3d-light-mode" hidden>Lighting <select data-light-mode><option value="inspection">Inspection light</option><option value="mission">Mission Sun</option></select></label>
     <label>Sun azimuth <output data-az-out></output><input data-az type="range" min="0" max="359" step="1" value="${this.az}"></label>
@@ -165,7 +182,7 @@ export class SiteView {
   this.observer = new ResizeObserver(() => this.resize()); this.observer.observe(root);
   void this.load();
   this.setupCube();
-  const loop = () => { if (this.disposed) return; this.controls.update(); this.renderer.render(this.scene, this.camera); this.cube?.update(); this.placeLabels(); this.frame = requestAnimationFrame(loop); };
+  const loop = () => { if (this.disposed) return; this.tickSatellite(); this.controls.update(); this.renderer.render(this.scene, this.camera); this.cube?.update(); this.placeLabels(); this.frame = requestAnimationFrame(loop); };
   loop();
  }
 
@@ -183,7 +200,11 @@ export class SiteView {
   range("[data-scale]", "[data-scale-out]", v => `×${v}`, v => { this.scale = v; this.applyScale(); });
   range("[data-ex]", "[data-ex-out]", v => `×${v}`, v => { if (this.terrain) this.terrain.scale.y = v; if (this.innerTerrain) this.innerTerrain.scale.y = v; this.applyScale(); });
   const time = this.q<HTMLInputElement>("[data-time]");
-  time.oninput = () => this.setIndex(Number(time.value), true);
+  time.oninput = () => { this.setIndex(Number(time.value), true); const step = this.sampleSeconds(); if (step) this.setSatTime(Number(time.value) * step, false); };
+  const satTime = this.q<HTMLInputElement>("[data-sat-time]");
+  satTime.oninput = () => this.setSatTime(Number(satTime.value));
+  this.q<HTMLButtonElement>("[data-sat-play]").onclick = () => this.setSatPlaying(!this.satPlaying);
+  this.q<HTMLSelectElement>("[data-sat-speed]").onchange = e => { this.satSpeed = Number((e.target as HTMLSelectElement).value); };
   this.q<HTMLSelectElement>("[data-light-mode]").onchange = e => {
    this.lightMode = (e.target as HTMLSelectElement).value as "inspection" | "mission";
    if (this.lightMode === "mission") this.setIndex(this.index);
@@ -538,42 +559,123 @@ export class SiteView {
 
  private buildSatellite(label: {el: HTMLElement; world: Vector3}) {
   const area = this.options.area!; const L = area.result;
-  const state = satelliteState(L.site.lat, L.site.lon, area.seconds);
-  const from = this.basis.origin, sat = new Vector3(...state.position), delta = sat.clone().sub(from);
-  const rangeKm = delta.length() / 1000;
-  const dir = new Vector3(delta.dot(this.basis.east), delta.dot(this.basis.up), -delta.dot(this.basis.north)).normalize();
-  const elevation = Math.asin(clamp(dir.y, -1, 1)) * 180 / Math.PI;
-  // Shown just above the horizon when it is below it, so its bearing is still readable; the label states the real elevation.
-  if (elevation < 4) { const flat = new Vector3(dir.x, 0, dir.z).normalize(); dir.copy(flat.multiplyScalar(Math.cos(rad(4)))).setY(Math.sin(rad(4))); }
   const group = new Group(); group.name = "satellite";
   this.markers.add(group);
-  label.el.textContent = `S1 · assumed relay satellite · ${Math.round(rangeKm).toLocaleString()} km away · ${elevation.toFixed(0)}° ${elevation < 0 ? "below horizon" : "up"} · distance not to scale`;
-  const links: {part: AreaPart; line: Line}[] = [];
-  for (const part of this.areaParts) {
-   if (!satelliteAccess(part.node, state.position, state.boresight).visible) continue;
+  // One link per node; each is shown only while that node can see the satellite, so they open and close one by one.
+  const links = this.areaParts.map(part => {
    const line = new Line(new BufferGeometry(), new LineDashedMaterial({color: SATELLITE_LINK, dashSize: 30, gapSize: 22}));
-   this.markers.add(line); links.push({part, line});
-  }
-  this.satellite = {group, dir, label, links, size: 1};
-  this.q<HTMLElement>(".site3d-hud span:nth-child(3)").textContent = `1× measured relief · satellite ${Math.round(rangeKm).toLocaleString()} km away, drawn closer · ${links.length} of ${this.areaParts.length} nodes see it`;
-  const fallback = () => {
-   const body = new Mesh(new BoxGeometry(1, 1, 1.2), new MeshStandardMaterial({color: 0xd9dde2, roughness: 0.4, metalness: 0.7}));
-   const wing = new MeshStandardMaterial({color: 0x173148, roughness: 0.35, metalness: 0.3});
-   for (const s of [-1, 1]) { const p = new Mesh(new BoxGeometry(2.6, 0.05, 0.9), wing); p.position.x = s * 1.9; body.add(p); }
-   const dish = new Mesh(new ConeGeometry(0.7, 0.35, 24, 1, true), new MeshStandardMaterial({color: 0xf0f0ea, side: DoubleSide})); dish.position.y = -0.7; body.add(dish);
-   return body;
-  };
-  const place = (model: Group | Mesh, across: number) => { model.userData.across = across; group.add(model); this.placeArea(); };
-  new GLTFLoader().load(SATELLITE_MODEL, gltf => {
-   if (this.disposed) return;
+   line.visible = false; this.markers.add(line); return {part, line};
+  });
+  this.satellite = {group, dir: new Vector3(0, 1, 0), aim: new Vector3(0, -1, 0), boom: new Vector3(1, 0, 0), label, links, linked: 0, elevation: 90, rangeKm: 0};
+  // Time dial: the whole mission when one is applied, otherwise one day from the overhead pass.
+  const r = this.result;
+  this.satSpan = r && r.times.length > 1 ? Math.max(3600, (utc(r.times[r.times.length - 1]) - utc(r.times[0])) / 1000) : 86_400;
+  this.satTime = clamp(area.seconds, 0, this.satSpan);
+  this.satPlaying = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  this.q<HTMLElement>(".site3d-timebar").hidden = false;
+  this.q<HTMLInputElement>("[data-sat-time]").max = String(Math.round(this.satSpan));
+  void loadHorizons(L).then(set => { if (this.satellite?.group === group) { this.horizons = set; this.updateSatellite(); } });
+  // The exact model the Moon map flies (NASA's Cassini, as supplied), placed with the same axes: dish at -Z, boom along +Y.
+  gltfLoader().load(SATELLITE_MODEL, gltf => {
+   if (this.disposed || this.satellite?.group !== group) return;
    const model = gltf.scene;
-   model.traverse(o => { if (o instanceof Mesh) { o.castShadow = false; const m = o.material as MeshStandardMaterial; if (m) m.envMapIntensity = 1; } });
-   // Cassini's high-gain dish faces the model's +Y; point it at the area.
+   model.traverse(o => { if (o instanceof Mesh) o.castShadow = false; });
    const box = new Box3().setFromObject(model), size = box.getSize(new Vector3()), centre = box.getCenter(new Vector3());
    model.position.sub(centre);
-   const holder = new Group(); holder.add(model);
-   place(holder, Math.max(size.x, size.y, size.z));
-  }, undefined, () => { if (!this.disposed) place(fallback(), 4.5); });
+   const holder = new Group(); holder.add(model); holder.userData.across = Math.max(size.x, size.y, size.z);
+   group.add(holder); this.placeSatellite();
+  }, undefined, error => {
+   console.warn("Satellite model failed to load", error);
+   if (this.satellite) this.satellite.failed = true;
+   this.note("The satellite model could not be loaded; its links and position are still shown.");
+  });
+  this.updateSatellite();
+ }
+
+ /** Advance the satellite clock with the render loop and refresh the dial a few times a second. */
+ private tickSatellite() {
+  const now = performance.now(), dt = this.satLast ? Math.min(0.25, (now - this.satLast) / 1000) : 0; this.satLast = now;
+  if (!this.satellite) return;
+  if (this.satPlaying) {
+   this.satTime += dt * this.satSpeed;
+   if (this.satTime >= this.satSpan) { this.satTime = this.satSpan; this.setSatPlaying(false); }
+   this.updateSatellite();
+  }
+  if (now - this.satShown > 200) { this.satShown = now; this.renderTimebar(); }
+ }
+ private setSatPlaying(playing: boolean) {
+  if (playing && this.satTime >= this.satSpan) this.satTime = 0;
+  this.satPlaying = playing; this.renderTimebar();
+ }
+ /** Jump the satellite to `seconds` from the mission start; the mission-time sample (lighting, relay colours) follows. */
+ private setSatTime(seconds: number, syncSample = true) {
+  this.satTime = clamp(seconds, 0, this.satSpan);
+  this.updateSatellite(); this.renderTimebar(true);
+  const step = this.sampleSeconds();
+  if (syncSample && step && this.result) { const i = Math.round(this.satTime / step); if (i !== this.index) this.setIndex(i); }
+ }
+ private sampleSeconds() {
+  const r = this.result; if (!r || r.times.length < 2) return 0;
+  return (utc(r.times[1]) - utc(r.times[0])) / 1000;
+ }
+ private renderTimebar(force = false) {
+  const s = this.satellite; if (!s) return;
+  const slider = this.q<HTMLInputElement>("[data-sat-time]");
+  if (force || document.activeElement !== slider) slider.value = String(Math.round(this.satTime));
+  const r = this.result;
+  const when = r ? new Date(utc(r.times[0]) + this.satTime * 1000).toISOString().replace("T", " ").slice(0, 16) + " UTC"
+   : `+${Math.floor(this.satTime / 3600)} h ${String(Math.floor(this.satTime % 3600 / 60)).padStart(2, "0")} min`;
+  this.q("[data-sat-text]").innerHTML = `${when} · <b>${s.linked} of ${s.links.length} linked</b>`;
+  const play = this.q<HTMLButtonElement>("[data-sat-play]");
+  play.textContent = this.satPlaying ? "❚❚" : "▶"; play.setAttribute("aria-label", this.satPlaying ? "Pause the satellite" : "Play the satellite");
+  // The mission sample follows the playing clock too, but only when it changes.
+  const step = this.sampleSeconds();
+  if (this.satPlaying && step && r) { const i = Math.min(r.times.length - 1, Math.round(this.satTime / step)); if (i !== this.index) this.setIndex(i); }
+ }
+ /** Where the satellite is at the current clock, which way its dish points and which nodes see it (terrain horizon included). */
+ private updateSatellite() {
+  const s = this.satellite, area = this.options.area; if (!s || !area) return;
+  const L = area.result, state = satelliteState(L.site.lat, L.site.lon, this.satTime);
+  const b = this.basis, local = (v: number[], out: Vector3) => { const w = new Vector3(v[0], v[1], v[2]); return out.set(w.dot(b.east), w.dot(b.up), -w.dot(b.north)); };
+  const delta = new Vector3(...state.position).sub(b.origin);
+  s.rangeKm = delta.length() / 1000;
+  local([delta.x, delta.y, delta.z], s.dir).normalize();
+  s.elevation = Math.asin(clamp(s.dir.y, -1, 1)) * 180 / Math.PI;
+  // Shown just above the horizon when it is below it, so its bearing stays readable; the label states the real elevation.
+  if (s.elevation < 4) { const flat = new Vector3(s.dir.x, 0, s.dir.z).normalize(); s.dir.copy(flat.multiplyScalar(Math.cos(rad(4)))).setY(Math.sin(rad(4))); }
+  local(state.boresight, s.aim).normalize(); local(state.tangent, s.boom).normalize();
+  let linked = 0;
+  for (const link of s.links) {
+   const a = satelliteAccess(link.part.node, state.position, state.boresight, az => horizonDeg(this.horizons, link.part.node.id, az));
+   link.line.visible = a.visible; if (a.visible) linked++;
+  }
+  s.linked = linked;
+  s.label.el.textContent = `S1 · assumed relay satellite · ${Math.round(s.rangeKm).toLocaleString()} km away · ${s.elevation.toFixed(0)}° ${s.elevation < 0 ? "below horizon" : "up"} · distance not to scale`;
+  this.q<HTMLElement>(".site3d-hud span:nth-child(3)").textContent = `1× measured relief · satellite ${Math.round(s.rangeKm).toLocaleString()} km away, drawn closer · ${linked} of ${s.links.length} nodes see it${this.horizons ? " (terrain horizons applied)" : ""}`;
+  this.placeSatellite();
+ }
+ /** Seat the satellite along its true direction, at a shortened distance, with the map's attitude. */
+ private placeSatellite() {
+  const s = this.satellite; if (!s) return;
+  const ex = this.terrain?.scale.y ?? 1, c = this.areaCentre;
+  const distance = clamp(this.areaReach * 2.4, 1500, this.half * 0.85 - c.length());
+  const anchor = new Vector3(c.x, this.groundAt(c.x, c.y) * ex, c.y), at = anchor.clone().addScaledVector(s.dir, distance);
+  s.group.position.copy(at);
+  const holder = s.group.children[0];
+  if (holder) {
+   holder.scale.setScalar(distance * 0.11 / (holder.userData.across as number));
+   // Same rule as the map: the dish (model -Z) looks along the antenna axis, the boom (model +Y) stays near the flight direction.
+   const aim = s.aim.clone(), boom = s.boom.clone().addScaledVector(aim, -s.boom.dot(aim)).normalize();
+   const back = aim.clone().negate(), side = new Vector3().crossVectors(boom, back);
+   holder.quaternion.setFromRotationMatrix(new Matrix4().makeBasis(side, boom, back));
+  }
+  s.label.world.copy(at).add(new Vector3(0, distance * 0.09, 0));
+  const dash = distance / 70;
+  for (const link of s.links) {
+   if (!link.line.visible) continue;
+   link.line.geometry.setFromPoints([link.part.head.position, at]); link.line.computeLineDistances();
+   const m = link.line.material as LineDashedMaterial; m.dashSize = dash; m.gapSize = dash * 0.7;
+  }
  }
 
  /** Re-seat the area objects on the (possibly exaggerated) terrain at the current tower size. */
@@ -592,21 +694,7 @@ export class SiteView {
    this.areaOutline.line.geometry.setFromPoints(this.areaOutline.points.map(p => new Vector3(p.x, ground(p.x, p.y) + 4, p.y)));
    this.areaOutline.line.computeLineDistances();
   }
-  const s = this.satellite; if (!s) return;
-  const distance = clamp(this.areaReach * 2.4, 1500, this.half * 0.85 - this.areaCentre.length());
-  const c = this.areaCentre, anchor = new Vector3(c.x, ground(c.x, c.y), c.y), at = anchor.clone().addScaledVector(s.dir, distance);
-  s.group.position.copy(at);
-  const model = s.group.children[0];
-  if (model) {
-   const across = model.userData.across as number;
-   model.scale.setScalar(distance * 0.11 / across);
-   // Dish (+Y of the model) toward the area centre; the long boom stays roughly horizontal.
-   model.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), anchor.clone().sub(at).normalize());
-  }
-  s.label.world.copy(at).add(new Vector3(0, distance * 0.09, 0));
-  for (const link of s.links) { link.line.geometry.setFromPoints([link.part.head.position, at]); link.line.computeLineDistances(); }
-  const dash = distance / 70;
-  for (const link of s.links) { const m = link.line.material as LineDashedMaterial; m.dashSize = dash; m.gapSize = dash * 0.7; }
+  this.placeSatellite();
  }
  /** Horizontal unit vector from the target back toward the camera: opposite the map heading, or from the south-west. */
  private behind() {

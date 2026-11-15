@@ -9,6 +9,7 @@ import {addImagery, type ImageryHandle, type ImageryState} from "./imagery.js";
 import {MoonTerrainProvider, loadTerrainInfo} from "./terrain.js";
 import {SiteView, detailForReach} from "./site3d.js";
 import {LoadingCover} from "./loading.js";
+import {horizonDeg, loadHorizons, type HorizonSet} from "./horizon.js";
 import {icon} from "./icons.js";
 import type {AreaResult, Candidate, ReferenceFailure, ReferenceMission, Result} from "./types.js";
 import {boresightHit, orbitPeriod, satelliteAccess, satellitePosition, satelliteState, surfacePosition} from "./orbital-preview.js";
@@ -30,15 +31,17 @@ const CASSINI_SCALE = 0.0135;
 const PASS_SPEED = 60;
 const ORBIT_COLOR = Color.fromCssColorString("#ffd479"), SATELLITE_LINK_COLOR = Color.fromCssColorString("#ff5ad0");
 const satelliteModel = () => ({uri: SATELLITE_MODEL, minimumPixelSize: SATELLITE_PIXELS, scale: CASSINI_SCALE, lightColor: new Color(1.8, 1.8, 1.8, 1), maximumScale: 4_000_000, shadows: ShadowMode.DISABLED});
-/** Cassini in Cesium's entity frame (+x forward, +y left, +z up): the high-gain dish looks along the model's +x and its long magnetometer boom
- * runs along +z. The dish is aimed straight down at the Moon and the boom is laid along the flight direction. ``radial`` is straight up from the Moon. */
+/** Cassini's attitude. Cesium turns a glTF model's +Z into the entity's +X and its +Y into +Z (Y-up, Z-forward glTF convention).
+ * In the supplied model the white high-gain dish sits at the -Z end and opens along -Z, and the long boom runs along +Y.
+ * So the dish (entity -X) is aimed along ``look`` (by default straight down at the Moon) and the boom stays as close to the
+ * flight direction as the dish axis allows. ``radial`` is straight up from the Moon. The 3D site views use the same axes. */
 function satelliteAttitude(radial: Cartesian3, tangent: Cartesian3, result = new Quaternion(), look?: Cartesian3) {
- // ``look`` is where the dish points; by default straight down. The boom stays as close to the flight direction as the dish axis allows.
  const aim = look ? Cartesian3.normalize(look, new Cartesian3()) : Cartesian3.negate(radial, new Cartesian3());
  const boom = Cartesian3.subtract(tangent, Cartesian3.multiplyByScalar(aim, Cartesian3.dot(tangent, aim), new Cartesian3()), new Cartesian3());
  Cartesian3.normalize(boom, boom);
- const side = Cartesian3.cross(boom, aim, new Cartesian3()), rotation = new Matrix3();
- Matrix3.setColumn(rotation, 0, aim, rotation); Matrix3.setColumn(rotation, 1, side, rotation); Matrix3.setColumn(rotation, 2, boom, rotation);
+ const forward = Cartesian3.negate(aim, new Cartesian3());           // entity +X: the dish faces the opposite way
+ const side = Cartesian3.cross(boom, forward, new Cartesian3()), rotation = new Matrix3();
+ Matrix3.setColumn(rotation, 0, forward, rotation); Matrix3.setColumn(rotation, 1, side, rotation); Matrix3.setColumn(rotation, 2, boom, rotation);
  return Quaternion.fromRotationMatrix(rotation, result);
 }
 const wrap180 = (lon: number) => ((lon + 540) % 360) - 180;
@@ -156,7 +159,7 @@ export class MoonView {
  private satelliteSeconds = 0;
  private pass = {playing: !matchMedia("(prefers-reduced-motion: reduce)").matches, base: 0, startedAt: performance.now()};
  private live: {result: AreaResult; nodes: {node: AreaResult["nodes"][number]; at: Cartesian3}[]; visible: boolean[]; satellite: Cartesian3; aim: Cartesian3;
-  orientation: Quaternion; linked: number; seconds: number; reported: number} | undefined;
+  orientation: Quaternion; linked: number; seconds: number; reported: number; horizons?: HorizonSet} | undefined;
  private drawKind: "rect" | "free" | undefined;
  private drawing: {start: Cartesian2; screen: Cartesian2[]; points: Cartesian3[]} | undefined;
  private draft: Cartesian3[] = [];
@@ -1011,7 +1014,10 @@ export class MoonView {
   const hit = boresightHit(state), reach = Math.hypot(...state.position) - R;
   if (hit) vec(hit, L.aim); else Cartesian3.add(L.satellite, Cartesian3.multiplyByScalar(vec(state.boresight, new Cartesian3()), reach * 1.5, new Cartesian3()), L.aim);
   let linked = 0;
-  L.nodes.forEach((n, i) => { const a = satelliteAccess(n.node, state.position, state.boresight); L.visible[i] = a.visible; if (a.visible) linked++; });
+  L.nodes.forEach((n, i) => {
+   const a = satelliteAccess(n.node, state.position, state.boresight, az => horizonDeg(L.horizons, n.node.id, az));
+   L.visible[i] = a.visible; if (a.visible) linked++;
+  });
   L.linked = linked; L.seconds = t;
   // Tell the panel (slider, table) a few times a second, not every frame.
   const now = performance.now();
@@ -1038,7 +1044,9 @@ export class MoonView {
    this.satelliteSeconds = seconds;
    this.pass = {...this.pass, base: seconds, startedAt: performance.now()};
    const nodes = result.nodes.map(node => ({node, at: new Cartesian3(...surfacePosition(node.lat, node.lon, node.elevation + 10))}));
-   const live = this.live = {result, nodes, visible: nodes.map(() => false), satellite: new Cartesian3(), aim: new Cartesian3(), orientation: new Quaternion(), linked: 0, seconds, reported: 0};
+   const live = this.live = {result, nodes, visible: nodes.map(() => false), satellite: new Cartesian3(), aim: new Cartesian3(), orientation: new Quaternion(), linked: 0, seconds, reported: 0, horizons: undefined as HorizonSet | undefined};
+   // Each node's own terrain horizon: links then close one by one as the satellite sinks behind rims and hills.
+   void loadHorizons(result).then(set => { if (this.live === live) live.horizons = set; });
    this.updateLive();
    viewer.entities.add({id: "layout:orbital:satellite", position: new CallbackPositionProperty((_t, out) => Cartesian3.clone(live.satellite, out), false),
     orientation: new CallbackProperty((_t, out) => Quaternion.clone(live.orientation, out), false), model: satelliteModel(),

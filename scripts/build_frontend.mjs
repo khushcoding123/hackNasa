@@ -30,4 +30,8 @@ const source = path.join(root, "node_modules/cesium/Build/Cesium"), target = pat
 rmSync(target, {recursive: true, force: true});
 mkdirSync(target, {recursive: true});
 for (const folder of ["Workers", "ThirdParty", "Assets", "Widgets"]) cpSync(path.join(source, folder), path.join(target, folder), {recursive: true});
-console.log("Built web/app.js, web/ora.js and web/cesium");
+// Draco decoder for Three.js, so the 3D site views can open the same compressed Cassini model the Moon map flies.
+const draco = path.join(root, "web/draco");
+rmSync(draco, {recursive: true, force: true});
+cpSync(path.join(root, "node_modules/three/examples/jsm/libs/draco/gltf"), draco, {recursive: true, filter: file => !/encoder/.test(file)});
+console.log("Built web/app.js, web/ora.js, web/cesium and web/draco");

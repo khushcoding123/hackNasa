@@ -5,6 +5,7 @@ import {map, timeline, horizon, powerTimeline} from "./charts.js";
 import type {Result, Comparison, Candidate, Sensitivity, Metrics, AreaResult, ReferenceMission, ReferenceFailure, RelayConfigurationComparison, DynamicCost} from "./types.js";
 import {assessmentBadge, assessmentHtml} from "./evidence.js";
 import {hazardView} from "./hazard.js";
+import {cachedHorizons, horizonDeg} from "./horizon.js";
 import {ORBIT_LIMITS, OrbitSettings, altitudeForSpeed, getOrbit, gravityAtOrbit, inclinationDeg, orbitPeriod, orbitRadius, orbitSpeed, resetOrbit, satelliteAccess, satelliteState, setOrbit, surfaceGravity} from "./orbital-preview.js";
 
 const $=<T extends HTMLElement=HTMLElement>(q:string)=>document.querySelector<T>(q)!;
@@ -499,9 +500,10 @@ function onSatelliteTime(seconds:number){
 }
 function satelliteReadout(L:AreaResult){
  const state=satelliteState(L.site.lat,L.site.lon,satelliteSeconds), o=getOrbit();
- const access=L.nodes.map(v=>satelliteAccess(v,state.position,state.boresight));
- const why=(a:ReturnType<typeof satelliteAccess>)=>a.visible?'<span class="green">Linked</span>':a.elevationDeg<o.maskDeg?'<span class="amber">Below the elevation mask · no link drawn</span>':'<span class="amber">Outside the antenna beam · no link drawn</span>';
- return `<p class="callout">Pass time: +${n(satelliteSeconds/60,1)} min · ${access.filter(a=>a.visible).length} of ${L.nodes.length} nodes linked (above the ${n(o.maskDeg,0)}° mask${o.beamDeg<180?`, inside the ${n(o.beamDeg,0)}° beam`:""})</p>`+table(["Node → S1","Elevation","Range","Off antenna axis","Geometric access"],L.nodes.map((v,i)=>{const a=access[i];return row([`${v.role==="gateway"?"G":v.role==="mine"?"M":"R"}${v.id} → S1`,`${n(a.elevationDeg,1)}°`,`${n(a.rangeM/1000,0)} km`,`${n(a.offAxisDeg,1)}°`,why(a)]);}));
+ const horizons=cachedHorizons(L);   // loaded by the map for this area; until then only the mask applies
+ const access=L.nodes.map(v=>satelliteAccess(v,state.position,state.boresight,az=>horizonDeg(horizons,v.id,az)));
+ const why=(a:ReturnType<typeof satelliteAccess>)=>a.visible?'<span class="green">Linked</span>':!a.aboveMask?'<span class="amber">Below the elevation mask · no link drawn</span>':!a.aboveTerrain?`<span class="amber">Not ${n(o.maskDeg,0)}° clear of its terrain horizon (${n(a.horizonDeg,1)}°) · no link drawn</span>`:'<span class="amber">Outside the antenna beam · no link drawn</span>';
+ return `<p class="callout">Pass time: +${n(satelliteSeconds/60,1)} min · ${access.filter(a=>a.visible).length} of ${L.nodes.length} nodes linked (above the ${n(o.maskDeg,0)}° mask${horizons?", measured from each node's own terrain horizon":""}${o.beamDeg<180?`, inside the ${n(o.beamDeg,0)}° beam`:""})</p>`+table(["Node → S1","Elevation","Terrain horizon","Range","Off antenna axis","Geometric access"],L.nodes.map((v,i)=>{const a=access[i];return row([`${v.role==="gateway"?"G":v.role==="mine"?"M":"R"}${v.id} → S1`,`${n(a.elevationDeg,1)}°`,horizons?`${n(a.horizonDeg,1)}° at ${n(a.azimuthDeg,0)}°`:"loading",`${n(a.rangeM/1000,0)} km`,`${n(a.offAxisDeg,1)}°`,why(a)]);}));
 }
 function orbitDerived(L:AreaResult){
  const o=getOrbit();

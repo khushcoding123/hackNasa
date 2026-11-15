@@ -64,4 +64,15 @@ O.setOrbit({beamDeg: 5});
 const narrow = satelliteAccess(off, st.position, st.boresight);
 assert.ok(!narrow.visible && !narrow.inBeam && narrow.elevationDeg >= 10, 'outside the beam, not below the mask');
 O.resetOrbit();
-console.log('Orbital preview: overhead, occultation, range, polar and longitude seam checks passed; orbit radius, gravity, speed, heading, pointing and beam checks passed');
+// Terrain horizon: two nodes see the same low satellite; the one with a ridge in that direction loses it first.
+{
+ const lat = -86.8, lon = 337.2, node = {lat, lon, elevation: 0};
+ let t = 0; while (satelliteAccess(node, satellitePosition(lat, lon, t)).elevationDeg > 14) t += 10;   // the satellite sinks toward 14°
+ const low = satelliteAccess(node, satellitePosition(lat, lon, t));
+ assert.ok(low.visible && low.aboveTerrain && low.azimuthDeg >= 0 && low.azimuthDeg < 360, 'no horizon given: only the mask applies');
+ const ridge = satelliteAccess(node, satellitePosition(lat, lon, t), undefined, az => Math.abs(((az - low.azimuthDeg + 540) % 360) - 180) < 20 ? 20 : 0);
+ assert.ok(!ridge.visible && ridge.aboveMask && !ridge.aboveTerrain && ridge.horizonDeg === 20, 'a 20° ridge toward the satellite blocks it while it is above the 10° mask');
+ const behind = satelliteAccess(node, satellitePosition(lat, lon, t), undefined, az => Math.abs(((az - low.azimuthDeg + 540) % 360) - 180) > 160 ? 20 : 0);
+ assert.ok(behind.visible, 'a ridge on the opposite side does not block it');
+}
+console.log('Orbital preview: overhead, occultation, range, polar and longitude seam checks passed; orbit radius, gravity, speed, heading, pointing, beam and terrain-horizon checks passed');

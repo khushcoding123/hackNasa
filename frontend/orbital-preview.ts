@@ -101,15 +101,23 @@ export function boresightHit(state: SatelliteState): Vector | null {
  const t = -b - Math.sqrt(disc);
  return t > 0 ? [o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t] : null;
 }
-/** Geometric access from a surface node to the satellite: above the elevation mask and, when a beam limit is set, inside the beam. */
-export function satelliteAccess(node: {lat: number; lon: number; elevation: number}, satellite: Vector, boresight?: Vector) {
+/** Geometric access from a surface node to the satellite: above the elevation mask and, when a beam limit is set, inside the beam.
+ * When `horizon` gives the node's terrain horizon (degrees for an azimuth, 0 = north), the mask is the clearance kept above
+ * that horizon (never less than above level ground). Nodes behind higher ground then lose a setting satellite earlier, so
+ * links close one by one instead of all at the same flat-ground angle. Without it, the mask is measured from level ground. */
+export function satelliteAccess(node: {lat: number; lon: number; elevation: number}, satellite: Vector, boresight?: Vector, horizon?: (azimuthDeg: number) => number) {
  const at = surfacePosition(node.lat, node.lon, node.elevation + 10);
  const up = surfacePosition(node.lat, node.lon).map(v => v / MOON_RADIUS);
  const delta = satellite.map((v, i) => v - at[i]) as Vector;
  const rangeM = Math.hypot(...delta);
  const elevationDeg = Math.asin(Math.max(-1, Math.min(1, delta.reduce((sum, v, i) => sum + v * up[i], 0) / rangeM))) * 180 / Math.PI;
+ const p = rad(node.lat), l = rad(node.lon);
+ const east: Vector = [-Math.sin(l), Math.cos(l), 0], north: Vector = [-Math.sin(p) * Math.cos(l), -Math.sin(p) * Math.sin(l), Math.cos(p)];
+ const azimuthDeg = ((Math.atan2(dot(delta, east), dot(delta, north)) * 180 / Math.PI) + 360) % 360;
+ const horizonDeg = horizon ? horizon(azimuthDeg) : -90;
  // Angle between the antenna axis and the direction from the satellite to the node.
  const offAxisDeg = boresight ? Math.acos(Math.max(-1, Math.min(1, -dot(delta, boresight) / rangeM))) * 180 / Math.PI : 0;
  const inBeam = !boresight || orbit.beamDeg >= 180 || offAxisDeg <= orbit.beamDeg;
- return {rangeM, elevationDeg, offAxisDeg, inBeam, visible: elevationDeg >= orbit.maskDeg && inBeam};
+ const aboveMask = elevationDeg >= orbit.maskDeg, aboveTerrain = elevationDeg >= Math.max(0, horizonDeg) + orbit.maskDeg;
+ return {rangeM, elevationDeg, azimuthDeg, horizonDeg, offAxisDeg, inBeam, aboveMask, aboveTerrain, visible: aboveMask && aboveTerrain && inBeam};
 }
