@@ -82,7 +82,9 @@ def label_arrays(tx_xy, h_tx, h_rx, dem, transform, crs, radio):
     # Receiver centers coincide with DEM samples (avoid interpolating nodata neighbors here).
     b = xyz(x, y, dem[r0:r1, c0:c1]+h_rx)
     distance = np.linalg.norm(b-a, axis=-1)
-    valid = trace['valid']
+    # Coincident phase centers have undefined FSPL. Mask that receiver rather
+    # than rejecting an otherwise valid map when TX and RX heights match.
+    valid = trace['valid'] & np.isfinite(distance) & (distance > 0)
     free_loss = fspl_db(np.where(valid, distance, np.nan), radio['frequency_ghz']*1e9)
     nu = trace['max_knife_edge_nu']
     # A coincident phase center has no meaningful FSPL; refuse rather than invent a floor.

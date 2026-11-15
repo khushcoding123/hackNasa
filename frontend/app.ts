@@ -1,4 +1,5 @@
 import {MoonView} from "./moon.js";
+import {surfaceCoverage} from "./surface.js";
 import {map, timeline, horizon, powerTimeline} from "./charts.js";
 import type {Result, Comparison, Candidate, Sensitivity, Metrics, AreaResult} from "./types.js";
 
@@ -17,6 +18,8 @@ const toXY=(lat:number,lon:number)=>{const rho=2*MOON_R*Math.tan((90+lat)*DEG/2)
 const toLatLon=(x:number,y:number):[number,number]=>[2*Math.atan(Math.hypot(x,y)/(2*MOON_R))/DEG-90,((Math.atan2(x,y)/DEG)%360+360)%360];
 let sites:Record<string,[string,number,number]>={};
 const views:Record<string,[string,string]>={landing:["Start with the Moon.","01 · Explore the surface. Then draw the area you want to analyse: a square or any shape."],configure:["Tell us about your mission.","02 · Draw an area, choose dates and communication goals, then calculate."],layout:["Plan the network.","03 · The best layout of towers and links inside the area you drew, compared with simpler formats."],overview:["Your mission, in three dimensions.","04 · Inspect the lander and calculated relay network. Explore the local terrain, or switch to Whole Moon for context."],sites:["Choose your horizon.","Compare landing regions over the same mission period and assumptions."],communication:["Understand the silence.","Trace each communication blackout to terrain, geometry, and RF conditions."],relays:["Bridge the distance.","Explore the smallest screened relay configuration and its physical constraints."],resilience:["Plan for the unexpected.","Disable a relay and inspect how the remaining paths perform."],sensitivity:["Question the assumptions.","Change one assumption at a time and compare the modeled outcome."],data:["The science behind the signal.","Inspect sources, model assumptions, and the limits of these planning estimates."]};
+views.surface=["Surface coverage","Explore simulated surface links independently of mission dates."];
+document.querySelector('.menu-pop')?.insertAdjacentHTML('afterbegin','<button data-view="surface">Surface coverage</button>');
 function dirty(){
  // Compare only editable fields; API configuration may include additional model defaults.
  const same=(a:unknown,b:unknown):boolean=>a!==null&&typeof a==="object"?Object.entries(a).every(([k,v])=>same(v,(b as Record<string,unknown>)?.[k])):a===b;
@@ -38,7 +41,7 @@ $("#panel-close").onclick=()=>{setPanel(false);$("#panel-tab").focus();};
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!document.body.classList.contains("panel-collapsed")&&matchMedia("(max-width:767px)").matches&&(e.target as HTMLElement).closest?.("#panel"))setPanel(false);});
 function updateNavigation(){
  document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(b=>{
-  const available=["landing","configure"].includes(b.dataset.view!)||(!!result&&!stale);
+  const available=["landing","configure","surface"].includes(b.dataset.view!)||(!!result&&!stale);
   b.disabled=!available;b.title=available?"":"Complete mission setup and calculate a network first.";
   b.classList.toggle("completed",!!result&&!stale&&steps.indexOf(b.dataset.view!)<steps.indexOf(active));
  });
@@ -50,7 +53,7 @@ function updateNavigation(){
 }
 $("#start-mission").onclick=()=>navigate("configure");
 function navigate(view:string,focus=true){
- if(!["landing","configure"].includes(view)&&(!result||stale))view="configure";
+ if(!["landing","configure","surface"].includes(view)&&(!result||stale))view="configure";
  active=view;
  document.querySelectorAll("[data-view][aria-current]").forEach(b=>b.removeAttribute("aria-current"));
  document.querySelectorAll<HTMLButtonElement>(`[data-view="${view}"]`).forEach(b=>b.setAttribute("aria-current","step"));
@@ -254,6 +257,7 @@ function configuration(){
 }
 function render(){
  document.body.dataset.step=active;flow();form.hidden=active!=="configure";
+ if(active==="surface"){$("#flow-actions").innerHTML="";surfaceCoverage(outlet);return;}
  if(active==="landing"){
   outlet.innerHTML=`<section class="panel introduction"><p class="eyebrow">A CONNECTION STARTS HERE</p><h2>From the surface to a working plan.</h2><p>Search, zoom and click the Moon to read coordinates, elevation and nearby features. Then <strong>draw the area you care about</strong>, a square or any shape of any size anywhere on the Moon, and MOONMESH plans the towers and links inside it.</p><div class="draw-actions"><button class="primary" data-draw-start="rect">▭ Draw a square</button><button data-draw-start="free">✎ Draw freeform</button><button data-pole-go>⌖ Go to the pole</button></div><p>Terrain can hide Earth from a lunar lander. Relay towers may help restore contact. MOONMESH shows when, where, and under which assumptions.</p><ol class="journey-list"><li><strong>Draw an area</strong><span>Any size, anywhere on the Moon.</span></li><li><strong>Plan the layout</strong><span>Towers, gateways and links, with tree, loop and mesh compared.</span></li><li><strong>Understand and test it</strong><span>The Earth link, blackouts and relay failures.</span></li></ol><button class="primary" data-go="configure">Set up my mission →</button><p class="caption">${result&&!stale?"Your applied mission is ready in Step 3.":"No towers are placed before you calculate a mission."}</p></section>`;
   connect();return;

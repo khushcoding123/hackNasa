@@ -10,6 +10,7 @@ from .models import Mission
 from .science import scenario
 from ora.api import router as ora_router
 from . import tiles
+from moonmesh_train.coverage import router as coverage_router
 
 app = FastAPI(title="MOONMESH", description="Lunar landing-site and communications planning prototype")
 
@@ -112,4 +113,5 @@ def terrain_tile(request: Request, west: float, south: float, east: float, north
 
 
 app.include_router(ora_router)
+app.include_router(coverage_router)
 app.mount("/", StaticFiles(directory=Path(__file__).resolve().parents[1] / "web", html=True), name="web")

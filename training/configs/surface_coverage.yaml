@@ -1,0 +1,13 @@
+# App integration uses the final evaluation decision; no implicit weight discovery.
+seed: 42
+decision: reports/eval/final/decision.json
+radio_profile: moonmesh_2p4_ref
+experiment_config: exp_b_haworth_pilot.yaml
+numba_threads: 8
+cache_entries: 8
+sites:
+  haworth:
+    dem: derived/terrain/haworth/pgda90_dem_20m.tif
+    slope: derived/terrain/haworth/features_pgda90/slope_deg.tif
+    grid: derived/terrain/haworth/grid.json
+    source: NASA GSFC LOLA PGDA 90
