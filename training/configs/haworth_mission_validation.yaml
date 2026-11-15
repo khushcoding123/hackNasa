@@ -1,0 +1,35 @@
+epoch: '2026-11-01T00:00:00+00:00'
+hours: 24
+app_minutes: 5
+reference_seconds: 30
+moon_radius_km: 1737.4
+lunar_gm_km3_s2: 4902.800118
+altitude_km: 500
+lander: [-86.8, 337.2, 2]
+relay: [-86.76463526002901, 339.4856393404219, 5]
+earth: [35.4, -116.9, 6378.137]
+access_mask_deg: 10
+earth_mask_deg: 10
+terrain_buffer_deg: 0.1
+# Frequency GHz, power W, gains dBi, receiver threshold dBm, losses and required margin dB.
+radios:
+  surface: [2.4, 2, 4, 4, -105, 3, 3]
+  access: [2.4, 10, 17, 17, -115, 3, 3]
+  backhaul: [8.4, 20, 30, 68, -115, 3, 3]
+limits:
+  orbiter_position_km: 0.01
+  earth_receiver_position_km: 0.1
+  range_km: 0.1
+  elevation_deg: 0.01
+  margin_db: 0.02
+  event_seconds: 300
+  availability_pp: 1
+  longest_blackout_seconds: 300
+sources:
+  lunar_gm: https://ssd.jpl.nasa.gov/astro_par.html
+  spice: https://naif.jpl.nasa.gov/pub/naif/generic_kernels/
+  earth_rotation: https://aa.usno.navy.mil/faq/GAST
+  terrain: https://imbrium.mit.edu/DATA/LOLA_GDR/POLAR/IMG/
+  terrain_cross_check: https://pgda.gsfc.nasa.gov/products/78
+  rf: https://www.itu.int/rec/R-REC-P.525/en
+pgda_file: raw/pgda78/haworth/Haworth_final_adj_5mpp_surf.tif

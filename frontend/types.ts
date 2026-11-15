@@ -33,6 +33,12 @@ export interface ModelStatus {
 }
 export interface ScoreEvidence {method:string; fallback:boolean; note:string; models:{name:string; loaded:boolean; used:boolean; sha256?:string|null; error?:string|null; warnings:string[]}[]}
 export interface Comparison {site:Site; direct:Metrics; solar:Metrics; network:Metrics; worst:Metrics; recommended:string[]; feasible:boolean; assessment?:Assessment}
+export interface RelayConfigurationComparison {
+ site:Site; config:Record<string,unknown>; times:string[]; architecture:string; environment_case:string;
+ configurations:{name:string; relay_ids:string[]; network:Metrics; worst_relay_failure:Metrics|null;
+  recovered_hours:number; meets_communications:boolean; within_relay_limit:boolean; cost:CostReport;
+  online:boolean[]; relay_sites:{id:string;lat:number;lon:number;distance:number}[]}[];
+}
 export interface CostReport {currency:string; budget_usd:number|null; relay_cost_usd:number; total_usd:number; remaining_usd:number|null; within_budget:boolean; assumptions:string; pricing_basis:"illustrative"|"user"; items:{category:string; item:string; quantity:number; unit_cost_usd:number; total_usd:number}[]}
 export interface Result extends Comparison {
  cost:CostReport;

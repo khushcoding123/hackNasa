@@ -1,7 +1,7 @@
 """RF budgets, outage metrics, standalone relay power, and constrained search."""
 from itertools import combinations
 
-from .costs import relay_limit
+from .costs import cost_report, relay_limit
 
 import numpy as np
 
@@ -75,3 +75,31 @@ def infrastructure_key(selection, candidates):
             sum(c["solar"]["availability"] for c in selected),
             sum(min(c["surface_margin"], c["minimum_earth_margin"]) for c in selected),
             -sum(c["unknown_samples"] for c in selected))
+
+
+def compare_configurations(result, mission, alternatives):
+    """Compare installed subsets of the same screened catalog on one mission grid."""
+    direct = np.asarray(result["samples"]["direct"], dtype=bool)
+    candidates = result["candidates"]
+    paths = [np.asarray(candidate["temporal_coverage"], dtype=bool) for candidate in candidates]
+    indices = {candidate["id"]: i for i, candidate in enumerate(candidates)}
+    rows = []
+    layouts = [("Direct only", []), ("Planner recommendation", result["recommended"])]
+    layouts.extend((row.name, row.relay_ids) for row in alternatives)
+    for name, ids in layouts:
+        missing = set(ids) - indices.keys()
+        if missing:
+            raise ValueError(f"Relay IDs are outside the screened results: {', '.join(sorted(missing))}.")
+        selection = tuple(indices[relay_id] for relay_id in ids)
+        online, network, worst, _ = evaluate(direct, paths, selection, mission)
+        cost = cost_report(len(ids), mission.budget_usd, mission.relay_cost_usd)
+        rows.append(dict(
+            name=name, relay_ids=ids, network=network, worst_relay_failure=worst if ids else None,
+            recovered_hours=float(np.count_nonzero(online & ~direct)*mission.minutes/60),
+            meets_communications=passes(worst if mission.resilient else network, mission),
+            within_relay_limit=len(ids) <= mission.max_relays, cost=cost, online=online.tolist(),
+            relay_sites=[{key: candidates[i][key] for key in ("id", "lat", "lon", "distance")} for i in selection],
+        ))
+    return dict(site=result["site"], config=result["config"], times=result["times"], configurations=rows,
+                architecture="Direct Earth or lander → surface relay → Earth",
+                environment_case="cold_dust", provenance=result["provenance"])

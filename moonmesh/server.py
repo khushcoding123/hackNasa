@@ -1,11 +1,13 @@
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from spiceypy.utils.exceptions import SpiceyError
 
 from .data import LOCAL, SITES
-from .models import Mission
+from .models import Mission, MissionComparisonRequest
+from .network import compare_configurations
 from .excel import ExportRequest, export_workbook
 from .science import scenario
 from .mission_sim import reference_mission
@@ -58,6 +60,23 @@ def mission_reference():
         raise HTTPException(503, str(error)) from error
     except (SpiceyError, ValueError) as error:
         raise HTTPException(422, f"Cannot run the Haworth reference mission: {error}") from error
+
+
+@app.get("/api/mission/reference/validation")
+def mission_reference_validation():
+    report = Path(__file__).resolve().parents[1] / "docs/figures/haworth_mission_validation.json"
+    if not report.is_file():
+        raise HTTPException(404, "No published benchmark report is available.")
+    return FileResponse(report, media_type="application/json")
+
+
+@app.post("/api/mission/compare-configurations")
+def mission_configurations(body: MissionComparisonRequest):
+    result = compute(body.mission, include_map=False)
+    try:
+        return compare_configurations(result, body.mission, body.alternatives)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
 
 
 @app.post("/api/export/xlsx")

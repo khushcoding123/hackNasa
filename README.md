@@ -4,6 +4,8 @@ MOONMESH is a lunar communication planning product targeting **lander → surfac
 
 **Current prototype:** the configurable planner calculates direct-to-Earth and lander → surface relay → Earth paths. Open **End-to-end simulation** from the workspace menu to run the fixed Haworth lander → relay → satellite → Earth scenario, inspect blackouts, test failures, and download the results. See [Communication architecture](docs/COMMUNICATION_ARCHITECTURE.md) for model inputs and scope.
 
+After applying a regular mission, open **Analysis → Compare relay configurations** to evaluate alternate relay sites against the direct-only baseline and the planner recommendation on the same timeline. See the [Haworth mission validation report](docs/HAWORTH_VALIDATION.md) for the fixed satellite mission benchmark.
+
 ## Run locally
 
 On Windows with Node.js and uv installed, run this from the repository root.
